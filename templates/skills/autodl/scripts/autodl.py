@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import shutil
+import subprocess
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+BASE_URL = os.environ.get("AUTODL_API_BASE_URL", "https://api.autodl.com").rstrip("/")
+TOKEN = os.environ.get("AUTODL_TOKEN", "")
+
+
+def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    if not TOKEN:
+        raise RuntimeError("AUTODL_TOKEN is not configured")
+    http_request = urllib.request.Request(
+        BASE_URL + path,
+        data=json.dumps(body).encode("utf-8"),
+        method=method,
+        headers={"Authorization": TOKEN, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"AutoDL HTTP {exc.code}: {detail}") from exc
+    if payload.get("code") != "Success":
+        raise RuntimeError(f"AutoDL API error: {payload.get('msg') or payload}")
+    return payload
+
+
+def load_state(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    payload = request(
+        "GET",
+        "/api/v1/dev/instance/pro/snapshot",
+        {"instance_uuid": state["instance_uuid"]},
+    )
+    return payload["data"]
+
+
+def ssh_prefix(details: dict[str, Any]) -> list[str]:
+    password = str(details.get("root_password") or "")
+    if password:
+        sshpass = shutil.which("sshpass")
+        if sshpass is None:
+            raise RuntimeError("Password SSH requires sshpass")
+        return [sshpass, "-p", password]
+    return []
+
+
+parser = argparse.ArgumentParser()
+subparsers = parser.add_subparsers(dest="action", required=True)
+
+create = subparsers.add_parser("create")
+create.add_argument("--gpu-spec", required=True)
+create.add_argument("--gpu-count", type=int, default=1)
+create.add_argument("--state", type=Path, required=True)
+
+for name in ("status", "release"):
+    command = subparsers.add_parser(name)
+    command.add_argument("--state", type=Path, required=True)
+
+execute = subparsers.add_parser("exec")
+execute.add_argument("--state", type=Path, required=True)
+execute.add_argument("command", nargs=argparse.REMAINDER)
+
+upload = subparsers.add_parser("upload")
+upload.add_argument("--state", type=Path, required=True)
+upload.add_argument("--source", type=Path, required=True)
+upload.add_argument("--remote", required=True)
+
+download = subparsers.add_parser("download")
+download.add_argument("--state", type=Path, required=True)
+download.add_argument("--remote", required=True)
+download.add_argument("--destination", type=Path, required=True)
+
+args = parser.parse_args()
+
+if args.action == "create":
+    image_uuid = os.environ.get("AUTODL_IMAGE_UUID", "")
+    if not image_uuid:
+        raise SystemExit("AUTODL_IMAGE_UUID is not configured")
+    payload = request(
+        "POST",
+        "/api/v1/dev/instance/pro/create",
+        {
+            "req_gpu_amount": args.gpu_count,
+            "expand_system_disk_by_gb": 0,
+            "gpu_spec_uuid": args.gpu_spec,
+            "image_uuid": image_uuid,
+            "cuda_v_from": 118,
+            "instance_name": f"medai-{int(time.time())}",
+            "start_command": "sleep 1",
+        },
+    )
+    instance_uuid = str(payload["data"])
+    deadline = time.monotonic() + 600
+    status = ""
+    while time.monotonic() < deadline:
+        status = str(
+            request(
+                "GET",
+                "/api/v1/dev/instance/pro/status",
+                {"instance_uuid": instance_uuid},
+            )["data"]
+        )
+        if status == "running":
+            break
+        time.sleep(10)
+    if status != "running":
+        raise SystemExit(f"AutoDL instance did not start; last status={status}")
+    args.state.parent.mkdir(parents=True, exist_ok=True)
+    args.state.write_text(
+        json.dumps({"instance_uuid": instance_uuid, "created_by_run": True}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(instance_uuid)
+elif args.action == "status":
+    state = load_state(args.state)
+    print(
+        request(
+            "GET",
+            "/api/v1/dev/instance/pro/status",
+            {"instance_uuid": state["instance_uuid"]},
+        )["data"]
+    )
+elif args.action == "release":
+    state = load_state(args.state)
+    if not state.get("created_by_run"):
+        raise SystemExit("Refusing to release an instance not created by this run")
+    request(
+        "POST",
+        "/api/v1/dev/instance/pro/power_off",
+        {"instance_uuid": state["instance_uuid"]},
+    )
+    request(
+        "POST",
+        "/api/v1/dev/instance/pro/release",
+        {"instance_uuid": state["instance_uuid"]},
+    )
+    state["released"] = True
+    state["released_at_unix"] = int(time.time())
+    args.state.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+elif args.action in {"exec", "upload", "download"}:
+    state = load_state(args.state)
+    details = snapshot(state)
+    host = str(details["proxy_host"])
+    port = str(details["ssh_port"])
+    target = f"root@{host}"
+    prefix = ssh_prefix(details)
+    if args.action == "exec":
+        command_parts = args.command[1:] if args.command[:1] == ["--"] else args.command
+        if not command_parts:
+            raise SystemExit("exec requires a command")
+        remote_command = " ".join(shlex.quote(item) for item in command_parts)
+        command = [
+            *prefix,
+            "ssh",
+            "-p",
+            port,
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            target,
+            remote_command,
+        ]
+    elif args.action == "upload":
+        command = [
+            *prefix,
+            "scp",
+            "-rP",
+            port,
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            str(args.source),
+            f"{target}:{args.remote}",
+        ]
+    else:
+        args.destination.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            *prefix,
+            "scp",
+            "-rP",
+            port,
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            f"{target}:{args.remote}",
+            str(args.destination),
+        ]
+    raise SystemExit(subprocess.run(command).returncode)

@@ -14,3 +14,6 @@ __pycache__/
 resources/
 
 runs/
+dist/
+build/
+*.egg-info/

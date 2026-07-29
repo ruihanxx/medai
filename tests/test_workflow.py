@@ -1,0 +1,203 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from medai.artifacts import initialize_manifest
+from medai.config import RunConfig
+from medai.workflow import create_workflow
+
+
+def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("source", encoding="utf-8")
+    output = tmp_path / "output"
+    output.mkdir()
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=repo,
+        data=None,
+        siliconflow_config=None,
+    )
+    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+
+    def fake_convert(paper_path, preprocessing_dir):
+        preprocessing_dir.mkdir(parents=True, exist_ok=True)
+        (preprocessing_dir / "artifacts").mkdir()
+        markdown = preprocessing_dir / "paper.md"
+        markdown.write_text("# Paper", encoding="utf-8")
+        return markdown
+
+    def fake_agent(*, prompt_path, working_dir, **kwargs):
+        name = prompt_path.name
+        if name == "preprocessing.md":
+            (output / "preprocessing" / "claims.json").write_text(
+                json.dumps(
+                    {
+                        "claims": [
+                            {
+                                "claim_id": "C1",
+                                "statement": "Accuracy is reported.",
+                                "kind": "numeric",
+                                "paper_result": 0.9,
+                                "provenance": {"page": 1, "section": "Results"},
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output / "preprocessing" / "experiment_todo.json").write_text(
+                json.dumps(
+                    {
+                        "experiments": [
+                            {
+                                "experiment_id": "E1",
+                                "description": "Train and evaluate.",
+                                "claims": ["C1"],
+                                "artifacts": ["Figure 1"],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+        elif name == "codegen.md":
+            (output / "codegen" / "codebase" / "codegen_plan.json").write_text(
+                json.dumps(
+                    {
+                        "files": [{"path": "run.py", "responsibility": "Run experiment"}],
+                        "dependency_order": ["run.py"],
+                        "entry_points": ["run.py"],
+                        "shared_state": "Files",
+                        "ambiguities": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        elif name == "audit.md":
+            (output / "audit" / "replicate_plan.json").write_text(
+                json.dumps(
+                    {
+                        "experiments": [
+                            {
+                                "experiment_id": "E1",
+                                "claims": ["C1"],
+                                "artifacts": ["Figure 1"],
+                                "steps": [
+                                    {
+                                        "step_id": "S1",
+                                        "description": "Run",
+                                        "command": "python run.py",
+                                        "expected_outputs": ["figure.png"],
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+        elif name == "replicate.md":
+            result_dir = output / "replication" / "E1"
+            result_dir.mkdir(parents=True)
+            (result_dir / "figure.png").write_bytes(b"png")
+            (result_dir / "result.json").write_text(
+                json.dumps(
+                    {
+                        "experiment_id": "E1",
+                        "claims": [
+                            {
+                                "claim_id": "C1",
+                                "reproduced_result": 0.89,
+                                "evidence": ["replication/E1/result.json"],
+                            }
+                        ],
+                        "artifacts": [
+                            {
+                                "artifact_id": "Figure 1",
+                                "path": "replication/E1/figure.png",
+                            }
+                        ],
+                        "commands": ["python run.py"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        elif name == "report_E1.md":
+            (output / "report" / "reproduction_report.md").write_text(
+                "# Report\n\n## E1\nCompared C1 and Figure 1.\n",
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr("medai.workflow.convert_pdf_to_markdown", fake_convert)
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    monkeypatch.setattr(
+        "medai.workflow.detect_resources",
+        lambda path: {"cpu": {}, "memory": {}, "disk": {}, "gpus": []},
+    )
+
+    result = create_workflow().invoke({"config": config})
+
+    stage_lines = [
+        line
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("enter ")
+    ]
+    assert stage_lines == [
+        "enter preflight stage",
+        "enter preprocessing stage",
+        "enter preprocessing agent stage",
+        "enter codegen stage",
+        "enter codegen audit stage",
+        "enter replicate stage",
+        "enter report stage",
+    ]
+    assert Path(result["report_path"]).is_file()
+    assert (output / "codegen" / "codebase" / "README.md").is_file()
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    assert list(manifest["stages"]) == [
+        "preflight",
+        "preprocess_pdf",
+        "preprocessing_agent",
+        "codegen_agent",
+        "audit_agent",
+        "replicate_agent",
+        "report_agents",
+    ]
+
+
+def test_graph_stops_after_a_stage_failure(monkeypatch):
+    import medai.workflow as workflow
+
+    calls = []
+
+    def succeeds(state):
+        calls.append("preflight")
+        return {}
+
+    def fails(state):
+        calls.append("preprocess_pdf")
+        raise RuntimeError("stop")
+
+    def must_not_run(state):
+        calls.append("unexpected")
+        return {}
+
+    monkeypatch.setattr(workflow, "preflight_node", succeeds)
+    monkeypatch.setattr(workflow, "preprocess_pdf_node", fails)
+    monkeypatch.setattr(workflow, "preprocessing_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "codegen_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "audit_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "replicate_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "report_agents_node", must_not_run)
+
+    with pytest.raises(RuntimeError, match="stop"):
+        workflow.create_workflow().invoke({"config": object()})
+    assert calls == ["preflight", "preprocess_pdf"]
