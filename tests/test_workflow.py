@@ -5,7 +5,7 @@ import pytest
 
 from medai.artifacts import initialize_manifest
 from medai.config import RunConfig
-from medai.workflow import create_workflow
+from medai.workflow import codegen_agent_node, create_workflow
 
 
 def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
@@ -68,6 +68,29 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 encoding="utf-8",
             )
         elif name == "codegen.md":
+            (output / "codegen" / "codebase" / "data_inventory.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "dataset": {
+                            "id": None,
+                            "root": None,
+                            "adapter": None,
+                            "status": "not_supplied",
+                        },
+                        "scan": {
+                            "files_scanned": 0,
+                            "bytes_scanned": 0,
+                            "truncated": False,
+                            "limits": {},
+                        },
+                        "catalog": [],
+                        "explored_files": [],
+                        "warnings": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
             (output / "codegen" / "codebase" / "codegen_plan.json").write_text(
                 json.dumps(
                     {
@@ -160,6 +183,10 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     ]
     assert Path(result["report_path"]).is_file()
     assert (output / "codegen" / "codebase" / "README.md").is_file()
+    assert (output / "codegen" / "codebase" / "data_inventory.json").is_file()
+    codegen_prompt = (output / "prompts" / "codegen.md").read_text(encoding="utf-8")
+    assert "/explore-data/SKILL.md" in codegen_prompt
+    assert "explore-data-analysis" not in codegen_prompt
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
     assert list(manifest["stages"]) == [
@@ -201,3 +228,115 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="stop"):
         workflow.create_workflow().invoke({"config": object()})
     assert calls == ["preflight", "preprocess_pdf"]
+
+
+def test_codegen_requires_data_inventory(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    output.mkdir()
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+
+    def fake_agent(*, working_dir, **kwargs):
+        (working_dir / "codegen_plan.json").write_text(
+            json.dumps(
+                {
+                    "files": [{"path": "run.py", "responsibility": "Run"}],
+                    "dependency_order": ["run.py"],
+                    "entry_points": ["run.py"],
+                    "shared_state": "Files",
+                    "ambiguities": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    with pytest.raises(RuntimeError, match="Required artifact is missing"):
+        codegen_agent_node(
+            {
+                "config": config,
+                "paper_markdown": str(tmp_path / "paper.md"),
+                "claims_path": str(tmp_path / "claims.json"),
+                "experiments_path": str(tmp_path / "experiments.json"),
+                "resources_path": str(tmp_path / "resources.json"),
+            }
+        )
+
+
+def test_codegen_rejects_inventory_that_disagrees_with_data_input(
+    tmp_path: Path,
+    monkeypatch,
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    data = tmp_path / "raw"
+    data.mkdir()
+    output = tmp_path / "output"
+    output.mkdir()
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=data,
+        siliconflow_config=None,
+    )
+    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+
+    def fake_agent(*, working_dir, **kwargs):
+        (working_dir / "data_inventory.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "dataset": {
+                        "id": None,
+                        "root": None,
+                        "adapter": None,
+                        "status": "not_supplied",
+                    },
+                    "scan": {
+                        "files_scanned": 0,
+                        "bytes_scanned": 0,
+                        "truncated": False,
+                        "limits": {},
+                    },
+                    "catalog": [],
+                    "explored_files": [],
+                    "warnings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (working_dir / "codegen_plan.json").write_text(
+            json.dumps(
+                {
+                    "files": [{"path": "run.py", "responsibility": "Run"}],
+                    "dependency_order": ["run.py"],
+                    "entry_points": ["run.py"],
+                    "shared_state": "Files",
+                    "ambiguities": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    with pytest.raises(ValueError, match="must report explored"):
+        codegen_agent_node(
+            {
+                "config": config,
+                "paper_markdown": str(tmp_path / "paper.md"),
+                "claims_path": str(tmp_path / "claims.json"),
+                "experiments_path": str(tmp_path / "experiments.json"),
+                "resources_path": str(tmp_path / "resources.json"),
+            }
+        )

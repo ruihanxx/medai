@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -67,6 +68,29 @@ class PlannedFile(StrictModel):
 class Ambiguity(StrictModel):
     question: str
     assumption: str
+
+
+class InventoryDataset(StrictModel):
+    id: str | None
+    root: str | None
+    adapter: str | None
+    status: Literal["explored", "not_supplied"]
+
+
+class InventoryScan(StrictModel):
+    files_scanned: int = Field(ge=0)
+    bytes_scanned: int = Field(ge=0)
+    truncated: bool
+    limits: dict[str, int]
+
+
+class DataInventory(StrictModel):
+    schema_version: Literal[1]
+    dataset: InventoryDataset
+    scan: InventoryScan
+    catalog: list[dict[str, Any]]
+    explored_files: list[dict[str, Any]]
+    warnings: list[str]
 
 
 class CodegenPlan(StrictModel):
@@ -141,6 +165,36 @@ def validate_experiment_coverage(claims: ClaimsFile, todo: ExperimentTodo) -> No
         raise ValueError(f"Experiments reference unknown claims: {sorted(unknown_claims)}")
     if missing_claims:
         raise ValueError(f"Claims missing from experiments: {sorted(missing_claims)}")
+
+
+def validate_data_inventory(data_dir: Path | None, inventory: DataInventory) -> None:
+    if data_dir is None:
+        if inventory.dataset.status != "not_supplied":
+            raise ValueError("Data inventory must report not_supplied when no data is configured")
+        if any(
+            (
+                inventory.dataset.id is not None,
+                inventory.dataset.root is not None,
+                inventory.dataset.adapter is not None,
+                inventory.scan.files_scanned != 0,
+                inventory.scan.bytes_scanned != 0,
+                inventory.scan.truncated,
+                bool(inventory.scan.limits),
+                bool(inventory.catalog),
+                bool(inventory.explored_files),
+            )
+        ):
+            raise ValueError("not_supplied data inventory must be empty")
+        return
+
+    if inventory.dataset.status != "explored":
+        raise ValueError("Data inventory must report explored when data is configured")
+    if inventory.dataset.root is None:
+        raise ValueError("Explored data inventory must record the data root")
+    if Path(inventory.dataset.root).expanduser().resolve() != data_dir.resolve():
+        raise ValueError("Data inventory root does not match the configured data directory")
+    if not inventory.dataset.id or not inventory.dataset.adapter:
+        raise ValueError("Explored data inventory must identify its dataset and adapter")
 
 
 def validate_replication_plan(todo: ExperimentTodo, plan: ReplicationPlan) -> None:

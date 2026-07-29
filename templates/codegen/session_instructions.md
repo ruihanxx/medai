@@ -9,10 +9,34 @@ Inputs:
 - Data: `{{ data_dir or "not supplied" }}`
 - Skills: `{{ skills_dir }}`
 - Local resources: `{{ resources_path }}`
+- Data inventory output: `{{ data_inventory_path }}`
 
 Required order:
 
-1. Read and use `{{ skills_dir }}/explore-data-analysis/SKILL.md` to inspect the data.
+1. Before planning or coding, write `{{ data_inventory_path }}`.
+   When data is supplied, read and use
+   `{{ skills_dir }}/explore-data/SKILL.md` to inspect it. When data is not
+   supplied, write:
+   ```json
+   {
+     "schema_version": 1,
+     "dataset": {
+       "id": null,
+       "root": null,
+       "adapter": null,
+       "status": "not_supplied"
+     },
+     "scan": {
+       "files_scanned": 0,
+       "bytes_scanned": 0,
+       "truncated": false,
+       "limits": {}
+     },
+     "catalog": [],
+     "explored_files": [],
+     "warnings": []
+   }
+   ```
 2. Read the resource inventory and determine full-scale compute requirements.
    If GPU is required and local resources are insufficient, use
    `{{ skills_dir }}/autodl/SKILL.md`, connect over SSH, and work remotely.

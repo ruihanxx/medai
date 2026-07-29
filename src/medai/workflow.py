@@ -20,9 +20,11 @@ from medai.config import RunConfig
 from medai.models import (
     ClaimsFile,
     CodegenPlan,
+    DataInventory,
     ExperimentResult,
     ExperimentTodo,
     ReplicationPlan,
+    validate_data_inventory,
     validate_experiment_coverage,
     validate_experiment_result,
     validate_replication_plan,
@@ -108,6 +110,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         config.output / "prompts" / "preprocessing.md",
         paper_markdown=state["paper_markdown"],
         artifacts_dir=config.output / "preprocessing" / "artifacts",
+        skills_dir=skills_dir(),
         claims_path=claims_path,
         experiments_path=experiments_path,
     )
@@ -161,6 +164,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         codebase_dir.mkdir(parents=True, exist_ok=True)
 
     codegen_plan_path = codebase_dir / "codegen_plan.json"
+    data_inventory_path = codebase_dir / "data_inventory.json"
     autodl_state_path = config.output / "remote_compute" / "autodl_instance.json"
     prompt_path = render_prompt(
         "codegen/session_instructions.md",
@@ -172,6 +176,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         data_dir=config.data,
         skills_dir=skills_dir(),
         resources_path=state["resources_path"],
+        data_inventory_path=data_inventory_path,
         codegen_plan_path=codegen_plan_path,
         autodl_state_path=autodl_state_path,
     )
@@ -184,12 +189,14 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
+    inventory = load_model(data_inventory_path, DataInventory)
+    validate_data_inventory(config.data, inventory)
     load_model(codegen_plan_path, CodegenPlan)
     record_stage(
         config.output,
         "codegen_agent",
         "completed",
-        outputs=[str(codebase_dir), str(codegen_plan_path)],
+        outputs=[str(codebase_dir), str(data_inventory_path), str(codegen_plan_path)],
     )
     return {"codebase_dir": str(codebase_dir)}
 

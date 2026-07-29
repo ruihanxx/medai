@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from medai.models import DataInventory
+
 ROOT = Path(__file__).parents[1]
 SKILL_ROOT = ROOT / "templates" / "skills" / "explore-data"
 
@@ -79,6 +81,7 @@ def test_mimic_adapter_writes_bounded_actual_rows(tmp_path: Path):
     )
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(output.read_text(encoding="utf-8"))
+    DataInventory.model_validate(payload)
     assert payload["dataset"]["id"] == "mimic-iv"
     explored = payload["explored_files"][0]
     assert explored["structure"]["columns"] == columns
@@ -143,6 +146,7 @@ def test_generic_adapter_samples_safe_formats_and_blocks_unsafe_loads(tmp_path: 
     completed = run_adapter("generic_adapter.py", data, output)
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(output.read_text(encoding="utf-8"))
+    DataInventory.model_validate(payload)
     explored = {item["path"]: item for item in payload["explored_files"]}
     assert explored["sample.csv"]["structure"]["columns"] == ["a", "b"]
     assert explored["sample.csv"]["sample"]["rows"][0] == {"a": "1", "b": "2"}

@@ -23,7 +23,8 @@ The LangGraph stages are:
 1. `preflight`: validate inputs and record CPU, RAM, disk, and GPU resources.
 2. `preprocess_pdf`: convert the PDF to Markdown and copy images.
 3. `preprocessing_agent`: write text/numeric claims and experiment definitions.
-4. `codegen_agent`: explore data, plan resources/files, and write code.
+4. `codegen_agent`: use the `explore-data` skill to write and validate a
+   bounded data inventory, plan resources/files, and write code.
 5. `audit_agent`: check coverage, install dependencies, smoke-test, and write the replication plan.
 6. `replicate_agent`: execute every experiment and write evidence.
 7. `report_agents`: sequentially compare each experiment with the paper in one report.
@@ -44,6 +45,7 @@ agent failure stops the run explicitly.
 ├── preprocessing/artifacts/
 ├── preprocessing/claims.json
 ├── preprocessing/experiment_todo.json
+├── codegen/codebase/data_inventory.json
 ├── codegen/codebase/codegen_plan.json
 ├── audit/replicate_plan.json
 ├── replication/<experiment_id>/result.json
@@ -55,7 +57,10 @@ agent failure stops the run explicitly.
 Claims have unique `claim_id` values and are limited to `text` or `numeric`.
 Experiments have unique `experiment_id` values and list their claim IDs and
 paper artifact labels. The replication plan and result files must preserve
-those mappings.
+those mappings. The data inventory records the configured raw root, adapter,
+bounded scan limits, catalog, explored file samples, warnings, and whether a
+scan was truncated. With no `--data` input it must explicitly report
+`not_supplied` and contain no catalog or samples.
 
 ## Agent boundaries
 
