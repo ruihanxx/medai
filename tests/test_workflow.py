@@ -244,6 +244,11 @@ def test_codegen_requires_data_inventory(tmp_path: Path, monkeypatch):
         siliconflow_config=None,
     )
     initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    resources_path = tmp_path / "resources.json"
+    resources_path.write_text(
+        json.dumps({"cpu": {}, "memory": {}, "disk": {}, "gpus": []}),
+        encoding="utf-8",
+    )
 
     def fake_agent(*, working_dir, **kwargs):
         (working_dir / "codegen_plan.json").write_text(
@@ -267,7 +272,7 @@ def test_codegen_requires_data_inventory(tmp_path: Path, monkeypatch):
                 "paper_markdown": str(tmp_path / "paper.md"),
                 "claims_path": str(tmp_path / "claims.json"),
                 "experiments_path": str(tmp_path / "experiments.json"),
-                "resources_path": str(tmp_path / "resources.json"),
+                "resources_path": str(resources_path),
             }
         )
 
@@ -291,6 +296,11 @@ def test_codegen_rejects_inventory_that_disagrees_with_data_input(
         siliconflow_config=None,
     )
     initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    resources_path = tmp_path / "resources.json"
+    resources_path.write_text(
+        json.dumps({"cpu": {}, "memory": {}, "disk": {}, "gpus": []}),
+        encoding="utf-8",
+    )
 
     def fake_agent(*, working_dir, **kwargs):
         (working_dir / "data_inventory.json").write_text(
@@ -337,6 +347,6 @@ def test_codegen_rejects_inventory_that_disagrees_with_data_input(
                 "paper_markdown": str(tmp_path / "paper.md"),
                 "claims_path": str(tmp_path / "claims.json"),
                 "experiments_path": str(tmp_path / "experiments.json"),
-                "resources_path": str(tmp_path / "resources.json"),
+                "resources_path": str(resources_path),
             }
         )

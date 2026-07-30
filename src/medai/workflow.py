@@ -166,6 +166,12 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     codegen_plan_path = codebase_dir / "codegen_plan.json"
     data_inventory_path = codebase_dir / "data_inventory.json"
     autodl_state_path = config.output / "remote_compute" / "autodl_instance.json"
+    resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
+    computation_provider = (
+        "AutoDL"
+        if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
+        else None
+    )
     prompt_path = render_prompt(
         "codegen/session_instructions.md",
         config.output / "prompts" / "codegen.md",
@@ -179,6 +185,8 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         data_inventory_path=data_inventory_path,
         codegen_plan_path=codegen_plan_path,
         autodl_state_path=autodl_state_path,
+        gpu_info=resources["gpus"],
+        computation_provider=computation_provider,
     )
     run_agent(
         provider=config.provider,
