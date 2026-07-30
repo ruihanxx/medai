@@ -37,6 +37,8 @@ The goal is to help your maintain this repository next time, understand it faste
 
 Do not update documentation for a purely internal change that preserves all documented behavior and interfaces.
 
+Add less test. Do not add test if the change is required to be a "minimal change".
+
 ## Working with Codex
 
 - **Commit during implementation; never push.** Run `git add` and `git commit` at each semantic boundary so the git log reflects the change's structure. Never run `git push`, `git push --force`, or any remote-modifying command—the user pushes manually after reviewing the branch.
