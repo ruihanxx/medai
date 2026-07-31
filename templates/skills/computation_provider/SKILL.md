@@ -64,6 +64,10 @@ and an explicit current-run ownership marker at the designated run state path.
 Persist only non-secret connection information. Verify the saved state before
 using it for SSH, transfer, power, or release operations.
 
+Use the orchestration-owned `remote_compute/instance.json` path for every
+provider. Read the selected provider reference for the exact state schema; never
+derive a provider-specific state filename.
+
 ### Connect to a Remote Machine
 
 Confirm the instance is running and use the connection method documented by the

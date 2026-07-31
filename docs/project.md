@@ -61,7 +61,7 @@ runs/<run_id>/
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
 ├── system_maintenance/dataset/patch.json
-└── remote_compute/
+└── remote_compute/instance.json
 ```
 
 Claims have unique `claim_id` values and are limited to `text` or `numeric`.
@@ -95,7 +95,9 @@ automatically.
   its first supported provider is AutoDL. Only instances created by the current
   run may be automatically powered off or released. After replication finishes
   and required outputs are transferred, the replicate stage must release them;
-  host cleanup retries release on failure paths.
+  host cleanup retries release on failure paths. The generic
+  `remote_compute/instance.json` records the selected provider and common
+  lifecycle state; each provider reference defines its provider-specific state.
 
 ## Acceptance
 

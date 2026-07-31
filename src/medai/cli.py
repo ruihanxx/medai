@@ -7,7 +7,7 @@ import typer
 
 from medai.artifacts import fail_manifest, initialize_manifest
 from medai.config import RunConfig
-from medai.workflow import create_workflow, release_run_autodl_instance
+from medai.workflow import create_workflow, release_run_computation_instance
 
 app = typer.Typer(
     name="medai",
@@ -67,12 +67,12 @@ def run(
             },
         )
         create_workflow().invoke({"config": config})
-        release_run_autodl_instance(config)
+        release_run_computation_instance(config)
     except Exception as exc:
         if "config" in locals() and (config.output / "manifest.json").exists():
             cleanup_error = None
             try:
-                release_run_autodl_instance(config)
+                release_run_computation_instance(config)
             except Exception as cleanup_exc:
                 cleanup_error = str(cleanup_exc)
             message = str(exc)

@@ -9,7 +9,7 @@ You are auditing and modifying an codebase associated with a medical paper, and 
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
-- Remote computation state, when remote compute was selected: `{{ autodl_state_path }}`
+- Remote computation state, when remote compute was selected: `{{ computation_provider_state_path }}`
 
 ## Available skills
 

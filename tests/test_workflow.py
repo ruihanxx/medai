@@ -9,7 +9,7 @@ from medai.prompts import render_prompt
 from medai.workflow import (
     codegen_agent_node,
     create_workflow,
-    release_run_autodl_instance,
+    release_run_computation_instance,
 )
 
 
@@ -264,7 +264,7 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
         data_inventory_path=tmp_path / "data_inventory.json",
         codegen_plan_path=tmp_path / "codegen_plan.json",
         dataset_patch_path=tmp_path / "patch.json",
-        autodl_state_path=tmp_path / "autodl_instance.json",
+        computation_provider_state_path=tmp_path / "instance.json",
         gpu_info=[],
         computation_provider="AutoDL",
     )
@@ -272,16 +272,18 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     prompt = prompt_path.read_text(encoding="utf-8")
     assert "/skills/computation_provider/SKILL.md" in prompt
     assert "/skills/autodl/SKILL.md" not in prompt
+    assert str(tmp_path / "instance.json") in prompt
+    assert "autodl_instance.json" not in prompt
 
 
-def test_autodl_cleanup_uses_new_skill_path_and_skips_released_state(
+def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     tmp_path: Path,
     monkeypatch,
 ):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
     output = tmp_path / "output"
-    state_path = output / "remote_compute" / "autodl_instance.json"
+    state_path = output / "remote_compute" / "instance.json"
     state_path.parent.mkdir(parents=True)
     config = RunConfig.create(
         paper=paper,
@@ -301,17 +303,31 @@ def test_autodl_cleanup_uses_new_skill_path_and_skips_released_state(
     monkeypatch.setenv("AUTODL_RELEASE_ON_FINISH", "false")
 
     state_path.write_text(
-        json.dumps({"instance_uuid": "instance", "created_by_run": True, "released": True}),
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": True,
+                "provider_state": {"instance_uuid": "instance"},
+            }
+        ),
         encoding="utf-8",
     )
-    release_run_autodl_instance(config)
+    release_run_computation_instance(config)
     assert calls == []
 
     state_path.write_text(
-        json.dumps({"instance_uuid": "instance", "created_by_run": True}),
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"instance_uuid": "instance"},
+            }
+        ),
         encoding="utf-8",
     )
-    release_run_autodl_instance(config)
+    release_run_computation_instance(config)
     assert len(calls) == 1
     command, kwargs = calls[0]
     assert command[1].endswith("/computation_provider/scripts/autodl.py")

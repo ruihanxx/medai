@@ -37,14 +37,20 @@ def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
 
 
 def load_state(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    state = json.loads(path.read_text(encoding="utf-8"))
+    if state.get("provider") != "autodl":
+        raise RuntimeError("State does not belong to the AutoDL provider")
+    provider_state = state.get("provider_state")
+    if not isinstance(provider_state, dict) or not provider_state.get("instance_uuid"):
+        raise RuntimeError("AutoDL state is missing provider_state.instance_uuid")
+    return state
 
 
 def snapshot(state: dict[str, Any]) -> dict[str, Any]:
     payload = request(
         "GET",
         "/api/v1/dev/instance/pro/snapshot",
-        {"instance_uuid": state["instance_uuid"]},
+        {"instance_uuid": state["provider_state"]["instance_uuid"]},
     )
     return payload["data"]
 
@@ -122,7 +128,16 @@ if args.action == "create":
         raise SystemExit(f"AutoDL instance did not start; last status={status}")
     args.state.parent.mkdir(parents=True, exist_ok=True)
     args.state.write_text(
-        json.dumps({"instance_uuid": instance_uuid, "created_by_run": True}, indent=2) + "\n",
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"instance_uuid": instance_uuid},
+            },
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     print(instance_uuid)
@@ -132,7 +147,7 @@ elif args.action == "status":
         request(
             "GET",
             "/api/v1/dev/instance/pro/status",
-            {"instance_uuid": state["instance_uuid"]},
+            {"instance_uuid": state["provider_state"]["instance_uuid"]},
         )["data"]
     )
 elif args.action == "release":
@@ -142,12 +157,12 @@ elif args.action == "release":
     request(
         "POST",
         "/api/v1/dev/instance/pro/power_off",
-        {"instance_uuid": state["instance_uuid"]},
+        {"instance_uuid": state["provider_state"]["instance_uuid"]},
     )
     request(
         "POST",
         "/api/v1/dev/instance/pro/release",
-        {"instance_uuid": state["instance_uuid"]},
+        {"instance_uuid": state["provider_state"]["instance_uuid"]},
     )
     state["released"] = True
     state["released_at_unix"] = int(time.time())

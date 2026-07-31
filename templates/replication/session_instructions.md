@@ -5,7 +5,7 @@ Execute the complete plan at `{{ replicate_plan_path }}` in
 If the plan uses remote compute, read
 `{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected
 provider reference required by that skill and use the existing instance state
-at `{{ autodl_state_path }}`.
+at `{{ computation_provider_state_path }}`.
 
 After every remote experiment has finished and all required results, logs, and
 evidence have been transferred into persistent run output, release every remote

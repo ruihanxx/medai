@@ -174,7 +174,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     codegen_plan_path = codebase_dir / "codegen_plan.json"
     data_inventory_path = codebase_dir / "data_inventory.json"
     transcript_path = config.output / "codegen" / "codegen_transcript.jsonl"
-    autodl_state_path = config.output / "remote_compute" / "autodl_instance.json"
+    computation_provider_state_path = config.output / "remote_compute" / "instance.json"
     dataset_patch_path = (
         config.output / "system_maintenance" / "dataset" / "patch.json"
     )
@@ -197,7 +197,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         data_inventory_path=data_inventory_path,
         codegen_plan_path=codegen_plan_path,
         dataset_patch_path=dataset_patch_path,
-        autodl_state_path=autodl_state_path,
+        computation_provider_state_path=computation_provider_state_path,
         gpu_info=resources["gpus"],
         computation_provider=computation_provider,
     )
@@ -243,7 +243,9 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         experiments_path=state["experiments_path"],
         resources_path=state["resources_path"],
         skills_dir=skills_dir(),
-        autodl_state_path=config.output / "remote_compute" / "autodl_instance.json",
+        computation_provider_state_path=(
+            config.output / "remote_compute" / "instance.json"
+        ),
         replicate_plan_path=replicate_plan_path,
     )
     run_agent(
@@ -290,7 +292,9 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         replication_dir=config.output / "replication",
         experiment_mappings=json.dumps(mappings, ensure_ascii=False, indent=2),
         skills_dir=skills_dir(),
-        autodl_state_path=config.output / "remote_compute" / "autodl_instance.json",
+        computation_provider_state_path=(
+            config.output / "remote_compute" / "instance.json"
+        ),
     )
     run_agent(
         provider=config.provider,
@@ -426,14 +430,17 @@ def create_workflow():
     return builder.compile()
 
 
-def release_run_autodl_instance(config: RunConfig) -> None:
-    state_path = config.output / "remote_compute" / "autodl_instance.json"
+def release_run_computation_instance(config: RunConfig) -> None:
+    state_path = config.output / "remote_compute" / "instance.json"
     if not state_path.is_file():
         return
     state = json.loads(state_path.read_text(encoding="utf-8"))
     if not state.get("created_by_run") or state.get("released"):
         return
-    script = skills_dir() / "computation_provider" / "scripts" / "autodl.py"
+    provider = state.get("provider")
+    if provider != "autodl":
+        raise RuntimeError(f"Unsupported computation provider in state: {provider}")
+    script = skills_dir() / "computation_provider" / "scripts" / f"{provider}.py"
     completed = subprocess.run(
         [sys.executable, str(script), "release", "--state", str(state_path)],
         capture_output=True,
@@ -442,5 +449,6 @@ def release_run_autodl_instance(config: RunConfig) -> None:
     )
     if completed.returncode != 0:
         raise RuntimeError(
-            f"Could not release AutoDL instance: {(completed.stderr or completed.stdout).strip()}"
+            f"Could not release {provider} instance: "
+            f"{(completed.stderr or completed.stdout).strip()}"
         )

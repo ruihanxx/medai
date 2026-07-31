@@ -93,23 +93,30 @@ Invoke the provider script through its path under the selected skill:
 python <skill-dir>/scripts/autodl.py --help
 ```
 
-Use the run-owned state path supplied by the orchestration prompt, normally
-inside `remote_compute/`. Never reuse a state file from another run.
+Use the generic run-owned state path supplied by the orchestration prompt:
+`remote_compute/instance.json`. Never create a provider-named state file or
+reuse a state file from another run.
 
 After successful creation, the script writes:
 
 ```json
 {
-  "instance_uuid": "<provider-instance-uuid>",
-  "created_by_run": true
+  "provider": "autodl",
+  "created_by_run": true,
+  "released": false,
+  "provider_state": {
+    "instance_uuid": "<provider-instance-uuid>"
+  }
 }
 ```
 
-The instance UUID is sufficient for the script to fetch current SSH host, port,
-and password from the snapshot API immediately before each connection or
-transfer. Do not persist the returned password or Jupyter token. Record the
-selected GPU specification and count in the run's plan or audit artifacts; do
-not hand-edit ownership fields in the state file.
+The top-level fields form the generic orchestration envelope. The AutoDL script
+owns the exact `provider_state` format and requires `instance_uuid`. That UUID
+is sufficient for the script to fetch current SSH host, port, and password from
+the snapshot API immediately before each connection or transfer. Do not persist
+the returned password or Jupyter token. Record the selected GPU specification
+and count in the run's plan or audit artifacts; do not hand-edit the provider,
+ownership, lifecycle, or provider-state fields.
 
 The script uses these reviewed Pro API operations:
 
@@ -121,8 +128,9 @@ The script uses these reviewed Pro API operations:
 | Power off during release | `POST /api/v1/dev/instance/pro/power_off` |
 | Release | `POST /api/v1/dev/instance/pro/release` |
 
-After successful release, the script adds `released: true` and
-`released_at_unix`. Treat that marker as a guard against duplicate release.
+After successful release, the script changes `released` to `true` and adds the
+top-level `released_at_unix` timestamp. Treat that marker as a guard against
+duplicate release.
 
 ## Create and Inspect an Instance
 

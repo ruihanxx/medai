@@ -65,7 +65,8 @@ locally, check {{ computation_provider }} for resources meeting the required
 GPU type, count, and VRAM. If a matching resource is available, rent it by
 following `{{ skills_dir }}/computation_provider/SKILL.md`. After selecting the
 provider, read the provider reference required by that skill before performing
-any provider operation. Store the instance state at `{{ autodl_state_path }}`
+any provider operation. Store the instance state at
+`{{ computation_provider_state_path }}`
 and leave it running for the audit and replication stages. If no matching
 resource is available, stop explicitly. Do not rent weaker hardware or reduce
 the experiment scale.
