@@ -47,13 +47,18 @@ agent failure stops the run explicitly.
 ├── preprocessing/artifacts/
 ├── preprocessing/claims.json
 ├── preprocessing/experiment_todo.json
+├── preprocessing/preprocessing_transcript.jsonl
 ├── codegen/codebase/data_inventory.json
 ├── codegen/codebase/codegen_plan.json
+├── codegen/codegen_transcript.jsonl
 ├── audit/replicate_plan.json
+├── audit/audit_transcript.jsonl
 ├── replication/<experiment_id>/result.json
+├── replication/replication_transcript.jsonl
 ├── report/reproduction_report.md
+├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
-└── logs/
+└── remote_compute/
 ```
 
 Claims have unique `claim_id` values and are limited to `text` or `numeric`.
@@ -69,7 +74,9 @@ scan was truncated. With no `--data` input it must explicitly report
 - Source prompts live under `templates/<stage>/`; runtime skills live under
   `templates/skills/`. Neither is stored under `src/`.
 - Prompts are rendered with Jinja2 and saved before invocation.
-- Agent subprocess output is preserved as JSONL.
+- Each agent invocation's provider event stream is preserved as a JSONL
+  transcript beside that stage's artifacts. Transcript files are diagnostic
+  records and are never used as the agent's structured result.
 - Replication agents do not receive paper target values.
 - Audit agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.

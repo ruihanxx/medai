@@ -69,7 +69,6 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         "replication",
         "report",
         "prompts",
-        "logs",
         "remote_compute",
     ):
         (config.output / name).mkdir(parents=True, exist_ok=True)
@@ -105,6 +104,9 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     record_stage(config.output, "preprocessing_agent", "running")
     claims_path = config.output / "preprocessing" / "claims.json"
     experiments_path = config.output / "preprocessing" / "experiment_todo.json"
+    transcript_path = (
+        config.output / "preprocessing" / "preprocessing_transcript.jsonl"
+    )
     prompt_path = render_prompt(
         "preprocessing/session_instructions.md",
         config.output / "prompts" / "preprocessing.md",
@@ -118,7 +120,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=config.output / "preprocessing",
-        log_path=config.output / "logs" / "preprocessing.jsonl",
+        transcript_path=transcript_path,
         siliconflow_config_path=config.siliconflow_config,
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
@@ -130,7 +132,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         config.output,
         "preprocessing_agent",
         "completed",
-        outputs=[str(claims_path), str(experiments_path)],
+        outputs=[str(claims_path), str(experiments_path), str(transcript_path)],
     )
     return {
         "claims_path": str(claims_path),
@@ -165,6 +167,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
 
     codegen_plan_path = codebase_dir / "codegen_plan.json"
     data_inventory_path = codebase_dir / "data_inventory.json"
+    transcript_path = config.output / "codegen" / "codegen_transcript.jsonl"
     autodl_state_path = config.output / "remote_compute" / "autodl_instance.json"
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     computation_provider = (
@@ -192,7 +195,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=codebase_dir,
-        log_path=config.output / "logs" / "codegen.jsonl",
+        transcript_path=transcript_path,
         siliconflow_config_path=config.siliconflow_config,
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
@@ -204,7 +207,12 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         config.output,
         "codegen_agent",
         "completed",
-        outputs=[str(codebase_dir), str(data_inventory_path), str(codegen_plan_path)],
+        outputs=[
+            str(codebase_dir),
+            str(data_inventory_path),
+            str(codegen_plan_path),
+            str(transcript_path),
+        ],
     )
     return {"codebase_dir": str(codebase_dir)}
 
@@ -214,6 +222,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     record_stage(config.output, "audit_agent", "running")
     replicate_plan_path = config.output / "audit" / "replicate_plan.json"
+    transcript_path = config.output / "audit" / "audit_transcript.jsonl"
     prompt_path = render_prompt(
         "audit/session_instructions.md",
         config.output / "prompts" / "audit.md",
@@ -229,7 +238,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=Path(state["codebase_dir"]),
-        log_path=config.output / "logs" / "audit.jsonl",
+        transcript_path=transcript_path,
         siliconflow_config_path=config.siliconflow_config,
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
@@ -241,7 +250,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         config.output,
         "audit_agent",
         "completed",
-        outputs=[str(replicate_plan_path)],
+        outputs=[str(replicate_plan_path), str(transcript_path)],
     )
     return {"replicate_plan_path": str(replicate_plan_path)}
 
@@ -250,6 +259,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     print("enter replicate stage")
     config = state["config"]
     record_stage(config.output, "replicate_agent", "running")
+    transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
     mappings = [
         {
@@ -274,7 +284,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=Path(state["codebase_dir"]),
-        log_path=config.output / "logs" / "replicate.jsonl",
+        transcript_path=transcript_path,
         siliconflow_config_path=config.siliconflow_config,
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
@@ -317,7 +327,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         config.output,
         "replicate_agent",
         "completed",
-        outputs=result_paths,
+        outputs=[*result_paths, str(transcript_path)],
     )
     return {}
 
@@ -328,8 +338,14 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     record_stage(config.output, "report_agents", "running")
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
     report_path = config.output / "report" / "reproduction_report.md"
+    transcript_paths = []
     for experiment in experiments.experiments:
         experiment_payload = experiment.model_dump(mode="json")
+        transcript_path = (
+            config.output
+            / "report"
+            / f"{experiment.experiment_id}_transcript.jsonl"
+        )
         prompt_path = render_prompt(
             "report/session_instructions.md",
             config.output / "prompts" / f"report_{experiment.experiment_id}.md",
@@ -350,13 +366,14 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             provider=config.provider,
             prompt_path=prompt_path,
             working_dir=config.output,
-            log_path=config.output / "logs" / f"report_{experiment.experiment_id}.jsonl",
+            transcript_path=transcript_path,
             siliconflow_config_path=config.siliconflow_config,
             codex_model=config.codex_model,
             codex_reasoning_effort=config.codex_reasoning_effort,
         )
         if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"Report agent did not write the shared report: {report_path}")
+        transcript_paths.append(str(transcript_path))
     report_text = report_path.read_text(encoding="utf-8")
     missing_experiments = [
         experiment.experiment_id
@@ -371,7 +388,7 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
         config.output,
         "report_agents",
         "completed",
-        outputs=[str(report_path)],
+        outputs=[str(report_path), *transcript_paths],
     )
     complete_manifest(config.output)
     return {"report_path": str(report_path)}

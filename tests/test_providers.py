@@ -24,7 +24,7 @@ class OpenStringIO(io.StringIO):
         return
 
 
-def test_codex_prompt_uses_stdin_and_writes_log(tmp_path: Path, monkeypatch):
+def test_codex_prompt_uses_stdin_and_writes_transcript(tmp_path: Path, monkeypatch):
     captured = {}
 
     def fake_popen(command, **kwargs):
@@ -34,13 +34,13 @@ def test_codex_prompt_uses_stdin_and_writes_log(tmp_path: Path, monkeypatch):
     monkeypatch.setattr("medai.providers.subprocess.Popen", fake_popen)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("do the work", encoding="utf-8")
-    log = tmp_path / "agent.jsonl"
+    transcript = tmp_path / "agent_transcript.jsonl"
 
     run_agent(
         provider="codex",
         prompt_path=prompt,
         working_dir=tmp_path,
-        log_path=log,
+        transcript_path=transcript,
         siliconflow_config_path=None,
         codex_model="gpt-5.6-terra",
         codex_reasoning_effort="high",
@@ -54,7 +54,7 @@ def test_codex_prompt_uses_stdin_and_writes_log(tmp_path: Path, monkeypatch):
         'model_reasoning_effort="high"',
     ]
     assert captured["process"].stdin.getvalue() == "do the work"
-    assert '"type":"done"' in log.read_text(encoding="utf-8")
+    assert '"type":"done"' in transcript.read_text(encoding="utf-8")
 
 
 def test_siliconflow_key_is_removed_from_child_environment():

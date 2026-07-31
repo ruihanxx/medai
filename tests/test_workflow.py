@@ -25,6 +25,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         siliconflow_config=None,
     )
     initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    transcript_paths = []
 
     def fake_convert(paper_path, preprocessing_dir):
         preprocessing_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +35,9 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         return markdown
 
     def fake_agent(*, prompt_path, working_dir, **kwargs):
+        transcript_path = kwargs["transcript_path"]
+        transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
+        transcript_paths.append(transcript_path.relative_to(output).as_posix())
         name = prompt_path.name
         if name == "preprocessing.md":
             (output / "preprocessing" / "claims.json").write_text(
@@ -182,6 +186,13 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "enter report stage",
     ]
     assert Path(result["report_path"]).is_file()
+    assert transcript_paths == [
+        "preprocessing/preprocessing_transcript.jsonl",
+        "codegen/codegen_transcript.jsonl",
+        "audit/audit_transcript.jsonl",
+        "replication/replication_transcript.jsonl",
+        "report/E1_transcript.jsonl",
+    ]
     assert (output / "codegen" / "codebase" / "README.md").is_file()
     assert (output / "codegen" / "codebase" / "data_inventory.json").is_file()
     codegen_prompt = (output / "prompts" / "codegen.md").read_text(encoding="utf-8")

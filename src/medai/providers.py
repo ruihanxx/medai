@@ -12,24 +12,25 @@ PROVIDER_COMMANDS = {
         "claude",
         "-p",
         "--dangerously-skip-permissions",
-        "--verbose",
-        "--output-format",
-        "stream-json",
     ],
     "codex": [
         "codex",
         "exec",
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
-        "--json",
     ],
     "codex-siliconflow": [
         "codex",
         "exec",
         "--dangerously-bypass-approvals-and-sandbox",
         "--skip-git-repo-check",
-        "--json",
     ],
+}
+
+TRANSCRIPT_FLAGS = {
+    "claude": ["--verbose", "--output-format", "stream-json"],
+    "codex": ["--json"],
+    "codex-siliconflow": ["--json"],
 }
 
 
@@ -38,23 +39,25 @@ def run_agent(
     provider: str,
     prompt_path: Path,
     working_dir: Path,
-    log_path: Path,
+    transcript_path: Path,
     siliconflow_config_path: Path | None,
     codex_model: str | None = None,
     codex_reasoning_effort: str | None = None,
 ) -> None:
+    """Run an agent and stream its provider JSONL transcript to disk."""
     prompt = prompt_path.read_text(encoding="utf-8")
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    transcript_path.parent.mkdir(parents=True, exist_ok=True)
 
     adapter_context = nullcontext(None)
     if provider == "codex-siliconflow":
         if siliconflow_config_path is None:
             raise RuntimeError("codex-siliconflow requires a config file")
         settings = SiliconFlowConfig.from_dotenv(siliconflow_config_path)
-        adapter_context = SiliconFlowAdapter(settings, artifact_dir=log_path.parent)
+        adapter_context = SiliconFlowAdapter(settings, artifact_dir=transcript_path.parent)
 
     with adapter_context as adapter:
         command = list(PROVIDER_COMMANDS[provider])
+        command.extend(TRANSCRIPT_FLAGS[provider])
         environment = os.environ.copy()
         if adapter is not None:
             command.extend(adapter.codex_args())
@@ -88,10 +91,13 @@ def run_agent(
         assert process.stdout is not None
         process.stdin.write(prompt)
         process.stdin.close()
-        with log_path.open("w", encoding="utf-8") as log:
+        with transcript_path.open("w", encoding="utf-8") as transcript:
             for line in iter(process.stdout.readline, ""):
                 print(line, end="")
-                log.write(line)
+                transcript.write(line)
         return_code = process.wait()
         if return_code != 0:
-            raise RuntimeError(f"{provider} agent failed with exit code {return_code}")
+            raise RuntimeError(
+                f"{provider} agent failed with exit code {return_code} "
+                f"(transcript: {transcript_path})"
+            )
