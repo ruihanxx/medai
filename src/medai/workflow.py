@@ -427,15 +427,13 @@ def create_workflow():
 
 
 def release_run_autodl_instance(config: RunConfig) -> None:
-    if os.environ.get("AUTODL_RELEASE_ON_FINISH", "true").casefold() not in {"1", "true", "yes"}:
-        return
     state_path = config.output / "remote_compute" / "autodl_instance.json"
     if not state_path.is_file():
         return
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    if not state.get("created_by_run"):
+    if not state.get("created_by_run") or state.get("released"):
         return
-    script = skills_dir() / "autodl" / "scripts" / "autodl.py"
+    script = skills_dir() / "computation_provider" / "scripts" / "autodl.py"
     completed = subprocess.run(
         [sys.executable, str(script), "release", "--state", str(state_path)],
         capture_output=True,

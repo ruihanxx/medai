@@ -9,7 +9,7 @@ You are auditing and modifying an codebase associated with a medical paper, and 
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
-- AutoDL state, when remote compute was selected: `{{ autodl_state_path }}`
+- Remote computation state, when remote compute was selected: `{{ autodl_state_path }}`
 
 ## Available skills
 
@@ -19,6 +19,10 @@ YAML frontmatter `description:` field summarizes when the skill applies.
 You may browse the catalog and reference relevant skills in planning steps if
 a skill genuinely matches; many plans will not need any skill, and that
 is fine.
+
+If remote computation was selected, read
+`{{ skills_dir }}/computation_provider/SKILL.md` and then the selected
+provider reference named by that skill before planning remote operations.
 
 Required work:
 

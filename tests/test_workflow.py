@@ -5,7 +5,12 @@ import pytest
 
 from medai.artifacts import initialize_manifest
 from medai.config import RunConfig
-from medai.workflow import codegen_agent_node, create_workflow
+from medai.prompts import render_prompt
+from medai.workflow import (
+    codegen_agent_node,
+    create_workflow,
+    release_run_autodl_instance,
+)
 
 
 def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
@@ -243,6 +248,75 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="stop"):
         workflow.create_workflow().invoke({"config": object()})
     assert calls == ["preflight", "preprocess_pdf"]
+
+
+def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path):
+    prompt_path = render_prompt(
+        "codegen/session_instructions.md",
+        tmp_path / "codegen.md",
+        codebase_dir=tmp_path / "codebase",
+        paper_markdown=tmp_path / "paper.md",
+        claims_path=tmp_path / "claims.json",
+        experiments_path=tmp_path / "experiments.json",
+        data_dir=None,
+        skills_dir=Path("/skills"),
+        resources_path=tmp_path / "resources.json",
+        data_inventory_path=tmp_path / "data_inventory.json",
+        codegen_plan_path=tmp_path / "codegen_plan.json",
+        dataset_patch_path=tmp_path / "patch.json",
+        autodl_state_path=tmp_path / "autodl_instance.json",
+        gpu_info=[],
+        computation_provider="AutoDL",
+    )
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+    assert "/skills/computation_provider/SKILL.md" in prompt
+    assert "/skills/autodl/SKILL.md" not in prompt
+
+
+def test_autodl_cleanup_uses_new_skill_path_and_skips_released_state(
+    tmp_path: Path,
+    monkeypatch,
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    state_path = output / "remote_compute" / "autodl_instance.json"
+    state_path.parent.mkdir(parents=True)
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr("medai.workflow.subprocess.run", fake_run)
+    monkeypatch.setenv("AUTODL_RELEASE_ON_FINISH", "false")
+
+    state_path.write_text(
+        json.dumps({"instance_uuid": "instance", "created_by_run": True, "released": True}),
+        encoding="utf-8",
+    )
+    release_run_autodl_instance(config)
+    assert calls == []
+
+    state_path.write_text(
+        json.dumps({"instance_uuid": "instance", "created_by_run": True}),
+        encoding="utf-8",
+    )
+    release_run_autodl_instance(config)
+    assert len(calls) == 1
+    command, kwargs = calls[0]
+    assert command[1].endswith("/computation_provider/scripts/autodl.py")
+    assert command[2:] == ["release", "--state", str(state_path)]
+    assert kwargs["timeout"] == 120
 
 
 def test_codegen_requires_data_inventory(tmp_path: Path, monkeypatch):

@@ -198,7 +198,14 @@ def test_autodl_skill_help_does_not_call_api():
     completed = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "templates" / "skills" / "autodl" / "scripts" / "autodl.py"),
+            str(
+                ROOT
+                / "templates"
+                / "skills"
+                / "computation_provider"
+                / "scripts"
+                / "autodl.py"
+            ),
             "--help",
         ],
         capture_output=True,
