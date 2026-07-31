@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 
 class StrictModel(BaseModel):
@@ -91,6 +91,15 @@ class DataInventory(StrictModel):
     catalog: list[dict[str, Any]]
     explored_files: list[dict[str, Any]]
     warnings: list[str]
+
+
+class DatasetPatch(StrictModel):
+    file_name: str = Field(alias="file name", min_length=1)
+    patch_content: Any
+
+
+class DatasetPatchFile(RootModel[list[DatasetPatch]]):
+    pass
 
 
 class CodegenPlan(StrictModel):

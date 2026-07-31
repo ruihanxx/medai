@@ -21,6 +21,7 @@ from medai.models import (
     ClaimsFile,
     CodegenPlan,
     DataInventory,
+    DatasetPatchFile,
     ExperimentResult,
     ExperimentTodo,
     ReplicationPlan,
@@ -70,10 +71,15 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         "report",
         "prompts",
         "remote_compute",
+        "system_maintenence/dataset",
     ):
         (config.output / name).mkdir(parents=True, exist_ok=True)
     resources_path = config.output / "preflight" / "resources.json"
+    dataset_patch_path = (
+        config.output / "system_maintenence" / "dataset" / "patch.json"
+    )
     write_json(resources_path, detect_resources(config.output))
+    write_json(dataset_patch_path, [])
     record_stage(config.output, "preflight", "completed", outputs=[str(resources_path)])
     return {"resources_path": str(resources_path)}
 
@@ -169,6 +175,9 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     data_inventory_path = codebase_dir / "data_inventory.json"
     transcript_path = config.output / "codegen" / "codegen_transcript.jsonl"
     autodl_state_path = config.output / "remote_compute" / "autodl_instance.json"
+    dataset_patch_path = (
+        config.output / "system_maintenence" / "dataset" / "patch.json"
+    )
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     computation_provider = (
         "AutoDL"
@@ -187,6 +196,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         resources_path=state["resources_path"],
         data_inventory_path=data_inventory_path,
         codegen_plan_path=codegen_plan_path,
+        dataset_patch_path=dataset_patch_path,
         autodl_state_path=autodl_state_path,
         gpu_info=resources["gpus"],
         computation_provider=computation_provider,
@@ -203,6 +213,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     inventory = load_model(data_inventory_path, DataInventory)
     validate_data_inventory(config.data, inventory)
     load_model(codegen_plan_path, CodegenPlan)
+    load_model(dataset_patch_path, DatasetPatchFile)
     record_stage(
         config.output,
         "codegen_agent",
@@ -211,6 +222,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             str(codebase_dir),
             str(data_inventory_path),
             str(codegen_plan_path),
+            str(dataset_patch_path),
             str(transcript_path),
         ],
     )

@@ -84,6 +84,33 @@ Outline the file structure of your codebase before writing any code:
 
 Track Python dependencies in `pyproject.toml` or `requirements.txt` (your choice; pick one and be consistent); a non-Python stack additionally uses its native manifest (e.g. R's `DESCRIPTION`).
 
+**Dataset Processing and Cohort Construction**
+
+Strictly follow the paper's dataset processing and cohort construction procedures.
+
+When the paper uses specialized cohort, clinical, or methodological terms that cannot be mapped directly to the available dataset, infer the closest executable implementation using the dataset schema, metadata, and relevant medical knowledge. If the mapping remains unclear, search external sources.
+
+Do not skip, weaken, or obscure any requirement because of uncertainty. Record every non-direct mapping in the form of `"ambiguities"` in step 2.5.
+
+Do not directly read large data files. First read the available document to get basic informations.
+
+Do not proactively search those documents for omissions. If using a document
+during this run naturally reveals information that the document omitted, append
+an entry to `{{ dataset_patch_path }}`. This file is initialized as a JSON array,
+and every entry must have exactly this form:
+
+```json
+{
+  "file name": "dataset_graph.yaml",
+  "patch_content": {}
+}
+```
+
+Set `"file name"` to the document's file name. Set `"patch_content"` to only
+the missing content, structured like the target document so it can be reviewed
+and applied later. Preserve existing entries, do not repeat information already
+present in the document, and do not invent additions. If this run does not
+naturally encounter an omission, leave the initialized empty array unchanged.
 
 ### 2.5. Capture the plan to disk
 
@@ -272,8 +299,9 @@ that depends on it. For each such upstream step, confirm:
 
 ## Hard constraints
 
-- Write into `{{ codebase_dir }}/`, nowhere else.
- 
+- Write into `{{ codebase_dir }}/`, except that dataset-document improvements
+  may be written to `{{ dataset_patch_path }}` as described above. Do not modify
+  the source dataset documents or raw data.
 - `codegen_plan.json` and `config.yaml` both live at the codebase root.
 - Do not commit (no `git commit`) — the host-side EXIT trap captures
   the diff against an empty initial state.

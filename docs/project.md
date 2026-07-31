@@ -58,6 +58,7 @@ agent failure stops the run explicitly.
 ├── report/reproduction_report.md
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
+├── system_maintenence/dataset/patch.json
 └── remote_compute/
 ```
 
@@ -68,6 +69,14 @@ those mappings. The data inventory records the configured raw root, adapter,
 bounded scan limits, catalog, explored file samples, warnings, and whether a
 scan was truncated. With no `--data` input it must explicitly report
 `not_supplied` and contain no catalog or samples.
+
+Each run initializes `system_maintenence/dataset/patch.json` as an empty JSON
+array. When code generation naturally encounters an omission in a dataset
+document, it may add an object containing exactly `"file name"` and
+`"patch_content"`; it does not proactively search for omissions or modify the
+read-only source dataset. The patch content follows the target document's
+structure and remains a reviewable run artifact rather than being applied
+automatically.
 
 ## Agent boundaries
 

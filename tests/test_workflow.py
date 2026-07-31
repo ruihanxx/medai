@@ -195,7 +195,11 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     ]
     assert (output / "codegen" / "codebase" / "README.md").is_file()
     assert (output / "codegen" / "codebase" / "data_inventory.json").is_file()
+    dataset_patch_path = output / "system_maintenence" / "dataset" / "patch.json"
+    assert json.loads(dataset_patch_path.read_text(encoding="utf-8")) == []
     codegen_prompt = (output / "prompts" / "codegen.md").read_text(encoding="utf-8")
+    assert str(dataset_patch_path) in codegen_prompt
+    assert '"file name": "dataset_graph.yaml"' in codegen_prompt
     assert "/explore-data/SKILL.md" in codegen_prompt
     assert "explore-data-analysis" not in codegen_prompt
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
