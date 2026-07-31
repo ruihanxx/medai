@@ -71,12 +71,12 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         "report",
         "prompts",
         "remote_compute",
-        "system_maintenence/dataset",
+        "system_maintenance/dataset",
     ):
         (config.output / name).mkdir(parents=True, exist_ok=True)
     resources_path = config.output / "preflight" / "resources.json"
     dataset_patch_path = (
-        config.output / "system_maintenence" / "dataset" / "patch.json"
+        config.output / "system_maintenance" / "dataset" / "patch.json"
     )
     write_json(resources_path, detect_resources(config.output))
     write_json(dataset_patch_path, [])
@@ -176,7 +176,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     transcript_path = config.output / "codegen" / "codegen_transcript.jsonl"
     autodl_state_path = config.output / "remote_compute" / "autodl_instance.json"
     dataset_patch_path = (
-        config.output / "system_maintenence" / "dataset" / "patch.json"
+        config.output / "system_maintenance" / "dataset" / "patch.json"
     )
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     computation_provider = (

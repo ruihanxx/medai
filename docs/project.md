@@ -58,7 +58,7 @@ agent failure stops the run explicitly.
 ├── report/reproduction_report.md
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
-├── system_maintenence/dataset/patch.json
+├── system_maintenance/dataset/patch.json
 └── remote_compute/
 ```
 
@@ -70,7 +70,7 @@ bounded scan limits, catalog, explored file samples, warnings, and whether a
 scan was truncated. With no `--data` input it must explicitly report
 `not_supplied` and contain no catalog or samples.
 
-Each run initializes `system_maintenence/dataset/patch.json` as an empty JSON
+Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset
 document, it may add an object containing exactly `"file name"` and
 `"patch_content"`; it does not proactively search for omissions or modify the
