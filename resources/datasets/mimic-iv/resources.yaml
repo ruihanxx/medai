@@ -1,0 +1,1138 @@
+dataset_id: mimic-iv
+dataset_name: MIMIC-IV
+version: '3.1'
+generated_at: '2026-07-06'
+raw_root: raw
+local_raw_root_note: raw is a symlink to ../mimic-iv_raw; original raw files were not modified.
+official_sources:
+- title: PhysioNet MIMIC-IV v3.1 project page
+  url: https://physionet.org/content/mimiciv/3.1/
+  accessed: '2026-07-06'
+  notes: Official dataset release page, citation, version, release notes, and module summary.
+- title: MIMIC-IV documentation index
+  url: https://mimic.mit.edu/docs/iv/
+  accessed: '2026-07-06'
+  notes: Official MIT-LCP documentation index for MIMIC-IV modules and table pages.
+- title: MIMIC-IV Hosp module documentation
+  url: https://mimic.mit.edu/docs/iv/modules/hosp/
+  accessed: '2026-07-06'
+  notes: Official table list and hospital EHR module summary.
+- title: MIMIC-IV ICU module documentation
+  url: https://mimic.mit.edu/docs/iv/modules/icu/
+  accessed: '2026-07-06'
+  notes: Official ICU star-schema and event table summary.
+- title: MIMIC-IV core concepts documentation
+  url: https://mimic.mit.edu/docs/iv/about/concepts/
+  accessed: '2026-07-06'
+  notes: Official identifier and date-shifting concepts.
+resources:
+- resource_id: admissions
+  columns:
+  - subject_id
+  - hadm_id
+  - admittime
+  - dischtime
+  - deathtime
+  - admission_type
+  - admit_provider_id
+  - admission_location
+  - discharge_location
+  - insurance
+  - language
+  - marital_status
+  - race
+  - edregtime
+  - edouttime
+  - hospital_expire_flag
+  paths:
+  - raw/hosp/admissions.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: entity_table
+  size_summary:
+    total_bytes: 19928140
+    human_readable: 19.0 MB
+  count_summary:
+    file_count: 1
+    row_count: 546028
+    column_count: 16
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/admissions/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Hospital admission records with admission/discharge timing, admission source, demographics, and in-hospital
+    mortality flag.
+- resource_id: d_hcpcs
+  columns:
+  - code
+  - category
+  - long_description
+  - short_description
+  paths:
+  - raw/hosp/d_hcpcs.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: data_dictionary
+  size_summary:
+    total_bytes: 427554
+    human_readable: 417.5 KB
+  count_summary:
+    file_count: 1
+    row_count: 89208
+    column_count: 4
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/d_hcpcs/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Dimension table describing HCPCS/CPT billing codes.
+- resource_id: d_icd_diagnoses
+  columns:
+  - icd_code
+  - icd_version
+  - long_title
+  paths:
+  - raw/hosp/d_icd_diagnoses.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: data_dictionary
+  size_summary:
+    total_bytes: 876360
+    human_readable: 855.8 KB
+  count_summary:
+    file_count: 1
+    row_count: 112107
+    column_count: 3
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/d_icd_diagnoses/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Dimension table describing ICD-9/ICD-10 billed diagnosis codes.
+- resource_id: d_icd_procedures
+  columns:
+  - icd_code
+  - icd_version
+  - long_title
+  paths:
+  - raw/hosp/d_icd_procedures.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: data_dictionary
+  size_summary:
+    total_bytes: 589186
+    human_readable: 575.4 KB
+  count_summary:
+    file_count: 1
+    row_count: 86423
+    column_count: 3
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/d_icd_procedures/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Dimension table describing ICD-9/ICD-10 billed procedure codes.
+- resource_id: d_labitems
+  columns:
+  - itemid
+  - label
+  - fluid
+  - category
+  paths:
+  - raw/hosp/d_labitems.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: data_dictionary
+  size_summary:
+    total_bytes: 13169
+    human_readable: 12.9 KB
+  count_summary:
+    file_count: 1
+    row_count: 1650
+    column_count: 4
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/d_labitems/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Dimension table describing laboratory item identifiers used by labevents.
+- resource_id: diagnoses_icd
+  columns:
+  - subject_id
+  - hadm_id
+  - seq_num
+  - icd_code
+  - icd_version
+  paths:
+  - raw/hosp/diagnoses_icd.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 33564802
+    human_readable: 32.0 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 5
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/diagnoses_icd/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Billed ICD-9/ICD-10 diagnoses assigned to hospitalizations.
+- resource_id: drgcodes
+  columns:
+  - subject_id
+  - hadm_id
+  - drg_type
+  - drg_code
+  - description
+  - drg_severity
+  - drg_mortality
+  paths:
+  - raw/hosp/drgcodes.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 9743908
+    human_readable: 9.3 MB
+  count_summary:
+    file_count: 1
+    row_count: 761856
+    column_count: 7
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/drgcodes/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Diagnosis related group billing code assignments for hospitalizations.
+- resource_id: emar
+  columns:
+  - subject_id
+  - hadm_id
+  - emar_id
+  - emar_seq
+  - poe_id
+  - pharmacy_id
+  - enter_provider_id
+  - charttime
+  - medication
+  - event_txt
+  - scheduletime
+  - storetime
+  paths:
+  - raw/hosp/emar.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 811305629
+    human_readable: 773.7 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 12
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/emar/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Electronic Medication Administration Record entries captured at medication administration time.
+- resource_id: emar_detail
+  columns:
+  - subject_id
+  - emar_id
+  - emar_seq
+  - parent_field_ordinal
+  - administration_type
+  - pharmacy_id
+  - barcode_type
+  - reason_for_no_barcode
+  - complete_dose_not_given
+  - dose_due
+  - dose_due_unit
+  - dose_given
+  - dose_given_unit
+  - will_remainder_of_dose_be_given
+  - product_amount_given
+  - product_unit
+  - product_code
+  - product_description
+  - product_description_other
+  - prior_infusion_rate
+  - infusion_rate
+  - infusion_rate_adjustment
+  - infusion_rate_adjustment_amount
+  - infusion_rate_unit
+  - route
+  - infusion_complete
+  - completion_interval
+  - new_iv_bag_hung
+  - continued_infusion_in_other_location
+  - restart_interval
+  - side
+  - site
+  - non_formulary_visual_verification
+  paths:
+  - raw/hosp/emar_detail.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_detail_table
+  size_summary:
+    total_bytes: 748158322
+    human_readable: 713.5 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 33
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/emar_detail/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Supplementary dosage, route, product, and administration details for eMAR entries.
+- resource_id: hcpcsevents
+  columns:
+  - subject_id
+  - hadm_id
+  - chartdate
+  - hcpcs_cd
+  - seq_num
+  - short_description
+  paths:
+  - raw/hosp/hcpcsevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 2162335
+    human_readable: 2.1 MB
+  count_summary:
+    file_count: 1
+    row_count: 186074
+    column_count: 6
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/hcpcsevents/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Billed HCPCS/CPT events occurring during hospitalizations.
+- resource_id: labevents
+  columns:
+  - labevent_id
+  - subject_id
+  - hadm_id
+  - specimen_id
+  - itemid
+  - order_provider_id
+  - charttime
+  - storetime
+  - value
+  - valuenum
+  - valueuom
+  - ref_range_lower
+  - ref_range_upper
+  - flag
+  - priority
+  - comments
+  paths:
+  - raw/hosp/labevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 2592909134
+    human_readable: 2.4 GB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 16
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/labevents/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Laboratory measurements sourced from patient-derived specimens.
+- resource_id: microbiologyevents
+  columns:
+  - microevent_id
+  - subject_id
+  - hadm_id
+  - micro_specimen_id
+  - order_provider_id
+  - chartdate
+  - charttime
+  - spec_itemid
+  - spec_type_desc
+  - test_seq
+  - storedate
+  - storetime
+  - test_itemid
+  - test_name
+  - org_itemid
+  - org_name
+  - isolate_num
+  - quantity
+  - ab_itemid
+  - ab_name
+  - dilution_text
+  - dilution_comparison
+  - dilution_value
+  - interpretation
+  - comments
+  paths:
+  - raw/hosp/microbiologyevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 117644075
+    human_readable: 112.2 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 25
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/microbiologyevents/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Microbiology culture, test, organism, and antibiotic susceptibility event rows.
+- resource_id: omr
+  columns:
+  - subject_id
+  - chartdate
+  - seq_num
+  - result_name
+  - result_value
+  paths:
+  - raw/hosp/omr.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 44069351
+    human_readable: 42.0 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 5
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/omr/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Online Medical Record miscellaneous EHR measurements such as height and weight.
+- resource_id: patients
+  columns:
+  - subject_id
+  - gender
+  - anchor_age
+  - anchor_year
+  - anchor_year_group
+  - dod
+  paths:
+  - raw/hosp/patients.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: entity_table
+  size_summary:
+    total_bytes: 2835586
+    human_readable: 2.7 MB
+  count_summary:
+    file_count: 1
+    row_count: 364627
+    column_count: 6
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/patients/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Patient demographics, anchor-year deidentification fields, and date of death when available.
+- resource_id: pharmacy
+  columns:
+  - subject_id
+  - hadm_id
+  - pharmacy_id
+  - poe_id
+  - starttime
+  - stoptime
+  - medication
+  - proc_type
+  - status
+  - entertime
+  - verifiedtime
+  - route
+  - frequency
+  - disp_sched
+  - infusion_type
+  - sliding_scale
+  - lockout_interval
+  - basal_rate
+  - one_hr_max
+  - doses_per_24_hrs
+  - duration
+  - duration_interval
+  - expiration_value
+  - expiration_unit
+  - expirationdate
+  - dispensation
+  - fill_quantity
+  paths:
+  - raw/hosp/pharmacy.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 525708076
+    human_readable: 501.4 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 27
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/pharmacy/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Formulary, dosing, verification, route, and dispensing information for prescribed medications.
+- resource_id: poe
+  columns:
+  - poe_id
+  - poe_seq
+  - subject_id
+  - hadm_id
+  - ordertime
+  - order_type
+  - order_subtype
+  - transaction_type
+  - discontinue_of_poe_id
+  - discontinued_by_poe_id
+  - order_provider_id
+  - order_status
+  paths:
+  - raw/hosp/poe.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 666594177
+    human_readable: 635.7 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 12
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/poe/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Provider orders made in the hospital relating to patient care.
+- resource_id: poe_detail
+  columns:
+  - poe_id
+  - poe_seq
+  - subject_id
+  - field_name
+  - field_value
+  paths:
+  - raw/hosp/poe_detail.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_detail_table
+  size_summary:
+    total_bytes: 55267894
+    human_readable: 52.7 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 5
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/poe_detail/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Supplementary key-value detail fields for provider orders.
+- resource_id: prescriptions
+  columns:
+  - subject_id
+  - hadm_id
+  - pharmacy_id
+  - poe_id
+  - poe_seq
+  - order_provider_id
+  - starttime
+  - stoptime
+  - drug_type
+  - drug
+  - formulary_drug_cd
+  - gsn
+  - ndc
+  - prod_strength
+  - form_rx
+  - dose_val_rx
+  - dose_unit_rx
+  - form_val_disp
+  - form_unit_disp
+  - doses_per_24_hrs
+  - route
+  paths:
+  - raw/hosp/prescriptions.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 606298611
+    human_readable: 578.2 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 21
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/prescriptions/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Medication prescriptions including drug identifiers, dosing, route, and timing.
+- resource_id: procedures_icd
+  columns:
+  - subject_id
+  - hadm_id
+  - seq_num
+  - chartdate
+  - icd_code
+  - icd_version
+  paths:
+  - raw/hosp/procedures_icd.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 7777324
+    human_readable: 7.4 MB
+  count_summary:
+    file_count: 1
+    row_count: 859655
+    column_count: 6
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/procedures_icd/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Billed ICD-9/ICD-10 procedures assigned to hospitalizations.
+- resource_id: provider
+  columns:
+  - provider_id
+  paths:
+  - raw/hosp/provider.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: metadata_table
+  size_summary:
+    total_bytes: 127330
+    human_readable: 124.3 KB
+  count_summary:
+    file_count: 1
+    row_count: 42244
+    column_count: 1
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/provider/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Deidentified provider identifiers used across hospital module tables.
+- resource_id: services
+  columns:
+  - subject_id
+  - hadm_id
+  - transfertime
+  - prev_service
+  - curr_service
+  paths:
+  - raw/hosp/services.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: table
+  size_summary:
+    total_bytes: 8569241
+    human_readable: 8.2 MB
+  count_summary:
+    file_count: 1
+    row_count: 593071
+    column_count: 5
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/services/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: services table.
+- resource_id: transfers
+  columns:
+  - subject_id
+  - hadm_id
+  - transfer_id
+  - eventtype
+  - careunit
+  - intime
+  - outtime
+  paths:
+  - raw/hosp/transfers.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: entity_table
+  size_summary:
+    total_bytes: 46185771
+    human_readable: 44.0 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 7
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/hosp/transfers/
+  - https://mimic.mit.edu/docs/iv/modules/hosp/
+  notes: Patient movement between hospital care locations, including ICU stay identifiers when applicable.
+- resource_id: caregiver
+  columns:
+  - caregiver_id
+  paths:
+  - raw/icu/caregiver.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: metadata_table
+  size_summary:
+    total_bytes: 41566
+    human_readable: 40.6 KB
+  count_summary:
+    file_count: 1
+    row_count: 17984
+    column_count: 1
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/caregiver/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Deidentified caregiver identifiers used by ICU event tables.
+- resource_id: chartevents
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - caregiver_id
+  - charttime
+  - storetime
+  - itemid
+  - value
+  - valuenum
+  - valueuom
+  - warning
+  paths:
+  - raw/icu/chartevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 3502392765
+    human_readable: 3.3 GB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 11
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/chartevents/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Charted ICU observations containing most documented ICU measurements.
+- resource_id: d_items
+  columns:
+  - itemid
+  - label
+  - abbreviation
+  - linksto
+  - category
+  - unitname
+  - param_type
+  - lownormalvalue
+  - highnormalvalue
+  paths:
+  - raw/icu/d_items.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: data_dictionary
+  size_summary:
+    total_bytes: 58741
+    human_readable: 57.4 KB
+  count_summary:
+    file_count: 1
+    row_count: 4095
+    column_count: 9
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/d_items/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Dimension table describing item identifiers recorded in ICU event tables.
+- resource_id: datetimeevents
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - caregiver_id
+  - charttime
+  - storetime
+  - itemid
+  - value
+  - valueuom
+  - warning
+  paths:
+  - raw/icu/datetimeevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 63481196
+    human_readable: 60.5 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 10
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/datetimeevents/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: ICU events where the documented value is a date or time.
+- resource_id: icustays
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - first_careunit
+  - last_careunit
+  - intime
+  - outtime
+  - los
+  paths:
+  - raw/icu/icustays.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: entity_table
+  size_summary:
+    total_bytes: 3342355
+    human_readable: 3.2 MB
+  count_summary:
+    file_count: 1
+    row_count: 94458
+    column_count: 8
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/icustays/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Tracking information for ICU stays including admission and discharge times.
+- resource_id: ingredientevents
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - caregiver_id
+  - starttime
+  - endtime
+  - storetime
+  - itemid
+  - amount
+  - amountuom
+  - rate
+  - rateuom
+  - orderid
+  - linkorderid
+  - statusdescription
+  - originalamount
+  - originalrate
+  paths:
+  - raw/icu/ingredientevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_detail_table
+  size_summary:
+    total_bytes: 311642048
+    human_readable: 297.2 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 17
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/ingredientevents/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Ingredient components of ICU administrations, including nutritional and water content.
+- resource_id: inputevents
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - caregiver_id
+  - starttime
+  - endtime
+  - storetime
+  - itemid
+  - amount
+  - amountuom
+  - rate
+  - rateuom
+  - orderid
+  - linkorderid
+  - ordercategoryname
+  - secondaryordercategoryname
+  - ordercomponenttypedescription
+  - ordercategorydescription
+  - patientweight
+  - totalamount
+  - totalamountuom
+  - isopenbag
+  - continueinnextdept
+  - statusdescription
+  - originalamount
+  - originalrate
+  paths:
+  - raw/icu/inputevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 401088206
+    human_readable: 382.5 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 26
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/inputevents/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Continuous infusions and intermittent administrations documented in the ICU.
+- resource_id: outputevents
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - caregiver_id
+  - charttime
+  - storetime
+  - itemid
+  - value
+  - valueuom
+  paths:
+  - raw/icu/outputevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 49307639
+    human_readable: 47.0 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 9
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/outputevents/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Patient output events such as urine or drainage measurements.
+- resource_id: procedureevents
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - caregiver_id
+  - starttime
+  - endtime
+  - storetime
+  - itemid
+  - value
+  - valueuom
+  - location
+  - locationcategory
+  - orderid
+  - linkorderid
+  - ordercategoryname
+  - ordercategorydescription
+  - patientweight
+  - isopenbag
+  - continueinnextdept
+  - statusdescription
+  - originalamount
+  - originalrate
+  paths:
+  - raw/icu/procedureevents.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 24096834
+    human_readable: 23.0 MB
+  count_summary:
+    file_count: 1
+    row_count: 808706
+    column_count: 22
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://mimic.mit.edu/docs/iv/modules/icu/procedureevents/
+  - https://mimic.mit.edu/docs/iv/modules/icu/
+  notes: Procedures documented during ICU care.
+- resource_id: changelog_txt
+  columns: []
+  paths:
+  - raw/CHANGELOG.txt
+  modality: documentation
+  file_format: text
+  compression: none
+  role: release_notes
+  size_summary:
+    total_bytes: 15199
+    human_readable: 14.8 KB
+  count_summary:
+    file_count: 1
+  readable: true
+  reader_hint: plain text
+  source_evidence:
+  - local raw documentation file
+  notes: Local release notes confirming MIMIC-IV v3.1.
+- resource_id: license_txt
+  columns: []
+  paths:
+  - raw/LICENSE.txt
+  modality: documentation
+  file_format: text
+  compression: none
+  role: license
+  size_summary:
+    total_bytes: 2518
+    human_readable: 2.5 KB
+  count_summary:
+    file_count: 1
+  readable: true
+  reader_hint: plain text
+  source_evidence:
+  - local raw documentation file
+  notes: Local dataset license file.
+- resource_id: sha256sums_txt
+  columns: []
+  paths:
+  - raw/SHA256SUMS.txt
+  modality: documentation
+  file_format: text
+  compression: none
+  role: manifest
+  size_summary:
+    total_bytes: 2884
+    human_readable: 2.8 KB
+  count_summary:
+    file_count: 1
+  readable: true
+  reader_hint: plain text
+  source_evidence:
+  - local raw documentation file
+  notes: Local checksum manifest for raw files.
