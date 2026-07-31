@@ -7,7 +7,6 @@ IMAGE_NAME="${MEDAI_IMAGE:-medai:local}"
 paper=""
 repo=""
 data=""
-output=""
 provider="codex"
 siliconflow_config=""
 forwarded=()
@@ -26,10 +25,9 @@ while [[ $# -gt 0 ]]; do
             data="$(realpath "$2")"
             shift 2
             ;;
-        --output)
-            mkdir -p "$2"
-            output="$(realpath "$2")"
-            shift 2
+        --output|--output=*)
+            echo "ERROR: output is created automatically under $PROJECT_ROOT/runs" >&2
+            exit 2
             ;;
         --provider)
             provider="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
@@ -41,7 +39,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat <<'EOF'
-Usage: ./medai --paper PAPER.pdf --provider PROVIDER --output DIR [options]
+Usage: ./medai --paper PAPER.pdf --provider PROVIDER [options]
 
 Options:
   --repo DIR
@@ -64,10 +62,6 @@ if [[ -z "$paper" || ! -f "$paper" ]]; then
     echo "ERROR: --paper must be an existing PDF file" >&2
     exit 2
 fi
-if [[ -z "$output" ]]; then
-    echo "ERROR: --output is required" >&2
-    exit 2
-fi
 if [[ -n "$repo" && ! -d "$repo" ]]; then
     echo "ERROR: --repo must be an existing directory" >&2
     exit 2
@@ -84,14 +78,19 @@ if [[ "$provider" == "codex-siliconflow" && ( -z "$siliconflow_config" || ! -f "
     echo "ERROR: codex-siliconflow requires --siliconflow-config" >&2
     exit 2
 fi
-if [[ -n "$repo" && ( "$output" == "$repo" || "$output" == "$repo/"* ) ]]; then
-    echo "ERROR: --output cannot be inside --repo" >&2
-    exit 2
-fi
-if [[ -n "$data" && ( "$output" == "$data" || "$output" == "$data/"* ) ]]; then
-    echo "ERROR: --output cannot be inside --data" >&2
-    exit 2
-fi
+paper_name="$(basename "$paper")"
+paper_name="${paper_name%.*}"
+paper_name="$(printf '%s' "$paper_name" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//')"
+[[ -n "$paper_name" ]] || paper_name="paper"
+run_prefix="$(date -u +%Y%m%dT%H%M%SZ)_${paper_name}"
+output="$PROJECT_ROOT/runs/$run_prefix"
+run_suffix=1
+mkdir -p "$PROJECT_ROOT/runs"
+while ! mkdir "$output" 2>/dev/null; do
+    output="$PROJECT_ROOT/runs/${run_prefix}_$run_suffix"
+    run_suffix=$((run_suffix + 1))
+done
+printf 'Run output: %s\n' "$output"
 
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
     docker build -f "$PROJECT_ROOT/docker/Dockerfile" -t "$IMAGE_NAME" "$PROJECT_ROOT"

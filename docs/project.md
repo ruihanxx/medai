@@ -2,11 +2,13 @@
 
 ## CLI and isolation
 
-`./medai` requires `--paper`, `--provider`, and `--output`; `--repo` and
-`--data` are optional. Supported providers are `claude`, `codex`, and
-`codex-siliconflow`. Paper, repository, data, provider configuration, and CLI
-credentials are mounted read-only. The output directory is writable and may
-not be placed inside the repository or data input.
+`./medai` requires `--paper` and `--provider`; `--repo` and `--data` are
+optional. Supported providers are `claude`, `codex`, and `codex-siliconflow`.
+Paper, repository, data, provider configuration, and CLI credentials are
+mounted read-only. Each invocation creates a unique run directory under the
+repository-root `runs/` directory, named from its UTC start time and paper
+filename. That run directory is the only writable host path mounted into the
+container.
 
 The `codex` provider accepts `--codex-model` and
 `--codex-reasoning-effort`. When omitted, these values come from
@@ -40,7 +42,7 @@ agent failure stops the run explicitly.
 ## Persistent artifacts
 
 ```text
-<output>/
+runs/<run_id>/
 ├── manifest.json
 ├── preflight/resources.json
 ├── preprocessing/paper.md

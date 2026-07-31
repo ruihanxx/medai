@@ -2,15 +2,15 @@
 
 `medai` runs an evidence-bound medical-paper replication workflow in Docker.
 The paper, optional repository, and optional local data are mounted read-only.
-Only the selected output directory is writable.
+Each run writes to a unique directory under the repository-root `runs/`
+directory; only that run directory is writable in the container.
 
 ```bash
 ./medai \
   --paper /absolute/path/paper.pdf \
   --repo /absolute/path/repository \
   --data /absolute/path/data \
-  --provider codex \
-  --output /absolute/path/run
+  --provider codex
 ```
 
 Supported providers are `claude`, `codex`, and `codex-siliconflow`. The latter
