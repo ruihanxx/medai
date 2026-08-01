@@ -113,64 +113,81 @@ class CodegenPlan(StrictModel):
     ambiguities: list[Ambiguity]
 
 
+class PlanEnvironment(StrictModel):
+    language: str
+    key_dependencies: list[str]
+    setup_hints: str
+
+
 class ReplicationStep(StrictModel):
-    step_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    description: str = Field(min_length=1)
-    command: str = Field(min_length=1)
-    expected_outputs: list[str] = Field(min_length=1)
+    id: int = Field(ge=1)
+    description: str
+    command_hint: str
+    expected_outcome: str
+    verifies: list[str]
 
 
-class ReplicationExperiment(StrictModel):
-    experiment_id: str
-    claims: list[str]
-    artifacts: list[str]
-    steps: list[ReplicationStep] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def unique_step_ids(self) -> "ReplicationExperiment":
-        step_ids = [step.step_id for step in self.steps]
-        if len(step_ids) != len(set(step_ids)):
-            raise ValueError("Replication step IDs must be unique within an experiment")
-        return self
+class RemoteComputePlan(StrictModel):
+    provider: Literal["autodl"]
+    state_path: str
+    remote_working_directory: str
+    setup_hints: list[str]
 
 
 class ReplicationPlan(StrictModel):
-    experiments: list[ReplicationExperiment] = Field(min_length=1)
+    environment: PlanEnvironment
+    steps: list[ReplicationStep] = Field(min_length=3, max_length=10)
+    remote_compute: RemoteComputePlan | None = None
 
     @model_validator(mode="after")
-    def unique_experiment_ids(self) -> "ReplicationPlan":
-        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("Replication-plan experiment IDs must be unique")
+    def unique_step_ids(self) -> "ReplicationPlan":
+        step_ids = [step.id for step in self.steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("Replication-plan step IDs must be unique")
         return self
 
 
-class ClaimResult(StrictModel):
-    claim_id: str
-    reproduced_result: Any
-    evidence: list[str] = Field(min_length=1)
+class ReplicationFix(StrictModel):
+    file_path: str
+    description: str
+    original_error: str
+    diff_snippet: str
 
 
-class ArtifactResult(StrictModel):
-    artifact_id: str
-    path: str
+class ReplicationStepOutcome(StrictModel):
+    step_id: int = Field(ge=1)
+    description: str
+    command_executed: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    output_files: list[str]
+    duration_seconds: float = Field(ge=0)
+    fixes_applied: list[ReplicationFix]
+    code_modified: bool
+    notes: str
 
 
-class ExperimentResult(StrictModel):
-    experiment_id: str
-    claims: list[ClaimResult]
-    artifacts: list[ArtifactResult]
-    commands: list[str] = Field(min_length=1)
+class ReplicationLog(StrictModel):
+    step_outcomes: list[ReplicationStepOutcome] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def unique_result_mappings(self) -> "ExperimentResult":
-        claim_ids = [claim.claim_id for claim in self.claims]
-        artifact_ids = [artifact.artifact_id for artifact in self.artifacts]
-        if len(claim_ids) != len(set(claim_ids)):
-            raise ValueError("Result claim IDs must be unique")
-        if len(artifact_ids) != len(set(artifact_ids)):
-            raise ValueError("Result artifact IDs must be unique")
+    def unique_step_ids(self) -> "ReplicationLog":
+        step_ids = [outcome.step_id for outcome in self.step_outcomes]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("Replication-log step IDs must be unique")
         return self
+
+
+class EvidenceEnvironment(StrictModel):
+    python_version: str
+    gpu_available: bool
+    gpu_model: str | None
+    key_packages: dict[str, str]
+
+
+class EvidenceSummary(StrictModel):
+    environment: EvidenceEnvironment
 
 
 class SmartReplicateRound(StrictModel):
@@ -244,30 +261,34 @@ def validate_data_inventory(data_dir: Path | None, inventory: DataInventory) -> 
 
 def validate_replication_plan(todo: ExperimentTodo, plan: ReplicationPlan) -> None:
     expected = {
-        experiment.experiment_id: (set(experiment.claims), set(experiment.artifacts))
+        reference
         for experiment in todo.experiments
+        for reference in (*experiment.claims, *experiment.artifacts)
     }
-    actual = {
-        experiment.experiment_id: (set(experiment.claims), set(experiment.artifacts))
-        for experiment in plan.experiments
-    }
-    if expected != actual:
-        raise ValueError("Replication plan does not match experiment claim/artifact mappings")
+    actual = {reference for step in plan.steps for reference in step.verifies}
+    unknown = actual - expected
+    missing = expected - actual
+    if unknown:
+        raise ValueError(f"Replication plan verifies unknown references: {sorted(unknown)}")
+    if missing:
+        raise ValueError(f"Replication plan is missing references: {sorted(missing)}")
 
 
-def validate_experiment_result(experiment: Experiment, result: ExperimentResult) -> None:
-    if result.experiment_id != experiment.experiment_id:
+def validate_replication_log(plan: ReplicationPlan, log: ReplicationLog) -> None:
+    planned_ids = [step.id for step in plan.steps]
+    outcome_ids = [outcome.step_id for outcome in log.step_outcomes]
+    if outcome_ids != planned_ids:
+        raise ValueError("Replication log must cover plan steps in order")
+    outcomes_by_id = {outcome.step_id: outcome for outcome in log.step_outcomes}
+    missing_outputs = [
+        step.id
+        for step in plan.steps
+        if step.verifies and not outcomes_by_id[step.id].output_files
+    ]
+    if missing_outputs:
         raise ValueError(
-            f"Result ID {result.experiment_id} does not match {experiment.experiment_id}"
+            f"Result-producing replication steps have no output files: {missing_outputs}"
         )
-    expected_claims = set(experiment.claims)
-    actual_claims = {claim.claim_id for claim in result.claims}
-    expected_artifacts = set(experiment.artifacts)
-    actual_artifacts = {artifact.artifact_id for artifact in result.artifacts}
-    if expected_claims != actual_claims:
-        raise ValueError(f"Result claim coverage does not match {experiment.experiment_id}")
-    if expected_artifacts != actual_artifacts:
-        raise ValueError(f"Result artifact coverage does not match {experiment.experiment_id}")
 
 
 def validate_smart_replicate_log(
@@ -319,6 +340,7 @@ def validate_reproduction_report(
         required_sections[2], 1
     )[0]
     risk_text = report_text.split(required_sections[2], 1)[1]
+
     def contains_identifier(text: str, identifier: str) -> bool:
         return re.search(
             rf"(?<![A-Za-z0-9_.-]){re.escape(identifier)}(?![A-Za-z0-9_.-])",

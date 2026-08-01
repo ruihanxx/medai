@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat <<'EOF'
-Usage: ./medai --paper PAPER.pdf [--provider PROVIDER] [options]
+Usage: ./medai --paper PAPER.pdf --provider PROVIDER [options]
 
 Options:
   --repo DIR

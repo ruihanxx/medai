@@ -2,9 +2,8 @@
 
 ## CLI and isolation
 
-`./medai` requires `--paper`; `--provider` defaults to `codex`, while `--repo`
-and `--data` are optional. Supported providers are `claude`, `codex`, and
-`codex-siliconflow`.
+`./medai` requires `--paper` and `--provider`; `--repo` and `--data` are
+optional. Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. Each invocation creates a unique run directory under the
 repository-root `runs/` directory, named from its UTC start time and paper
@@ -67,7 +66,8 @@ runs/<run_id>/
 ├── codegen/codegen_transcript.jsonl
 ├── plan/replicate_plan.json
 ├── plan/plan_transcript.jsonl
-├── replication/<experiment_id>/result.json
+├── replication/replication_log.json
+├── replication/evidence_summary.json
 ├── replication/<experiment_id>/smart_replicate_log.json  # smart mode only
 ├── replication/replication_transcript.jsonl
 ├── report/reproduction_report.md
@@ -80,12 +80,12 @@ runs/<run_id>/
 Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
 record a `final` or `validation` role plus a verbatim provenance quote.
 Experiments have unique `experiment_id` values and list their claim IDs and
-paper artifact labels. The replication plan and result files must preserve
-those mappings. Each plan experiment contains ordered steps with unique `step_id`,
-`description`, an executable `command`, and shape-only `expected_outputs`.
-Claim evidence and reproduced artifacts must resolve to regular files inside
-the run's copied codebase or replication directory; a `result.json` cannot cite
-itself as evidence. The reproduction report contains exactly three top-level audit
+paper artifact labels. The replication plan uses ordered steps whose
+`verifies` lists collectively cover those claim IDs and artifact labels. The
+replication log covers the plan steps in order, and every result-producing
+step names real output files inside the copied codebase or replication
+directory. The evidence summary records the execution environment. The
+reproduction report contains exactly three top-level audit
 sections: per-experiment claim/artifact comparisons, a verdict for every
 validation anchor, and one replication risk for every `codegen_plan.json`
 ambiguity. The data inventory records the configured raw root, adapter,

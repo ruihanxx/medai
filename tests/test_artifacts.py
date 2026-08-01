@@ -7,12 +7,12 @@ from medai.models import (
     ClaimsFile,
     CodegenPlan,
     DataInventory,
-    ExperimentResult,
     ExperimentTodo,
+    ReplicationLog,
     ReplicationPlan,
     validate_data_inventory,
     validate_experiment_coverage,
-    validate_experiment_result,
+    validate_replication_log,
     validate_replication_plan,
     validate_reproduction_report,
 )
@@ -76,6 +76,39 @@ def data_inventory_payload(
     }
 
 
+def replication_plan_payload():
+    return {
+        "environment": {
+            "language": "Python",
+            "key_dependencies": ["numpy"],
+            "setup_hints": "Use the available CPU.",
+        },
+        "steps": [
+            {
+                "id": 1,
+                "description": "Install dependencies.",
+                "command_hint": "python -m pip install -r requirements.txt",
+                "expected_outcome": "Dependencies import successfully.",
+                "verifies": [],
+            },
+            {
+                "id": 2,
+                "description": "Run evaluation.",
+                "command_hint": "python run.py",
+                "expected_outcome": "Writes metrics.json.",
+                "verifies": ["C1"],
+            },
+            {
+                "id": 3,
+                "description": "Render the figure.",
+                "command_hint": "python plot.py",
+                "expected_outcome": "Writes figure.png.",
+                "verifies": ["Figure 1"],
+            },
+        ],
+    }
+
+
 def test_claim_and_experiment_coverage_is_exact():
     claims = ClaimsFile.model_validate(claims_payload())
     todo = ExperimentTodo.model_validate(todo_payload())
@@ -86,53 +119,41 @@ def test_claim_and_experiment_coverage_is_exact():
         validate_experiment_coverage(claims, todo)
 
 
-def test_replication_plan_must_preserve_mappings():
+def test_replication_plan_must_cover_claims_and_artifacts():
     todo = ExperimentTodo.model_validate(todo_payload())
-    plan = ReplicationPlan.model_validate(
-        {
-            "experiments": [
-                {
-                    "experiment_id": "E1",
-                    "claims": ["C1"],
-                    "artifacts": ["Figure 1"],
-                    "steps": [
-                        {
-                            "step_id": "S1",
-                            "description": "Run",
-                            "command": "python run.py",
-                            "expected_outputs": ["figure.png"],
-                        }
-                    ],
-                }
-            ]
-        }
-    )
+    plan = ReplicationPlan.model_validate(replication_plan_payload())
     validate_replication_plan(todo, plan)
-    plan.experiments[0].artifacts = []
-    with pytest.raises(ValueError, match="does not match"):
+    plan.steps[2].verifies = []
+    with pytest.raises(ValueError, match="missing references"):
         validate_replication_plan(todo, plan)
 
 
-def test_experiment_result_must_cover_claims_and_artifacts():
-    experiment = ExperimentTodo.model_validate(todo_payload()).experiments[0]
-    result = ExperimentResult.model_validate(
+def test_replication_log_must_follow_plan_and_record_outputs():
+    plan = ReplicationPlan.model_validate(replication_plan_payload())
+    log = ReplicationLog.model_validate(
         {
-            "experiment_id": "E1",
-            "claims": [
+            "step_outcomes": [
                 {
-                    "claim_id": "C1",
-                    "reproduced_result": 0.9,
-                    "evidence": ["metrics.json"],
+                    "step_id": step.id,
+                    "description": step.description,
+                    "command_executed": step.command_hint,
+                    "exit_code": 0,
+                    "stdout": "done",
+                    "stderr": "",
+                    "output_files": [] if step.id == 1 else [f"step-{step.id}.json"],
+                    "duration_seconds": 1.0,
+                    "fixes_applied": [],
+                    "code_modified": False,
+                    "notes": "",
                 }
+                for step in plan.steps
             ],
-            "artifacts": [{"artifact_id": "Figure 1", "path": "figure.png"}],
-            "commands": ["python run.py"],
         }
     )
-    validate_experiment_result(experiment, result)
-    result.claims = []
-    with pytest.raises(ValueError, match="claim coverage"):
-        validate_experiment_result(experiment, result)
+    validate_replication_log(plan, log)
+    log.step_outcomes[1].output_files = []
+    with pytest.raises(ValueError, match="no output files"):
+        validate_replication_log(plan, log)
 
 
 def test_duplicate_claim_ids_are_rejected():

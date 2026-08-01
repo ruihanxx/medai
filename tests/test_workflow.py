@@ -11,7 +11,7 @@ from medai.workflow import (
     create_workflow,
     release_run_computation_instance,
     replicate_agent_node,
-    resolve_run_evidence_path,
+    resolve_replication_output,
 )
 
 
@@ -128,21 +128,34 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
             (output / "plan" / "replicate_plan.json").write_text(
                 json.dumps(
                     {
-                        "experiments": [
+                        "environment": {
+                            "language": "Python",
+                            "key_dependencies": [],
+                            "setup_hints": "Use the local CPU.",
+                        },
+                        "steps": [
                             {
-                                "experiment_id": "E1",
-                                "claims": ["C1"],
-                                "artifacts": ["Figure 1"],
-                                "steps": [
-                                    {
-                                        "step_id": "S1",
-                                        "description": "Run",
-                                        "command": "python run.py",
-                                        "expected_outputs": ["figure.png"],
-                                    }
-                                ],
-                            }
-                        ]
+                                "id": 1,
+                                "description": "Prepare the environment.",
+                                "command_hint": "python --version",
+                                "expected_outcome": "Prints a Python version.",
+                                "verifies": [],
+                            },
+                            {
+                                "id": 2,
+                                "description": "Run evaluation.",
+                                "command_hint": "python run.py",
+                                "expected_outcome": "Writes metrics.json.",
+                                "verifies": ["C1"],
+                            },
+                            {
+                                "id": 3,
+                                "description": "Render the figure.",
+                                "command_hint": "python plot.py",
+                                "expected_outcome": "Writes figure.png.",
+                                "verifies": ["Figure 1"],
+                            },
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -154,24 +167,63 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
             (result_dir / "metrics.json").write_text(
                 '{"accuracy": 0.89}\n', encoding="utf-8"
             )
-            (result_dir / "result.json").write_text(
+            (output / "replication" / "replication_log.json").write_text(
                 json.dumps(
                     {
-                        "experiment_id": "E1",
-                        "claims": [
+                        "step_outcomes": [
                             {
-                                "claim_id": "C1",
-                                "reproduced_result": 0.89,
-                                "evidence": ["replication/E1/metrics.json"],
-                            }
-                        ],
-                        "artifacts": [
+                                "step_id": 1,
+                                "description": "Prepare the environment.",
+                                "command_executed": "python --version",
+                                "exit_code": 0,
+                                "stdout": "Python 3.11",
+                                "stderr": "",
+                                "output_files": [],
+                                "duration_seconds": 0.1,
+                                "fixes_applied": [],
+                                "code_modified": False,
+                                "notes": "",
+                            },
                             {
-                                "artifact_id": "Figure 1",
-                                "path": "replication/E1/figure.png",
-                            }
-                        ],
-                        "commands": ["python run.py"],
+                                "step_id": 2,
+                                "description": "Run evaluation.",
+                                "command_executed": "python run.py",
+                                "exit_code": 0,
+                                "stdout": "accuracy=0.89",
+                                "stderr": "",
+                                "output_files": ["replication/E1/metrics.json"],
+                                "duration_seconds": 1.0,
+                                "fixes_applied": [],
+                                "code_modified": False,
+                                "notes": "",
+                            },
+                            {
+                                "step_id": 3,
+                                "description": "Render the figure.",
+                                "command_executed": "python plot.py",
+                                "exit_code": 0,
+                                "stdout": "wrote figure.png",
+                                "stderr": "",
+                                "output_files": ["replication/E1/figure.png"],
+                                "duration_seconds": 1.0,
+                                "fixes_applied": [],
+                                "code_modified": False,
+                                "notes": "",
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (output / "replication" / "evidence_summary.json").write_text(
+                json.dumps(
+                    {
+                        "environment": {
+                            "python_version": "3.11",
+                            "gpu_available": False,
+                            "gpu_model": None,
+                            "key_packages": {},
+                        }
                     }
                 ),
                 encoding="utf-8",
@@ -230,17 +282,19 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert '"status": "not_supplied"' in codegen_prompt
     assert "/explore-data/" not in codegen_prompt
     plan_prompt = (output / "prompts" / "plan.md").read_text(encoding="utf-8")
-    assert '"experiments"' in plan_prompt
-    assert '"step_id"' in plan_prompt
-    assert '"expected_outputs"' in plan_prompt
-    assert '"command_hint"' not in plan_prompt
-    assert '"verifies"' not in plan_prompt
-    replicate_prompt = (output / "prompts" / "replicate.md").read_text(encoding="utf-8")
-    assert "<experiment_id>/result.json" in replicate_prompt
-    assert '"reproduced_result"' in replicate_prompt
-    assert "replication_log.json" not in replicate_prompt
-    assert "evidence_summary.json" not in replicate_prompt
+    assert '"environment"' in plan_prompt
+    assert '"command_hint"' in plan_prompt
+    assert '"verifies"' in plan_prompt
+    replication_prompt = (output / "prompts" / "replicate.md").read_text(
+        encoding="utf-8"
+    )
+    assert "replication_log.json" in replication_prompt
+    assert "evidence_summary.json" in replication_prompt
     report_prompt = (output / "prompts" / "report_E1.md").read_text(encoding="utf-8")
+    assert str(output / "plan" / "replicate_plan.json") in report_prompt
+    assert "replication_log.json" in report_prompt
+    assert "evidence_summary.json" in report_prompt
+    assert "result.json" not in report_prompt
     assert "## 1. Per-experiment reports" in report_prompt
     assert "## 2. Validation claim assessment" in report_prompt
     assert "## 3. Replication risk list" in report_prompt
@@ -258,27 +312,20 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     ]
 
 
-def test_evidence_paths_are_confined_to_run_outputs(tmp_path: Path):
+def test_replication_outputs_stay_inside_run_roots(tmp_path: Path):
     codebase = tmp_path / "codebase"
     replication = tmp_path / "replication"
     codebase.mkdir()
     replication.mkdir()
     evidence = replication / "E1" / "metrics.json"
     evidence.parent.mkdir()
-    evidence.write_text('{"accuracy": 0.9}\n', encoding="utf-8")
+    evidence.write_text("{}\n", encoding="utf-8")
 
-    assert resolve_run_evidence_path("E1/metrics.json", codebase, replication) == evidence
-    assert (
-        resolve_run_evidence_path("replication/E1/metrics.json", codebase, replication)
-        == evidence
-    )
-
+    assert resolve_replication_output("E1/metrics.json", codebase, replication) == evidence
     outside = tmp_path / "outside.json"
     outside.write_text("{}\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="inside the copied codebase"):
-        resolve_run_evidence_path(str(outside), codebase, replication)
-    with pytest.raises(RuntimeError, match="regular file"):
-        resolve_run_evidence_path("E1", codebase, replication)
+        resolve_replication_output(str(outside), codebase, replication)
 
 
 def test_smart_replicate_injects_anchors_and_requires_round_log(
@@ -341,6 +388,43 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
         ),
         encoding="utf-8",
     )
+    replicate_plan_path = output / "plan" / "replicate_plan.json"
+    replicate_plan_path.parent.mkdir()
+    replicate_plan_path.write_text(
+        json.dumps(
+            {
+                "environment": {
+                    "language": "Python",
+                    "key_dependencies": [],
+                    "setup_hints": "Use the local CPU.",
+                },
+                "steps": [
+                    {
+                        "id": 1,
+                        "description": "Prepare.",
+                        "command_hint": "python --version",
+                        "expected_outcome": "Prints version.",
+                        "verifies": [],
+                    },
+                    {
+                        "id": 2,
+                        "description": "Run.",
+                        "command_hint": "python run.py",
+                        "expected_outcome": "Writes metrics.",
+                        "verifies": ["C1"],
+                    },
+                    {
+                        "id": 3,
+                        "description": "Render.",
+                        "command_hint": "python plot.py",
+                        "expected_outcome": "Writes figure.",
+                        "verifies": ["Figure 1"],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def fake_agent(*, prompt_path, transcript_path, **kwargs):
         transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
@@ -348,21 +432,38 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
         result_dir.mkdir()
         artifact_path = result_dir / "figure.png"
         artifact_path.write_bytes(b"png")
-        (result_dir / "result.json").write_text(
+        (output / "replication" / "replication_log.json").write_text(
             json.dumps(
                 {
-                    "experiment_id": "E1",
-                    "claims": [
+                    "step_outcomes": [
                         {
-                            "claim_id": "C1",
-                            "reproduced_result": 0.89,
-                            "evidence": [str(artifact_path)],
+                            "step_id": step_id,
+                            "description": "Run step.",
+                            "command_executed": "python run.py",
+                            "exit_code": 0,
+                            "stdout": "done",
+                            "stderr": "",
+                            "output_files": [] if step_id == 1 else [str(artifact_path)],
+                            "duration_seconds": 1.0,
+                            "fixes_applied": [],
+                            "code_modified": False,
+                            "notes": "",
                         }
-                    ],
-                    "artifacts": [
-                        {"artifact_id": "Figure 1", "path": str(artifact_path)}
-                    ],
-                    "commands": ["python run.py"],
+                        for step_id in (1, 2, 3)
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        (output / "replication" / "evidence_summary.json").write_text(
+            json.dumps(
+                {
+                    "environment": {
+                        "python_version": "3.11",
+                        "gpu_available": False,
+                        "gpu_model": None,
+                        "key_packages": {},
+                    }
                 }
             ),
             encoding="utf-8",
@@ -397,7 +498,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
             "config": config,
             "claims_path": str(claims_path),
             "experiments_path": str(experiments_path),
-            "replicate_plan_path": str(output / "plan" / "replicate_plan.json"),
+            "replicate_plan_path": str(replicate_plan_path),
             "codebase_dir": str(codebase),
         }
     )

@@ -149,8 +149,8 @@ and applied later. If this run does not naturally encounter an omission, leave t
 
 ### 2.5. Capture the plan to disk
 
-Before writing code, write `{{ codegen_plan_path }}` with your decisions so
-they are inspectable and machine-readable. Schema:
+Before writing code, write `codegen_plan.json` at the codebase root with
+your decisions so they are inspectable and machine-readable. Schema:
 
 ```json
 {

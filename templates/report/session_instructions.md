@@ -7,9 +7,13 @@ Read:
 - Paper claims: `{{ claims_path }}`
 - Paper Markdown and figures: `{{ paper_markdown }}`, `{{ paper_artifacts }}`
 - All experiment definitions: `{{ experiments_path }}`
-- All replication results: `{{ replication_dir }}/<experiment_id>/result.json`
+- Replication plan: `{{ replicate_plan_path }}`
+- Replication step log: `{{ replication_log_path }}`
+- Replication environment summary: `{{ evidence_summary_path }}`
+- Replication output files: paths listed in `replication_log.json["step_outcomes"]`;
+  resolve relative paths against `{{ codebase_dir }}` and then `{{ replication_dir }}`
+- Smart-replication audit logs when present: `{{ replication_dir }}/<experiment_id>/smart_replicate_log.json`
 - Experiment definition: `{{ experiment_json }}`
-- Replication result: `{{ result_path }}`
 - Code-generation decisions and ambiguities: `{{ codegen_plan_path }}`
 
 The ambiguity records are also provided here to make their required coverage
@@ -40,7 +44,8 @@ subsection include:
 1. A claim comparison table with one row for every claim assigned to the
    experiment. Each row must contain the claim ID and role, the verbatim paper
    quote from `provenance.quote`, page/section, `paper_result`, the actual
-   `reproduced_result`, evidence paths, and a direct comparison. Do not replace
+   reproduced result derived from the execution log and its output files,
+   evidence paths, and a direct comparison. Do not replace
    the quote with a paraphrase. If the paper result or evidence is absent,
    write `not reported` or `not produced`.
 2. An artifact comparison table with one row for every requested artifact.

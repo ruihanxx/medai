@@ -22,13 +22,14 @@ from medai.models import (
     CodegenPlan,
     DataInventory,
     DatasetPatchFile,
-    ExperimentResult,
+    EvidenceSummary,
     ExperimentTodo,
+    ReplicationLog,
     ReplicationPlan,
     SmartReplicateLog,
     validate_data_inventory,
     validate_experiment_coverage,
-    validate_experiment_result,
+    validate_replication_log,
     validate_replication_plan,
     validate_reproduction_report,
     validate_smart_replicate_log,
@@ -60,7 +61,7 @@ def skills_dir() -> Path:
     return Path(__file__).parent / "templates" / "skills"
 
 
-def resolve_run_evidence_path(
+def resolve_replication_output(
     value: str,
     codebase_dir: Path,
     replication_dir: Path,
@@ -79,7 +80,7 @@ def resolve_run_evidence_path(
         if any(resolved.is_relative_to(root) for root in allowed_roots) and resolved.is_file():
             return resolved
     raise RuntimeError(
-        "Evidence path must name a regular file inside the copied codebase or "
+        "Replication output must be a regular file inside the copied codebase or "
         f"replication directory: {value}"
     )
 
@@ -307,12 +308,20 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     record_stage(config.output, "replicate_agent", "running")
     transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
-    claims_by_id = {}
-    smart_anchors = "[]"
-    if config.smart_replicate:
-        claims = load_model(Path(state["claims_path"]), ClaimsFile)
-        claims_by_id = {claim.claim_id: claim for claim in claims.claims}
-        smart_anchors = json.dumps(
+    claims = load_model(Path(state["claims_path"]), ClaimsFile)
+    claims_by_id = {claim.claim_id: claim for claim in claims.claims}
+    prompt_path = render_prompt(
+        "replication/session_instructions.md",
+        config.output / "prompts" / "replicate.md",
+        replicate_plan_path=state["replicate_plan_path"],
+        codebase_dir=state["codebase_dir"],
+        replication_dir=config.output / "replication",
+        skills_dir=skills_dir(),
+        computation_provider_state_path=(
+            config.output / "remote_compute" / "instance.json"
+        ),
+        smart=config.smart_replicate,
+        smart_anchors=json.dumps(
             [
                 {
                     "claim_id": claim_id,
@@ -325,19 +334,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
             ],
             ensure_ascii=False,
             indent=2,
-        )
-    prompt_path = render_prompt(
-        "replication/session_instructions.md",
-        config.output / "prompts" / "replicate.md",
-        replicate_plan_path=state["replicate_plan_path"],
-        codebase_dir=state["codebase_dir"],
-        replication_dir=config.output / "replication",
-        skills_dir=skills_dir(),
-        computation_provider_state_path=(
-            config.output / "remote_compute" / "instance.json"
         ),
-        smart=config.smart_replicate,
-        smart_anchors=smart_anchors,
     )
     run_agent(
         provider=config.provider,
@@ -350,47 +347,34 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     )
 
     replication_dir = config.output / "replication"
-    result_metadata_paths = {
-        (replication_dir / experiment.experiment_id / "result.json").resolve()
-        for experiment in experiments.experiments
+    replication_log_path = replication_dir / "replication_log.json"
+    evidence_summary_path = replication_dir / "evidence_summary.json"
+    plan = load_model(Path(state["replicate_plan_path"]), ReplicationPlan)
+    replication_log = load_model(replication_log_path, ReplicationLog)
+    validate_replication_log(plan, replication_log)
+    load_model(evidence_summary_path, EvidenceSummary)
+    managed_artifacts = {
+        replication_log_path.resolve(),
+        evidence_summary_path.resolve(),
     }
-    result_paths = []
-    smart_log_paths = []
-    for experiment in experiments.experiments:
-        result_path = (
-            config.output
-            / "replication"
-            / experiment.experiment_id
-            / "result.json"
-        )
-        result = load_model(result_path, ExperimentResult)
-        validate_experiment_result(experiment, result)
-        for claim in result.claims:
-            for evidence in claim.evidence:
-                resolved = resolve_run_evidence_path(
-                    evidence,
-                    Path(state["codebase_dir"]),
-                    replication_dir,
-                )
-                if resolved in result_metadata_paths:
-                    raise RuntimeError(
-                        f"Claim evidence cannot cite result.json for {claim.claim_id}: {evidence}"
-                    )
-        for artifact in result.artifacts:
-            resolved = resolve_run_evidence_path(
-                artifact.path,
+    for outcome in replication_log.step_outcomes:
+        for output_file in outcome.output_files:
+            resolved = resolve_replication_output(
+                output_file,
                 Path(state["codebase_dir"]),
                 replication_dir,
             )
-            if resolved in result_metadata_paths:
+            if resolved in managed_artifacts:
                 raise RuntimeError(
-                    f"Artifact evidence cannot cite result.json for "
-                    f"{artifact.artifact_id}: {artifact.path}"
+                    f"Replication step {outcome.step_id} cannot cite a managed log "
+                    f"as its output: {output_file}"
                 )
-        if config.smart_replicate:
+
+    smart_log_paths = []
+    if config.smart_replicate:
+        for experiment in experiments.experiments:
             smart_log_path = (
-                config.output
-                / "replication"
+                replication_dir
                 / experiment.experiment_id
                 / "smart_replicate_log.json"
             )
@@ -404,13 +388,17 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
                 },
             )
             smart_log_paths.append(str(smart_log_path))
-        result_paths.append(str(result_path))
 
     record_stage(
         config.output,
         "replicate_agent",
         "completed",
-        outputs=[*result_paths, *smart_log_paths, str(transcript_path)],
+        outputs=[
+            str(replication_log_path),
+            str(evidence_summary_path),
+            *smart_log_paths,
+            str(transcript_path),
+        ],
     )
     return {}
 
@@ -441,19 +429,21 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             paper_markdown=state["paper_markdown"],
             paper_artifacts=config.output / "preprocessing" / "artifacts",
             experiments_path=state["experiments_path"],
+            replicate_plan_path=state["replicate_plan_path"],
+            codebase_dir=state["codebase_dir"],
             replication_dir=config.output / "replication",
+            replication_log_path=(
+                config.output / "replication" / "replication_log.json"
+            ),
+            evidence_summary_path=(
+                config.output / "replication" / "evidence_summary.json"
+            ),
             experiment_json=json.dumps(experiment_payload, ensure_ascii=False, indent=2),
             codegen_plan_path=codegen_plan_path,
             ambiguities_json=json.dumps(
                 [ambiguity.model_dump(mode="json") for ambiguity in codegen_plan.ambiguities],
                 ensure_ascii=False,
                 indent=2,
-            ),
-            result_path=(
-                config.output
-                / "replication"
-                / experiment.experiment_id
-                / "result.json"
             ),
         )
         run_agent(

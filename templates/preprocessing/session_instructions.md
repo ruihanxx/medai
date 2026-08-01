@@ -82,8 +82,7 @@ DO NOT extract:
 - Background, motivation, or related-work claims.
 - Limitations or future-work statements.
 - Citations to other papers.
-- Standalone experiments whose only purpose is a Figure/Table label. Record
-  requested Figure/Table outputs in the enclosing experiment's `artifacts`.
+- Figures, Tables.
 
 Output a JSON object with this top-level shape:
 ```json
