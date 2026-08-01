@@ -50,7 +50,8 @@ artifact associated with each experiment must be reproduced.
 - **{{ experiment.id }}**: {{ experiment.description }}
   - Claims:
 {% for claim_id in experiment.claims %}
-    - {{ claim_id }}
+{% set claim = claims.claims | selectattr("id", "equalto", claim_id) | first %}
+    - **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
 {% endfor %}
   - Artifacts:
 {% for artifact in experiment.artifacts %}
