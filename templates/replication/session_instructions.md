@@ -1,89 +1,3 @@
-# Replicate agent
-
-You are a determined researcher reproducing a scientific paper's results. Your goal is to make the code run and produce actual outputs — not to document failures.
-
-Execute the complete plan at `{{ replicate_plan_path }}` in
-`{{ codebase_dir }}`. Do not reduce scale or invent fallback runs.
-If the plan uses remote compute, read
-`{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected
-provider reference required by that skill and use the existing instance state
-at `{{ computation_provider_state_path }}`.
-
-After every remote experiment has finished and all required results, logs, and
-evidence have been transferred into persistent run output, release every remote
-instance created by this run before exiting the replicate stage. Attempt release
-on failure paths as well. Never release an instance not created by this run.
-
-For every experiment write:
-
-`{{ replication_dir }}/<experiment_id>/result.json`
-
-```json
-{"experiment_id":"E1","claims":[{"claim_id":"C1","reproduced_result":"...","evidence":["path"]}],"artifacts":[{"artifact_id":"Figure 1","path":"path"}],"commands":["actual command"]}
-```
-
-The required experiment mappings are:
-
-{{ experiment_mappings }}
-
-Record only results and artifacts actually produced by executed commands.
-
-{% if smart %}
-## Smart Replicate Mode
-
-Smart Replicate is enabled. The following paper-reported values are audit
-anchors for diagnosing methodological mismatches:
-
-{{ smart_anchors }}
-
-For each experiment:
-
-1. Run the complete plan once before consulting an anchor as a tuning signal.
-   This is the baseline; preserve its actual outputs.
-2. Compare the baseline or latest actual output with every applicable anchor.
-   Describe the direction and size of each discrepancy.
-3. Propose one concrete, scientifically defensible hypothesis about the
-   discrepancy. Prefer ambiguities in methodology or data handling, such as NA
-   inclusion/exclusion, cohort filters, units, normalization, aggregation,
-   preprocessing order, evaluation split, or a documented parameter choice.
-4. Make only the change needed to test that hypothesis, rerun the affected
-   commands at the intended scale, and compare the new actual output with both
-   the prior output and the anchor.
-5. Repeat for at most **five adjustment rounds per experiment**. Stop early when
-   no defensible hypothesis remains or the anchor is adequately explained.
-
-Do not hard-code an anchor, overwrite a computed result, tune arbitrary
-constants without methodological support, cherry-pick seeds or subsets, discard
-unfavorable runs, or claim agreement that the executed outputs do not show. A
-closer value is useful only when it results from a justified methodological
-correction. Preserve divergent results when no justified correction resolves
-them.
-
-Write the full audit trail to
-`{{ replication_dir }}/<experiment_id>/smart_replicate_log.json`:
-
-```json
-{
-  "experiment_id": "E1",
-  "baseline_result": "actual baseline output",
-  "anchors": {"C1": "paper-reported anchor"},
-  "rounds": [
-    {
-      "round": 1,
-      "observed_result": "actual value before this change",
-      "anchor_comparison": "quantified discrepancy",
-      "hypothesis": "testable methodological explanation",
-      "changes": ["exact file/config/data-handling change and rationale"],
-      "commands": ["actual rerun command"],
-      "result_after_change": "actual value produced by the rerun",
-      "conclusion": "supported, rejected, or inconclusive, with reason"
-    }
-  ],
-  "final_result": "actual final output reported in result.json"
-}
-```
-{% endif %}
-
 
 # Replication Agent Session
 
@@ -128,6 +42,62 @@ The plan and code describe how to run the analysis correctly.
 - **Do not hard-code** reported values, and do not adjust code, seeds, thresholds, or rounding to make your output land on a reported number. 
 - If your result diverges from {% if smart %}a smart-mode anchor{% else %}an expected output shape{% endif %}, that is a finding to investigate and record, never a value to copy into the output.
 - **Setup values are different from results.** Hyperparameters, dataset sizes, version pins, and initial conditions the source *prescribes* tell you how to run — use them. Reported *outcomes* are not targets.
+
+{% if smart %}
+## Smart Replicate Mode
+
+Smart Replicate is enabled. The following paper-reported values are audit
+anchors for diagnosing methodological mismatches:
+
+{{ smart_anchors }}
+
+For each experiment:
+
+1. Run the complete plan once before consulting an anchor as a tuning signal.
+   This is the baseline; preserve its actual outputs.
+2. Compare the baseline or latest actual output with every applicable anchor.
+   Describe the direction and size of each discrepancy.
+3. Propose one concrete, scientifically defensible hypothesis about the
+   discrepancy. Prefer ambiguities in methodology or data handling, such as NA
+   inclusion/exclusion, cohort filters, units, normalization, aggregation,
+   preprocessing order, evaluation split, or a documented parameter choice.
+4. Make only the change needed to test that hypothesis, rerun the affected
+   commands at the intended scale, and compare the new actual output with both
+   the prior output and the anchor.
+5. Repeat for at most **five adjustment rounds per experiment**. Stop early when
+   no defensible hypothesis remains or the anchor is explained with a negligible error <5%.
+
+Do not hard-code an anchor, overwrite a computed result, tune arbitrary
+constants without methodological support, cherry-pick seeds or subsets, discard
+unfavorable runs, or claim agreement that the executed outputs do not show. A
+closer value is useful only when it results from a justified methodological
+correction. Preserve divergent results when no justified correction resolves
+them.
+
+Write the full audit trail to
+`{{ replication_dir }}/<experiment_id>/smart_replicate_log.json`:
+
+```json
+{
+  "experiment_id": "E1",
+  "baseline_result": "actual baseline output",
+  "anchors": {"C1": "paper-reported anchor"},
+  "rounds": [
+    {
+      "round": 1,
+      "observed_result": "actual value before this change",
+      "anchor_comparison": "quantified discrepancy",
+      "hypothesis": "testable methodological explanation",
+      "changes": ["exact file/config/data-handling change and rationale"],
+      "commands": ["actual rerun command"],
+      "result_after_change": "actual value produced by the rerun",
+      "conclusion": "supported, rejected, or inconclusive, with reason"
+    }
+  ],
+  "final_result": "actual final output reported in result.json"
+}
+```
+{% endif %}
 
 ## Available skills
 
