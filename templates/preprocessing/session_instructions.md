@@ -59,6 +59,26 @@ Role Definitions
 
 For a Figure/Table validation anchor, keep the existing claim format: put the checkable observation in `description`, any explicit value in `paper_value`, and the Figure/Table label in `provenance.section`. Extract only information explicitly stated in the paper text or table, not details visible only inside an image. Do not duplicate an anchor that is also stated in prose.
 
+Example — a table reporting cohort construction after preprocessing (adapt every value to the paper; do not copy example values or placeholder text):
+```json
+{
+    "id": "C3",
+    "description": "The cohort counts and statistical characteristics after preprocessing are shown in Table 3.",
+    "role": "validation",
+    "paper_value": {
+        "cohort_count": "<count reported in Table 3>",
+        "summary_statistics": "<preprocessing-relevant statistics reported in Table 3>"
+    },
+    "units": "participants and statistic-specific units reported in Table 3",
+    "expected_output_file": "outputs/table_3_cohort_statistics.csv",
+    "provenance": {
+        "section": "Cohort construction; Table 3",
+        "page": 6,
+        "quote": "<Table 3 caption or supporting sentence, at most 200 characters>"
+    }
+}
+```
+
 When choosing tier, favor `supporting` unless the claim is clearly the paper's central reproducible result. Extract only `headline` and `supporting` claims. Setup-level configuration (e.g., "the model uses 12 layers") belongs in the replication plan, not in claims.
 
 Save the JSON to `{{ claims_path }}`.
