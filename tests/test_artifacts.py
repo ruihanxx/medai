@@ -22,7 +22,6 @@ def claims_payload():
             {
                 "claim_id": "C1",
                 "statement": "Accuracy improved.",
-                "role": "final",
                 "kind": "numeric",
                 "paper_result": 0.91,
                 "provenance": {"page": 3, "section": "Results"},
@@ -95,7 +94,6 @@ def test_replication_plan_must_preserve_mappings():
                             "description": "Run",
                             "command": "python run.py",
                             "expected_outputs": ["figure.png"],
-                            "verifies": ["C1", "Figure 1"],
                         }
                     ],
                 }

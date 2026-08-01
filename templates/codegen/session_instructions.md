@@ -38,12 +38,7 @@ Read the paper carefully. Prioritize:
   dataset specs, initial conditions, cohort construction rules.
 - **Model architecture / Algorithms** — what to build.
 
-Read the claims at `{{ claims_path }}` and experiments at
-`{{ experiments_path }}` to understand the required outputs and experiment
-structure. A `validation` claim may come from a Figure/Table; its
-`provenance.section` records that label. Resolve any linked image path relative
-to `{{ paper_markdown }}` and inspect it when needed to implement the
-corresponding intermediate check.
+Read the claims at `{{ claims_path }}` and experiments at `{{ experiments_path }}` as supplement to make it clear the output to yield and the structure of the experiment.
 
 You may also skim Results and Discussion sections for context, but
 do not memorize numerical results for hardcoding (see Self-Review).
@@ -52,23 +47,13 @@ do not memorize numerical results for hardcoding (see Self-Review).
 
 First choose the computational stack, then outline the file structure.
 
-**Match the paper's computational demands.** Infer each experiment's demands
-from the paper and implement in the language and framework the methodology
-genuinely needs, not whichever is fastest to write. If the method's scale
-depends on compiled or GPU performance — a large-N numerical simulation, an
-iterative sampling or optimization procedure with many steps, large-scale
-model training or inference — use tools that deliver it: GPU-enabled libraries
-(PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba),
-C/C++ extensions via the available gcc toolchain, or R for R-native methods —
-pure Python/NumPy on CPU is the easy default, but it is only correct when the
-paper's own scale doesn't need more. An implementation that is faithful on
-paper but cannot run at the paper's scale will fail the replication.
+**Match the paper's computational demands.** You can refer to the extracted experiment at `{{ experiments_path }}` for computational demands of each experiment. If it is recorded `"NA"`, you need to infer the computational demands from the paper. Implement in the language and framework the methodology genuinely needs, not whichever is fastest to write. If the method's scale depends on compiled or GPU performance — a large-N numerical simulation, an iterative sampling or optimization procedure with many steps, large-scale model training or inference — use tools that deliver it: GPU-enabled libraries (PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba), C/C++ extensions via the available gcc toolchain, or R for R-native methods — pure Python/NumPy on CPU is the easy default, but it is only correct when the paper's own scale doesn't need more. An implementation that is faithful on paper but cannot run at the paper's scale will fail the replication. 
 {% if gpu_info %}
 
 **This environment has local GPU resources**: {{ gpu_info | tojson }}. Compare their
 count and available VRAM with the paper's full-scale computational demands. If
-they are sufficient, use them through a GPU-enabled library (PyTorch / CuPy /
-JAX) rather than implementing the GPU-dependent work on CPU.
+they are sufficient (they don't need to be exactly the same as the paper's demand, as long as the capacity is sufficient), use them through a GPU-enabled library (PyTorch / CuPy /
+JAX) rather than implementing the GPU-dependent work on CPU. 
 {% else %}
 
 **No local NVIDIA GPU was detected during preflight.**
@@ -112,23 +97,16 @@ Do not skip, weaken, or obscure any requirement because of uncertainty. Record e
 
 Do not directly read large data files. First read the available document to get basic informations.
 
-Do not proactively search those documents for omissions. If using a document
-during this run naturally reveals information that the document omitted, append
-an entry to `{{ dataset_patch_path }}`. This file is initialized as a JSON array,
-and every entry must have exactly this form:
-
+If using a document during this run naturally reveals information that the document omitted, append an entry to `{{ dataset_patch_path }}`. This file is initialized as a JSON array, and every entry must have exactly this form:
 ```json
 {
   "file name": "dataset_graph.yaml",
   "patch_content": {}
 }
 ```
-
 Set `"file name"` to the document's file name. Set `"patch_content"` to only
 the missing content, structured like the target document so it can be reviewed
-and applied later. Preserve existing entries, do not repeat information already
-present in the document, and do not invent additions. If this run does not
-naturally encounter an omission, leave the initialized empty array unchanged.
+and applied later. If this run does not naturally encounter an omission, leave the initialized empty array unchanged. Do not proactively search those documents for omissions. Only add important omissions; it's ok to omit some not generally used details.
 
 ### 2.5. Capture the plan to disk
 
@@ -180,6 +158,7 @@ Write the code, module-by-module. Guidelines:
   Your job is to produce the codebase; verifying it imports cleanly
   is part of Self-Review, but a full training/inference run is out
   of scope.
+
 
 ### 4. Self-Review
 
@@ -292,14 +271,10 @@ that depends on it. For each such upstream step, confirm:
   `codegen_plan.json["ambiguities"]`.
 
 - **Validate intermediates against documented METHOD anchors — never against
-  final reported results.** Claims at `{{ claims_path }}` whose `role` is
-  `validation` are the available anchors, including anchors extracted from a
-  Figure/Table. If the methodology states an intermediate the step should
-  reproduce *as part of the procedure* (e.g. "features are scaled to
+  reported results.** The extracted claims at `{{claim_path}}` records the anchor claims, whose `role` attribute has value `validation`. If the methodology states an intermediate the step should reproduce *as part of the procedure* (e.g. "features are scaled to
   unit variance", "the cut leaves N=27056 records", a fold count, a member
   count, a fit coefficient), have the code assert/log its own intermediate
-  against that anchor. Use an anchor to detect divergence, never to hardcode or
-  tune the computation to the paper's answer.
+  against that anchor, and if it is off, prefer the documented alternative. 
 
 - **Sanity-check the step's output before using it downstream.** If a
   selection yields an implausible count (e.g. one sub-group far smaller than
