@@ -84,11 +84,11 @@ A step is only "unreproducible" once distinct strategies have each failed for a 
 
 - **Working directory:** `{{ codebase_dir }}/` — the writable codebase produced by the codegen stage. Run commands and keep experiment outputs here.
 - **Replication plan:** `{{ replicate_plan_path }}` (read-only) — execute every step in this plan.
-- **Result directory:** `{{ replication_dir }}/` — write each pipeline-managed result to `<experiment_id>/result.json` here.
+- **Output directory:** `{{ replication_dir }}/` — write each pipeline-managed result to `<experiment_id>/result.json` here.
 - **Skills directory:** `{{ skills_dir }}/` (read-only) — consult applicable runtime skills here.
 - **Remote-compute state:** `{{ computation_provider_state_path }}` — use this state only when the plan requires remote compute.
 
-Write only under the working directory and the result directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
+Write only under the working directory and the output directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
 
 ## Reporting Discipline
 
