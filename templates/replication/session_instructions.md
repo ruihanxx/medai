@@ -82,15 +82,13 @@ A step is only "unreproducible" once distinct strategies have each failed for a 
 
 ## Workspace Layout
 
-- **Working directory:** `{{ codebase_dir }}/` — a writable copy of the original repo. Make all your changes here.
-{% if has_repo %}- **Original repo:** `{{ repo_path }}` — read-only reference. Do not attempt to write here.
-{% endif %}{% if has_paper %}- **Paper:** `{{ paper_path }}` — the paper you are replicating. Consult it for methodology, parameters, and experimental setup. See **Reporting Discipline** below for how to treat any result values it reports.
-{% endif %}{% if has_data %}- **Pre-positioned data:** `{{ data_path }}/` (read-only). User-supplied inputs for this paper.
-{% endif %}- **Output directory:** `{{ replication_dir }}/` — save logs and evidence here.
-{% if gpu_info %}- **Hardware:** a GPU is available in this environment: {{ gpu_info }} — use it for GPU-capable steps.
-{% endif %}
+- **Working directory:** `{{ codebase_dir }}/` — the writable codebase produced by the codegen stage. Run commands and keep experiment outputs here.
+- **Replication plan:** `{{ replicate_plan_path }}` (read-only) — execute every step in this plan.
+- **Result directory:** `{{ replication_dir }}/` — write each pipeline-managed result to `<experiment_id>/result.json` here.
+- **Skills directory:** `{{ skills_dir }}/` (read-only) — consult applicable runtime skills here.
+- **Remote-compute state:** `{{ computation_provider_state_path }}` — use this state only when the plan requires remote compute.
 
-Write only under the working directory and the output directory above. Other subdirectories of the run output (`analyze/`, `verify/`, ...) belong to other pipeline phases — do not write into them.
+Write only under the working directory and the result directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
 
 ## Reporting Discipline
 
