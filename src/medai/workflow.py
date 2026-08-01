@@ -30,6 +30,7 @@ from medai.models import (
     validate_experiment_coverage,
     validate_experiment_result,
     validate_replication_plan,
+    validate_reproduction_report,
     validate_smart_replicate_log,
 )
 from medai.preprocessing import convert_pdf_to_markdown
@@ -237,10 +238,15 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     record_stage(config.output, "plan_agent", "running")
     replicate_plan_path = config.output / "plan" / "replicate_plan.json"
     transcript_path = config.output / "plan" / "plan_transcript.jsonl"
+    claims = load_model(Path(state["claims_path"]), ClaimsFile)
+    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     prompt_path = render_prompt(
         "plan/session_instructions.md",
         config.output / "prompts" / "plan.md",
         codebase_dir=state["codebase_dir"],
+        paper_markdown=state["paper_markdown"],
+        data_dir=config.data,
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
         resources_path=state["resources_path"],
@@ -249,6 +255,9 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
             config.output / "remote_compute" / "instance.json"
         ),
         replicate_plan_path=replicate_plan_path,
+        claims=claims.model_dump(mode="json"),
+        experiments=experiments.model_dump(mode="json"),
+        gpu_info=resources["gpus"],
     )
     run_agent(
         provider=config.provider,
@@ -259,7 +268,6 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
     plan = load_model(replicate_plan_path, ReplicationPlan)
     validate_replication_plan(experiments, plan)
     record_stage(
@@ -380,6 +388,9 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     record_stage(config.output, "report_agents", "running")
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    claims = load_model(Path(state["claims_path"]), ClaimsFile)
+    codegen_plan_path = Path(state["codebase_dir"]) / "codegen_plan.json"
+    codegen_plan = load_model(codegen_plan_path, CodegenPlan)
     report_path = config.output / "report" / "reproduction_report.md"
     transcript_paths = []
     for experiment in experiments.experiments:
@@ -397,7 +408,15 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             claims_path=state["claims_path"],
             paper_markdown=state["paper_markdown"],
             paper_artifacts=config.output / "preprocessing" / "artifacts",
+            experiments_path=state["experiments_path"],
+            replication_dir=config.output / "replication",
             experiment_json=json.dumps(experiment_payload, ensure_ascii=False, indent=2),
+            codegen_plan_path=codegen_plan_path,
+            ambiguities_json=json.dumps(
+                [ambiguity.model_dump(mode="json") for ambiguity in codegen_plan.ambiguities],
+                ensure_ascii=False,
+                indent=2,
+            ),
             result_path=(
                 config.output
                 / "replication"
@@ -418,15 +437,7 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             raise RuntimeError(f"Report agent did not write the shared report: {report_path}")
         transcript_paths.append(str(transcript_path))
     report_text = report_path.read_text(encoding="utf-8")
-    missing_experiments = [
-        experiment.experiment_id
-        for experiment in experiments.experiments
-        if experiment.experiment_id not in report_text
-    ]
-    if missing_experiments:
-        raise RuntimeError(
-            f"Shared report is missing experiments: {missing_experiments}"
-        )
+    validate_reproduction_report(report_text, claims, experiments, codegen_plan)
     record_stage(
         config.output,
         "report_agents",

@@ -5,6 +5,7 @@ import pytest
 
 from medai.models import (
     ClaimsFile,
+    CodegenPlan,
     DataInventory,
     ExperimentResult,
     ExperimentTodo,
@@ -13,6 +14,7 @@ from medai.models import (
     validate_experiment_coverage,
     validate_experiment_result,
     validate_replication_plan,
+    validate_reproduction_report,
 )
 
 
@@ -22,9 +24,14 @@ def claims_payload():
             {
                 "claim_id": "C1",
                 "statement": "Accuracy improved.",
+                "role": "validation",
                 "kind": "numeric",
                 "paper_result": 0.91,
-                "provenance": {"page": 3, "section": "Results"},
+                "provenance": {
+                    "page": 3,
+                    "section": "Results",
+                    "quote": "Accuracy improved to 0.91.",
+                },
             }
         ]
     }
@@ -175,3 +182,44 @@ def test_data_inventory_rejects_wrong_root_and_nonempty_not_supplied(tmp_path: P
     nonempty = DataInventory.model_validate(payload)
     with pytest.raises(ValueError, match="must be empty"):
         validate_data_inventory(None, nonempty)
+
+
+def test_reproduction_report_requires_all_audit_content():
+    claims = ClaimsFile.model_validate(claims_payload())
+    experiments = ExperimentTodo.model_validate(todo_payload())
+    codegen_plan = CodegenPlan.model_validate(
+        {
+            "files": [{"path": "run.py", "responsibility": "Run"}],
+            "dependency_order": ["run.py"],
+            "entry_points": ["run.py"],
+            "shared_state": "Files",
+            "ambiguities": [
+                {
+                    "question": "The batch size is unspecified.",
+                    "assumption": "Use batch size 32.",
+                }
+            ],
+        }
+    )
+    report = (
+        "## 1. Per-experiment reports\nE1 C1 Figure 1\n"
+        "## 2. Validation claim assessment\nC1 close\n"
+        "## 3. Replication risk list\n"
+        "The batch size is unspecified. Use batch size 32.\n"
+    )
+    validate_reproduction_report(report, claims, experiments, codegen_plan)
+
+    with pytest.raises(ValueError, match="required section"):
+        validate_reproduction_report(
+            report.replace("## 2. Validation claim assessment", "Validation"),
+            claims,
+            experiments,
+            codegen_plan,
+        )
+    with pytest.raises(ValueError, match="ambiguity risks"):
+        validate_reproduction_report(
+            report.replace("The batch size is unspecified.", "Unspecified input."),
+            claims,
+            experiments,
+            codegen_plan,
+        )

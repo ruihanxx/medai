@@ -1,44 +1,93 @@
 # Experiment report agent
 
-Update the single report at `{{ report_path }}` for experiment
-`{{ experiment_id }}`.
+Update the single Markdown report at `{{ report_path }}` for experiment
+`{{ experiment_id }}`. This is an evidence audit, not a narrative summary.
 
 Read:
 - Paper claims: `{{ claims_path }}`
 - Paper Markdown and figures: `{{ paper_markdown }}`, `{{ paper_artifacts }}`
+- All experiment definitions: `{{ experiments_path }}`
+- All replication results: `{{ replication_dir }}/<experiment_id>/result.json`
 - Experiment definition: `{{ experiment_json }}`
 - Replication result: `{{ result_path }}`
+- Code-generation decisions and ambiguities: `{{ codegen_plan_path }}`
 
-Create the report if absent. Preserve existing experiment sections. Add a
-section comparing every claim's paper result with reproduced evidence and
-recording every requested artifact and reproduced path. Do not invent missing
-evidence.
+The ambiguity records are also provided here to make their required coverage
+explicit:
 
-# Replication Report
+```json
+{{ ambiguities_json }}
+```
 
-**Status: Insufficient Specification**
-**Mode:** {{ mode }}
+Create the report if absent. When it exists, preserve other experiments and
+update the current experiment in place instead of appending a duplicate. Keep
+exactly one copy of each validation anchor and ambiguity risk. Use these exact
+top-level sections in this order:
 
-{% if mode == "repo-only" %}
-This repository was processed in repo-only mode (no paper provided).
-The replication spec source was `{{ source_path }}` — but no verifiable
-claims could be extracted from it.
-{% elif mode == "paper-only" %}
-This paper was processed in paper-only mode (no repository provided).
-The replication spec source was `{{ source_path }}` — but no verifiable
-claims could be extracted from it.
-{% else %}
-The replication spec source was `{{ source_path }}` — but no verifiable
-claims could be extracted from it.
-{% endif %}
+```markdown
+# Reproduction Report
 
-A reproducible spec needs at least one numerical, structural, or
-qualitative claim that can be verified by running the code. Suggested
-remedies:
+## 1. Per-experiment reports
+## 2. Validation claim assessment
+## 3. Replication risk list
+```
 
-- Hand-author claims in JSON (`--claims path/to/claims.json`)
-{% if not has_paper %}- Add a paper PDF (`--paper`) describing the project's claims
-{% endif %}{% if mode == "repo-only" %}- Expand the README to describe expected outputs, metrics, or figures
-{% endif %}
+## 1. Per-experiment reports
 
-No score is reported.
+Create one subsection for every experiment. In the current experiment's
+subsection include:
+
+1. A claim comparison table with one row for every claim assigned to the
+   experiment. Each row must contain the claim ID and role, the verbatim paper
+   quote from `provenance.quote`, page/section, `paper_result`, the actual
+   `reproduced_result`, evidence paths, and a direct comparison. Do not replace
+   the quote with a paraphrase. If the paper result or evidence is absent,
+   write `not reported` or `not produced`.
+2. An artifact comparison table with one row for every requested artifact.
+   Each row must contain the artifact label, the paper's original caption/table
+   text and source path, the reproduced artifact path, and a content-level
+   comparison. Locate originals through the paper Markdown and
+   `{{ paper_artifacts }}`; inspect the original and reproduced files when the
+   comparison requires it. A pair of paths alone is not a comparison. If an
+   original or reproduced artifact cannot be found, say so explicitly.
+
+Never invent paper text, values, artifact content, experimental outputs, or
+evidence. Preserve discrepancies instead of explaining them away.
+
+## 2. Validation claim assessment
+
+Include one row for every claim whose `role` is `validation`. Each row must
+identify its experiment(s), quote and paper anchor, reproduced anchor and
+evidence, discrepancy, verdict, and rationale. The verdict must be exactly one
+of:
+
+- `close`: the anchor is reproduced within the paper's stated tolerance; when
+  no tolerance is stated, a numeric anchor has relative error at most 5%, or a
+  text/structural anchor matches all explicitly checkable key conditions.
+- `not close`: evidence exists but fails that criterion.
+- `not assessable`: the paper anchor, reproduced value, or necessary evidence
+  is missing. Missing evidence is never `close`.
+
+For a numeric anchor, show the absolute difference and relative error. If the
+paper value is zero or a relative error is not meaningful, state the
+domain-appropriate comparison used. For a structured numeric anchor, assess
+every reported component and do not cherry-pick the closest component. For a
+qualitative or artifact-backed anchor, enumerate the matched and unmatched
+conditions. Judge each anchor independently; do not infer one anchor's success
+from another claim.
+If no validation claims were extracted, state
+`No validation claims were extracted from the paper.`
+
+## 3. Replication risk list
+
+Create one risk row for every object in `codegen_plan.json["ambiguities"]`.
+Copy its `question` and `assumption` verbatim, then state the mechanism by which
+that assumption could change the replication, affected experiment/claim/
+artifact IDs, severity (`low`, `medium`, or `high`) with a brief reason, and
+what evidence would resolve or reduce the risk. Do not merge ambiguities. Do
+not add generic risks that are not traceable to an ambiguity. If the ambiguity
+list is empty, state `No ambiguities were recorded in codegen_plan.json.`
+
+Before finishing, verify that the report includes all three required sections,
+the current experiment ID, every assigned claim ID and artifact label, every
+validation claim, and every ambiguity question verbatim.

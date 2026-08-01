@@ -12,14 +12,16 @@ class StrictModel(BaseModel):
 
 class Provenance(StrictModel):
     page: int = Field(ge=1)
-    section: str
+    section: str = Field(min_length=1)
+    quote: str = Field(min_length=1, max_length=200)
 
 
 class Claim(StrictModel):
     claim_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    statement: str
+    statement: str = Field(min_length=1)
+    role: Literal["final", "validation"]
     kind: Literal["text", "numeric"]
-    paper_result: Any
+    paper_result: Any = None
     provenance: Provenance
 
 
@@ -278,3 +280,72 @@ def validate_smart_replicate_log(
         raise ValueError(
             f"Smart-replicate log anchors do not match {experiment.experiment_id}"
         )
+
+
+def validate_reproduction_report(
+    report_text: str,
+    claims: ClaimsFile,
+    experiments: ExperimentTodo,
+    codegen_plan: CodegenPlan,
+) -> None:
+    required_sections = [
+        "## 1. Per-experiment reports",
+        "## 2. Validation claim assessment",
+        "## 3. Replication risk list",
+    ]
+    invalid_sections = [
+        section for section in required_sections if report_text.count(section) != 1
+    ]
+    if invalid_sections:
+        raise ValueError(
+            "Report must contain exactly one of each required section: "
+            f"{invalid_sections}"
+        )
+    section_positions = [report_text.index(section) for section in required_sections]
+    if section_positions != sorted(section_positions):
+        raise ValueError("Report required sections are out of order")
+    per_experiment_text = report_text.split(required_sections[0], 1)[1].split(
+        required_sections[1], 1
+    )[0]
+    validation_text = report_text.split(required_sections[1], 1)[1].split(
+        required_sections[2], 1
+    )[0]
+    risk_text = report_text.split(required_sections[2], 1)[1]
+    missing_experiments = [
+        experiment.experiment_id
+        for experiment in experiments.experiments
+        if experiment.experiment_id not in per_experiment_text
+    ]
+    if missing_experiments:
+        raise ValueError(f"Report is missing experiments: {missing_experiments}")
+    missing_claims = [
+        claim.claim_id
+        for claim in claims.claims
+        if claim.claim_id not in per_experiment_text
+    ]
+    if missing_claims:
+        raise ValueError(f"Report is missing claims: {missing_claims}")
+    missing_artifacts = [
+        artifact
+        for experiment in experiments.experiments
+        for artifact in experiment.artifacts
+        if artifact not in per_experiment_text
+    ]
+    if missing_artifacts:
+        raise ValueError(f"Report is missing artifacts: {missing_artifacts}")
+    missing_validation_claims = [
+        claim.claim_id
+        for claim in claims.claims
+        if claim.role == "validation" and claim.claim_id not in validation_text
+    ]
+    if missing_validation_claims:
+        raise ValueError(
+            f"Report is missing validation claim assessments: {missing_validation_claims}"
+        )
+    missing_ambiguities = [
+        ambiguity.question
+        for ambiguity in codegen_plan.ambiguities
+        if ambiguity.question not in risk_text or ambiguity.assumption not in risk_text
+    ]
+    if missing_ambiguities:
+        raise ValueError(f"Report is missing ambiguity risks: {missing_ambiguities}")

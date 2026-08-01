@@ -53,9 +53,14 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                             {
                                 "claim_id": "C1",
                                 "statement": "Accuracy is reported.",
+                                "role": "validation",
                                 "kind": "numeric",
                                 "paper_result": 0.9,
-                                "provenance": {"page": 1, "section": "Results"},
+                                "provenance": {
+                                    "page": 1,
+                                    "section": "Results",
+                                    "quote": "Accuracy was 0.9.",
+                                },
                             }
                         ]
                     }
@@ -108,7 +113,12 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                         "dependency_order": ["run.py"],
                         "entry_points": ["run.py"],
                         "shared_state": "Files",
-                        "ambiguities": [],
+                        "ambiguities": [
+                            {
+                                "question": "The batch size is unspecified.",
+                                "assumption": "Use batch size 32.",
+                            }
+                        ],
                     }
                 ),
                 encoding="utf-8",
@@ -164,7 +174,13 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
             )
         elif name == "report_E1.md":
             (output / "report" / "reproduction_report.md").write_text(
-                "# Report\n\n## E1\nCompared C1 and Figure 1.\n",
+                "# Reproduction Report\n\n"
+                "## 1. Per-experiment reports\n\n"
+                "### E1\n\nC1 compares 0.9 with 0.89. Figure 1 was reproduced.\n\n"
+                "## 2. Validation claim assessment\n\n"
+                "C1: close (1.1% relative error).\n\n"
+                "## 3. Replication risk list\n\n"
+                "The batch size is unspecified. Assumption: Use batch size 32.\n",
                 encoding="utf-8",
             )
 
@@ -208,6 +224,11 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
     assert "/explore-data/SKILL.md" in codegen_prompt
     assert "explore-data-analysis" not in codegen_prompt
+    report_prompt = (output / "prompts" / "report_E1.md").read_text(encoding="utf-8")
+    assert "## 1. Per-experiment reports" in report_prompt
+    assert "## 2. Validation claim assessment" in report_prompt
+    assert "## 3. Replication risk list" in report_prompt
+    assert "The batch size is unspecified." in report_prompt
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
     assert list(manifest["stages"]) == [
@@ -251,9 +272,14 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
                     {
                         "claim_id": "C1",
                         "statement": "Accuracy is reported.",
+                        "role": "final",
                         "kind": "numeric",
                         "paper_result": 0.9,
-                        "provenance": {"page": 1, "section": "Results"},
+                        "provenance": {
+                            "page": 1,
+                            "section": "Results",
+                            "quote": "Accuracy was 0.9.",
+                        },
                     }
                 ]
             }

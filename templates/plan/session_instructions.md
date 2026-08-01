@@ -40,10 +40,10 @@ from a Figure/Table while retaining the same claim format.
 
 {% for claim in claims.claims %}
 {% if claim.role == "validation" %}
-- **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+- **{{ claim.claim_id }}** ({{ claim.role }}): {{ claim.statement }}
   - Source: {{ claim.provenance.section }}
-{% if claim.paper_value is defined %}
-  - Anchor value: {{ claim.paper_value | tojson }}{% if claim.units is defined %} {{ claim.units }}{% endif %}
+{% if claim.paper_result is not none %}
+  - Anchor value: {{ claim.paper_result | tojson }}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -52,11 +52,11 @@ The following experiments were extracted from the paper. Every claim and
 artifact associated with each experiment must be reproduced.
 
 {% for experiment in experiments.experiments %}
-- **{{ experiment.id }}**: {{ experiment.description }}
+- **{{ experiment.experiment_id }}**: {{ experiment.description }}
   - Claims:
 {% for claim_id in experiment.claims %}
-{% set claim = claims.claims | selectattr("id", "equalto", claim_id) | first %}
-    - **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+{% set claim = claims.claims | selectattr("claim_id", "equalto", claim_id) | first %}
+    - **{{ claim.claim_id }}** ({{ claim.role }}): {{ claim.statement }}
 {% endfor %}
   - Artifacts:
 {% for artifact in experiment.artifacts %}

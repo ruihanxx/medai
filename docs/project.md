@@ -39,7 +39,9 @@ The LangGraph stages are:
    matching configured remote compute when needed, plan files, and write code.
 5. `plan_agent`: check coverage, install dependencies, smoke-test, and write the replication plan.
 6. `replicate_agent`: execute every experiment and write evidence.
-7. `report_agents`: sequentially compare each experiment with the paper in one report.
+7. `report_agents`: sequentially update one report with per-experiment
+   claim/artifact comparisons, validation-anchor assessments, and a risk list
+   derived from code-generation ambiguities.
 
 Each workflow node prints `enter <stage> stage` to standard output immediately
 when it starts.
@@ -73,10 +75,14 @@ runs/<run_id>/
 └── remote_compute/instance.json
 ```
 
-Claims have unique `claim_id` values and are limited to `text` or `numeric`.
+Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
+record a `final` or `validation` role plus a verbatim provenance quote.
 Experiments have unique `experiment_id` values and list their claim IDs and
 paper artifact labels. The replication plan and result files must preserve
-those mappings. The data inventory records the configured raw root, adapter,
+those mappings. The reproduction report contains exactly three top-level audit
+sections: per-experiment claim/artifact comparisons, a verdict for every
+validation anchor, and one replication risk for every `codegen_plan.json`
+ambiguity. The data inventory records the configured raw root, adapter,
 bounded scan limits, catalog, explored file samples, warnings, and whether a
 scan was truncated. With no `--data` input it must explicitly report
 `not_supplied` and contain no catalog or samples.
