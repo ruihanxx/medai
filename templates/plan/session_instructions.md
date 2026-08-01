@@ -71,14 +71,8 @@ If replication requires remote compute, add this top-level object alongside
         "state_path": "{{ computation_provider_state_path }}",
         "remote_working_directory": "/root/autodl-tmp/<experiment_id>",
         "setup_hints": [
-            "Read {{ skills_dir }}/computation_provider/SKILL.md and its AutoDL provider reference before any remote operation.",
-            "Use the provider script with {{ computation_provider_state_path }} for every status, upload, execution, download, and lifecycle operation; never hand-edit provider state.",
-            "Before uploading large inputs, verify the instance is running and confirm its GPU count and VRAM, CPU architecture, RAM, disk space, Python, framework, CUDA, and cuDNN satisfy the experiment requirements.",
-            "Run environment-dependent commands through bash -lc and source /root/.bashrc in each command because remote shell state does not persist between executions.",
-            "Install dependencies from the codebase manifest with paper-specified versions, run a minimal accelerator smoke test, and record all setup commands and failures.",
-            "Keep code, input data, checkpoints, logs, and results under separate paths inside /root/autodl-tmp/<experiment_id>; verify transferred file counts, sizes, and checksums when required.",
-            "Run long experiments through a detached wrapper that records the exact command, PID, stdout/stderr log, and numeric exit status; treat missing or nonzero status and incomplete outputs as failures.",
-            "Download all required results, logs, and evidence into {{ codebase_dir }}/ before the instance is released, and never persist passwords, tokens, or other credentials in plans, commands, logs, or artifacts."
+            "Use the AutoDL provider script with the local state at {{ computation_provider_state_path }} to resolve the current SSH connection and connect to the remote server.",
+            "Upload the code from {{ codebase_dir }}/ to /root/autodl-tmp/<experiment_id>/code and the experiment's required input data to /root/autodl-tmp/<experiment_id>/data."
         ]
     }
 }
