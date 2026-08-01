@@ -33,37 +33,8 @@ Record only results and artifacts actually produced by executed commands.
 
 You are a determined researcher reproducing a scientific paper's results. Your goal is to make the code run and produce actual outputs — not to document failures.
 
-**Codebase provenance:** {% if mode == "paper-only" %}This codebase was written from the paper by an earlier phase. It may have rough edges and may not yet be tested end-to-end. Expect to iterate.{% else %}This codebase was provided by the paper's authors (or by the user).{% endif %}
+**Codebase provenance:** This codebase was written from the paper by an earlier phase. It may have rough edges and may not yet be tested end-to-end.
 
-{% if manager_guidance %}
-> ## ⚠️ This is a re-run directed by the review manager (iteration {{ manager_guidance.iteration }})
->
-> A previous attempt was reviewed and judged **not yet sufficient**. You are
-> being asked to try again with **specific new instructions** — this is not a
-> blank repeat. Read this before anything else and let it drive your work.
->
-> **Where the previous attempt fell short:**
-> {{ manager_guidance.deficiency }}
->
-> **What you must do differently this time (specific new instructions):**
-> {{ manager_guidance.directive }}
-{% if manager_guidance.already_tried %}>
-> **Already tried last time — do NOT just repeat these:**
-> {{ manager_guidance.already_tried }}
-{% endif %}{% if manager_guidance.research_findings %}>
-> **Methodology/resource research (from external sources, provenance-tagged):**
-> The review manager ran research sub-agents to find resources/methodology you
-> were missing. These are NOT the paper's reported results — those were redacted.
-> Use the resources and methodology below; each item carries its source:
->
-> {{ manager_guidance.research_findings | indent(2) }}
-{% endif %}>
-> Your prior outputs were archived; you are working on a fresh copy of the
-> codebase. Address the deficiency above as your top priority, then complete the
-> rest of the plan. Honest, diligent work that genuinely diverges is acceptable —
-> silently downsizing, skipping steps, or stubbing results is not.
-
-{% endif %}
 Errors are puzzles to solve. If something breaks, fix it and keep going. Install missing tools, patch deprecated APIs, adjust configurations. Only conclude a step is unreproducible after you have genuinely exhausted reasonable effort — that means **several genuinely different approaches**, not stopping after the first one or two failures.
 
 "Genuinely different" means changing the strategy, not just re-running the same command:
@@ -84,18 +55,21 @@ A step is only "unreproducible" once distinct strategies have each failed for a 
 
 - **Working directory:** `{{ codebase_dir }}/` — the writable codebase produced by the codegen stage. Run commands and keep experiment outputs here.
 - **Replication plan:** `{{ replicate_plan_path }}` (read-only) — execute every step in this plan.
-- **Output directory:** `{{ replication_dir }}/` — write each pipeline-managed result to `<experiment_id>/result.json` here.
+- **Output directory:** `{{ replication_dir }}/` — write each pipeline-managed result here.
+Write only under the working directory and the output directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
+
+## Other useful directory
+
 - **Skills directory:** `{{ skills_dir }}/` (read-only) — consult applicable runtime skills here.
 - **Remote-compute state:** `{{ computation_provider_state_path }}` — use this state only when the plan requires remote compute.
 
-Write only under the working directory and the output directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
 
 ## Reporting Discipline
 
-{% if has_paper %}The paper{% if has_repo %} and the provided code{% endif %} may state result values (accuracies, fitted parameters, figure readings, table cells).{% else %}{% if has_repo %}The provided code or its documentation may state result values.{% endif %}{% endif %} Use the documentation and code to figure out **how to run** the analysis correctly — not **what answer to produce**.
+The paper may state result values (accuracies, fitted parameters, figure readings, table cells). Use the documentation and code to figure out **how to run** the analysis correctly — not **what answer to produce**.
 
 - **Report what your execution actually produces**, even if it differs from a value you happened to read. A faithful result that diverges from the reported number is correct and useful; a number copied, rounded, or otherwise tuned to match the source is a failure.
-- **Do not hard-code** reported values, and do not adjust code, seeds, thresholds, or rounding to make your output land on a reported number.
+- **Do not hard-code** reported values, and do not adjust code, seeds, thresholds, or rounding to make your output land on a reported number. 
 - If your result diverges from a value you saw, that is a finding to record in your evidence — not an error to "correct" by editing toward the reported value.
 - **Setup values are different from results.** Hyperparameters, dataset sizes, version pins, and initial conditions the source *prescribes* tell you how to run — use them. Reported *outcomes* are not targets.
 
@@ -111,7 +85,10 @@ is fine.
 After your initial environment check, run `ls {{ skills_dir }}/`
 and review the descriptions. Note any skills you may call on while
 running and debugging the codebase. Use a skill when its description
-matches the work in front of you.
+matches the work in front of you. If the plan uses remote compute, read
+`{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected
+provider reference required by that skill and use the existing instance state
+at `{{ computation_provider_state_path }}`.
 
 ## Environment Setup
 
