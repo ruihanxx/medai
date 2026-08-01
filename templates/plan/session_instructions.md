@@ -35,11 +35,16 @@ Required work:
 ## Paper Claims and Experiment artifacts
 
 The following validation claims were extracted from the paper as reference
-anchors for methodology and cohort construction.
+anchors for methodology and cohort construction. Some anchors may originate
+from a Figure/Table while retaining the same claim format.
 
 {% for claim in claims.claims %}
 {% if claim.role == "validation" %}
 - **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+  - Source: {{ claim.provenance.section }}
+{% if claim.paper_value is defined %}
+  - Anchor value: {{ claim.paper_value | tojson }}{% if claim.units is defined %} {{ claim.units }}{% endif %}
+{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -61,6 +66,7 @@ artifact associated with each experiment must be reproduced.
 
 
 Each plan step should produce evidence relevant to one or more claims/artifacts (except for pure setup steps); use the claim IDs (e.g. `C1`, `C2`) or artifacts index (e.g. Figure 2, Table 3) in the `verifies` field of each step. Reproduce experiment one after another.
+For a Figure/Table-sourced validation anchor, plan evidence for both its claim ID and its Figure/Table artifact label.
 
 ## Your Task
 

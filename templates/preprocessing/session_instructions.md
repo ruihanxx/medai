@@ -13,12 +13,12 @@ matches your work; many extractions will not need any skill, and that is fine.
 
 
 Read the paper markdown from path `{{ paper_markdown }}`. This file is the original paper converted in markdown format, and the images of figures are recorded as a path. 
-All of the images are saved at `{{ artifacts_dir }}`. Only invoke multimodal capabilities to read and understand image files via path when you are explicitly asked to understand or read an image.
+All of the images are saved at `{{ artifacts_dir }}`. Do not read images by default. Use multimodal capabilities only when a Figure/Table's caption or surrounding text indicates that it may contain a validation anchor not available in the prose.
 
 ## Your task
 
 ### claim extraction
-Read the paper (do not need to read images), identify every claim that:
+Read the paper, and inspect only the Figure/Table images needed for validation anchors. Identify every claim that:
 - Reports a result, observation, measurement, or behavior of the system under study, AND
 - Could plausibly be checked by inspecting outputs that the paper's code is expected to produce
 
@@ -27,7 +27,7 @@ DO NOT extract:
 - Background, motivation, or related-work claims.
 - Limitations or future-work statements.
 - Citations to other papers.
-- Figures, Tables.
+- Figures or Tables as claims by themselves. If a Figure/Table contains a validation anchor, encode the anchor's content as a normal claim with `role` set to `validation`.
 
 Output a JSON object with this top-level shape:
 ```json
@@ -49,13 +49,15 @@ Each claim object has these fields:
 | `role` | yes | One of: `final`, `validation`. |
 | `paper_value` | optional | The value(s) the paper reports. Shape varies by type (see below). Omit for `qualitative` and `figure` claims where no numeric value is stated. |
 | `units` | optional | Physical / statistical units of `paper_value`, where meaningful. |
-| `expected_output_file` | optional | For `figure` and `table` claims when the paper's code is expected to produce a specific file. Path relative to the repo root. |
-| `provenance` | yes | `{"section": "...", "page": <int>, "quote": "..."}` — where in the paper the claim appears. `quote` is the verbatim snippet (≤200 chars). For repo-only sources where "page" doesn't apply, set `page` to 0. |
+| `expected_output_file` | optional | For a validation anchor from a Figure/Table when the paper's code is expected to reproduce a specific file. Path relative to the repo root. |
+| `provenance` | yes | `{"section": "...", "page": <int>, "quote": "..."}` — where in the paper the claim appears. For a Figure/Table anchor, include its label in `section`, e.g. `"Methods; Figure 2"` or `"Table 1"`. `quote` is the verbatim snippet or caption (≤200 chars). For repo-only sources where "page" doesn't apply, set `page` to 0. |
 
 Role Definitions
 
 - **`final`** — the paper's final reproducible results. 
-- **`validation`** — byproducts and method reference anchors, such as intermediate measurements, cohort construction statistics, preprocessing observations, which are not final outcomes. This is mostly used to determine how closely the replication process aligns with the original paper.
+- **`validation`** — byproducts and method reference anchors, including anchors found in Figures/Tables, such as intermediate measurements, cohort construction statistics, preprocessing observations, which are not final outcomes. This is mostly used to determine how closely the replication process aligns with the original paper.
+
+For a Figure/Table validation anchor, keep the existing claim format: put the checkable observation in `description`, any explicit value in `paper_value`, and the Figure/Table label in `provenance.section`. Extract only the relevant anchor, not the whole visual. Do not duplicate an anchor that is also stated in prose.
 
 When choosing tier, favor `supporting` unless the claim is clearly the paper's central reproducible result. Extract only `headline` and `supporting` claims. Setup-level configuration (e.g., "the model uses 12 layers") belongs in the replication plan, not in claims.
 
@@ -93,9 +95,9 @@ Each experiment object has these fields:
 | `description` | yes | One sentence: what the experiment is about. |
 | `models` | optional | If this experiment involves training models, give a list of model used. |
 | `computational demands` | yes | The computational demands of this experiment, e.g. `"cpu"`, `"4 H100"`. It must be explicitly mentioned in paper, otherwise use `"NA"`|
-| `claims` | yes | the list of `claim_id` of all the claims extracted previously that is relevent to this experiment. |
-| `artifacts` | yes | All the Figure/Table result of this experiment, e.g. `"Table 2"`, `"Figure 3"`. |
+| `claims` | yes | the list of `claim_id` of all the claims extracted previously that is relevent to this experiment, including validation anchors. |
+| `artifacts` | yes | All the Figure/Table result of this experiment, including Figure/Table sources of validation anchors, e.g. `"Table 2"`, `"Figure 3"`. |
 
-Every claim with a `final` role must belong to at least one experiment.
+Every extracted claim must belong to at least one experiment. When a Figure/Table supplies a validation anchor, include its claim ID in `claims` and its label in `artifacts`.
 
 Save the JSON to `{{ experiments_path }}`.

@@ -39,6 +39,7 @@ Read the paper carefully. Prioritize:
 - **Model architecture / Algorithms** — what to build.
 
 Read the claims at `{{ claims_path }}` and experiments at `{{ experiments_path }}` as supplement to make it clear the output to yield and the structure of the experiment.
+Validation claims may originate from a Figure/Table; their `provenance.section` identifies the source label. When needed, inspect the corresponding image linked from `{{ paper_markdown }}` to implement the intermediate check.
 
 You may also skim Results and Discussion sections for context, but
 do not memorize numerical results for hardcoding (see Self-Review).
@@ -271,7 +272,7 @@ that depends on it. For each such upstream step, confirm:
   `codegen_plan.json["ambiguities"]`.
 
 - **Validate intermediates against documented METHOD anchors — never against
-  reported results.** The extracted claims at `{{claim_path}}` records the anchor claims, whose `role` attribute has value `validation`. If the methodology states an intermediate the step should reproduce *as part of the procedure* (e.g. "features are scaled to
+  reported results.** The extracted claims at `{{ claims_path }}` record the anchor claims whose `role` attribute has value `validation`, including anchors extracted from Figures/Tables. If the methodology states an intermediate the step should reproduce *as part of the procedure* (e.g. "features are scaled to
   unit variance", "the cut leaves N=27056 records", a fold count, a member
   count, a fit coefficient), have the code assert/log its own intermediate
   against that anchor, and if it is off, prefer the documented alternative. 
