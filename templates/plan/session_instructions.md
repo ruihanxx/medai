@@ -31,6 +31,34 @@ Required work:
 4. Run smoke tests and debug failures.
 5. Write `{{ replicate_plan_path }}`:
 
+
+## Paper Claims and Experiment artifacts
+
+The following validation claims were extracted from the paper as reference
+anchors for methodology and cohort construction.
+
+{% for claim in claims.claims %}
+{% if claim.role == "validation" %}
+- **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+{% endif %}
+{% endfor %}
+
+The following experiments were extracted from the paper. Every claim and
+artifact associated with each experiment must be reproduced.
+
+{% for experiment in experiments.experiments %}
+- **{{ experiment.id }}**: {{ experiment.description }}
+  - Claims:
+{% for claim_id in experiment.claims %}
+    - {{ claim_id }}
+{% endfor %}
+  - Artifacts:
+{% for artifact in experiment.artifacts %}
+    - {{ artifact }}
+{% endfor %}
+{% endfor %}
+
+
 ```json
 {"experiments":[{"experiment_id":"E1","claims":["C1"],"artifacts":["Figure 1"],"steps":[{"step_id":"S1","description":"...","command":"...","expected_outputs":["path"]}]}]}
 ```
