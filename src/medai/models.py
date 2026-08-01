@@ -163,6 +163,32 @@ class ExperimentResult(StrictModel):
         return self
 
 
+class SmartReplicateRound(StrictModel):
+    round: int = Field(ge=1, le=5)
+    observed_result: Any
+    anchor_comparison: str
+    hypothesis: str
+    changes: list[str] = Field(min_length=1)
+    commands: list[str] = Field(min_length=1)
+    result_after_change: Any
+    conclusion: str
+
+
+class SmartReplicateLog(StrictModel):
+    experiment_id: str
+    baseline_result: Any
+    anchors: dict[str, Any]
+    rounds: list[SmartReplicateRound] = Field(max_length=5)
+    final_result: Any
+
+    @model_validator(mode="after")
+    def sequential_rounds(self) -> "SmartReplicateLog":
+        round_numbers = [round_record.round for round_record in self.rounds]
+        if round_numbers != list(range(1, len(self.rounds) + 1)):
+            raise ValueError("Smart-replicate rounds must be sequential from 1")
+        return self
+
+
 def validate_experiment_coverage(claims: ClaimsFile, todo: ExperimentTodo) -> None:
     known_claims = {claim.claim_id for claim in claims.claims}
     referenced_claims = {
@@ -232,3 +258,23 @@ def validate_experiment_result(experiment: Experiment, result: ExperimentResult)
         raise ValueError(f"Result claim coverage does not match {experiment.experiment_id}")
     if expected_artifacts != actual_artifacts:
         raise ValueError(f"Result artifact coverage does not match {experiment.experiment_id}")
+
+
+def validate_smart_replicate_log(
+    experiment: Experiment,
+    log: SmartReplicateLog,
+    anchors: dict[str, Any],
+) -> None:
+    if log.experiment_id != experiment.experiment_id:
+        raise ValueError(
+            f"Smart-replicate log ID {log.experiment_id} does not match "
+            f"{experiment.experiment_id}"
+        )
+    if set(anchors) != set(experiment.claims):
+        raise ValueError(
+            f"Expected smart-replicate anchors do not match {experiment.experiment_id}"
+        )
+    if log.anchors != anchors:
+        raise ValueError(
+            f"Smart-replicate log anchors do not match {experiment.experiment_id}"
+        )

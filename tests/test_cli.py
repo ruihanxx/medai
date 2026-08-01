@@ -17,6 +17,7 @@ def test_help_lists_required_inputs():
     assert "--provider" in result.stdout
     assert "--codex-model" in result.stdout
     assert "--codex-reasoning-effort" in result.stdout
+    assert "--smart-replicate" in result.stdout
 
 
 def test_codex_settings_are_loaded_from_environment(tmp_path: Path, monkeypatch):
@@ -36,6 +37,7 @@ def test_codex_settings_are_loaded_from_environment(tmp_path: Path, monkeypatch)
 
     assert config.codex_model == "gpt-5.6-terra"
     assert config.codex_reasoning_effort == "high"
+    assert config.smart_replicate is False
 
 
 def test_codex_reasoning_effort_is_validated(tmp_path: Path):

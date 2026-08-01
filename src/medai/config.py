@@ -18,6 +18,7 @@ class RunConfig:
     siliconflow_config: Path | None = None
     codex_model: str | None = None
     codex_reasoning_effort: str | None = None
+    smart_replicate: bool = False
 
     def validate(self) -> None:
         if not self.paper.is_file():
@@ -63,6 +64,7 @@ class RunConfig:
         siliconflow_config: Path | None,
         codex_model: str | None = None,
         codex_reasoning_effort: str | None = None,
+        smart_replicate: bool = False,
     ) -> "RunConfig":
         normalized_provider = provider.strip().casefold()
         if normalized_provider == "codex":
@@ -85,6 +87,7 @@ class RunConfig:
                 if codex_reasoning_effort
                 else None
             ),
+            smart_replicate=smart_replicate,
         )
         config.validate()
         return config

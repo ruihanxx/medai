@@ -15,6 +15,14 @@ The `codex` provider accepts `--codex-model` and
 `MEDAI_CODEX_MODEL` and `MEDAI_CODEX_REASONING_EFFORT` in the project `.env`.
 The resolved values are recorded in `manifest.json`.
 
+`--smart-replicate` is disabled by default. When enabled, the replicate agent
+receives the audited `paper_result` anchors for its assigned claims, performs a
+baseline run, and may make at most five hypothesis-driven adjustment rounds per
+experiment. Each round must compare actual output with its anchor, record a
+methodological hypothesis and exact change, and rerun the affected commands.
+Hard-coding anchors, editing computed outputs, or unsupported tuning remains
+prohibited. The resolved boolean is recorded in `manifest.json`.
+
 When a repository is supplied, it is copied to `codegen/codebase/`; agents
 modify only that copy.
 
@@ -56,6 +64,7 @@ runs/<run_id>/
 ├── plan/replicate_plan.json
 ├── plan/plan_transcript.jsonl
 ├── replication/<experiment_id>/result.json
+├── replication/<experiment_id>/smart_replicate_log.json  # smart mode only
 ├── replication/replication_transcript.jsonl
 ├── report/reproduction_report.md
 ├── report/<experiment_id>_transcript.jsonl
@@ -88,7 +97,10 @@ automatically.
 - Each agent invocation's provider event stream is preserved as a JSONL
   transcript beside that stage's artifacts. Transcript files are diagnostic
   records and are never used as the agent's structured result.
-- Replication agents do not receive paper target values.
+- Replication agents do not receive paper target values by default. Smart
+  Replicate exposes only claim-level audited anchors and requires the baseline,
+  comparisons, hypotheses, changes, commands, and actual round results in
+  `smart_replicate_log.json`; it does not expose the paper itself.
 - Plan agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.
 - Remote compute access is exposed through the `computation-provider` skill;

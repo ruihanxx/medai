@@ -38,6 +38,11 @@ def run(
         "--codex-reasoning-effort",
         help="Codex reasoning effort (default: MEDAI_CODEX_REASONING_EFFORT)",
     ),
+    smart_replicate: bool = typer.Option(
+        False,
+        "--smart-replicate",
+        help="Allow up to five audited anchor-guided replication adjustments",
+    ),
 ) -> None:
     try:
         config = RunConfig.create(
@@ -49,6 +54,7 @@ def run(
             siliconflow_config=siliconflow_config,
             codex_model=codex_model,
             codex_reasoning_effort=codex_reasoning_effort,
+            smart_replicate=smart_replicate,
         )
         if (config.output / "manifest.json").exists():
             raise ValueError(
@@ -64,6 +70,7 @@ def run(
                 "provider": config.provider,
                 "codex_model": config.codex_model,
                 "codex_reasoning_effort": config.codex_reasoning_effort,
+                "smart_replicate": config.smart_replicate,
             },
         )
         create_workflow().invoke({"config": config})

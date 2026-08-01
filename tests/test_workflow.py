@@ -10,6 +10,7 @@ from medai.workflow import (
     codegen_agent_node,
     create_workflow,
     release_run_computation_instance,
+    replicate_agent_node,
 )
 
 
@@ -218,6 +219,128 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "replicate_agent",
         "report_agents",
     ]
+
+
+def test_smart_replicate_injects_anchors_and_requires_round_log(
+    tmp_path: Path,
+    monkeypatch,
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    codebase = output / "codegen" / "codebase"
+    codebase.mkdir(parents=True)
+    (output / "prompts").mkdir()
+    (output / "replication").mkdir()
+    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+        smart_replicate=True,
+    )
+    claims_path = output / "preprocessing" / "claims.json"
+    claims_path.parent.mkdir()
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "statement": "Accuracy is reported.",
+                        "kind": "numeric",
+                        "paper_result": 0.9,
+                        "provenance": {"page": 1, "section": "Results"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    experiments_path = output / "preprocessing" / "experiment_todo.json"
+    experiments_path.write_text(
+        json.dumps(
+            {
+                "experiments": [
+                    {
+                        "experiment_id": "E1",
+                        "description": "Train and evaluate.",
+                        "claims": ["C1"],
+                        "artifacts": ["Figure 1"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_agent(*, prompt_path, transcript_path, **kwargs):
+        transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
+        result_dir = output / "replication" / "E1"
+        result_dir.mkdir()
+        artifact_path = result_dir / "figure.png"
+        artifact_path.write_bytes(b"png")
+        (result_dir / "result.json").write_text(
+            json.dumps(
+                {
+                    "experiment_id": "E1",
+                    "claims": [
+                        {
+                            "claim_id": "C1",
+                            "reproduced_result": 0.89,
+                            "evidence": [str(artifact_path)],
+                        }
+                    ],
+                    "artifacts": [
+                        {"artifact_id": "Figure 1", "path": str(artifact_path)}
+                    ],
+                    "commands": ["python run.py"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (result_dir / "smart_replicate_log.json").write_text(
+            json.dumps(
+                {
+                    "experiment_id": "E1",
+                    "baseline_result": 0.88,
+                    "anchors": {"C1": 0.9},
+                    "rounds": [
+                        {
+                            "round": 1,
+                            "observed_result": 0.88,
+                            "anchor_comparison": "0.02 below anchor",
+                            "hypothesis": "NA rows should be excluded",
+                            "changes": ["Exclude NA rows before evaluation"],
+                            "commands": ["python run.py"],
+                            "result_after_change": 0.89,
+                            "conclusion": "supported",
+                        }
+                    ],
+                    "final_result": 0.89,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    replicate_agent_node(
+        {
+            "config": config,
+            "claims_path": str(claims_path),
+            "experiments_path": str(experiments_path),
+            "replicate_plan_path": str(output / "plan" / "replicate_plan.json"),
+            "codebase_dir": str(codebase),
+        }
+    )
+
+    prompt = (output / "prompts" / "replicate.md").read_text(encoding="utf-8")
+    assert "Smart Replicate is enabled" in prompt
+    assert '"anchor": 0.9' in prompt
+    assert "five adjustment rounds per experiment" in prompt
 
 
 def test_graph_stops_after_a_stage_failure(monkeypatch):

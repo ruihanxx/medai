@@ -22,11 +22,67 @@ For every experiment write:
 {"experiment_id":"E1","claims":[{"claim_id":"C1","reproduced_result":"...","evidence":["path"]}],"artifacts":[{"artifact_id":"Figure 1","path":"path"}],"commands":["actual command"]}
 ```
 
-The required experiment mappings, without paper target values, are:
+The required experiment mappings are:
 
 {{ experiment_mappings }}
 
 Record only results and artifacts actually produced by executed commands.
+
+{% if smart %}
+## Smart Replicate Mode
+
+Smart Replicate is enabled. The following paper-reported values are audit
+anchors for diagnosing methodological mismatches:
+
+{{ smart_anchors }}
+
+For each experiment:
+
+1. Run the complete plan once before consulting an anchor as a tuning signal.
+   This is the baseline; preserve its actual outputs.
+2. Compare the baseline or latest actual output with every applicable anchor.
+   Describe the direction and size of each discrepancy.
+3. Propose one concrete, scientifically defensible hypothesis about the
+   discrepancy. Prefer ambiguities in methodology or data handling, such as NA
+   inclusion/exclusion, cohort filters, units, normalization, aggregation,
+   preprocessing order, evaluation split, or a documented parameter choice.
+4. Make only the change needed to test that hypothesis, rerun the affected
+   commands at the intended scale, and compare the new actual output with both
+   the prior output and the anchor.
+5. Repeat for at most **five adjustment rounds per experiment**. Stop early when
+   no defensible hypothesis remains or the anchor is adequately explained.
+
+Do not hard-code an anchor, overwrite a computed result, tune arbitrary
+constants without methodological support, cherry-pick seeds or subsets, discard
+unfavorable runs, or claim agreement that the executed outputs do not show. A
+closer value is useful only when it results from a justified methodological
+correction. Preserve divergent results when no justified correction resolves
+them.
+
+Write the full audit trail to
+`{{ replication_dir }}/<experiment_id>/smart_replicate_log.json`:
+
+```json
+{
+  "experiment_id": "E1",
+  "baseline_result": "actual baseline output",
+  "anchors": {"C1": "paper-reported anchor"},
+  "rounds": [
+    {
+      "round": 1,
+      "observed_result": "actual value before this change",
+      "anchor_comparison": "quantified discrepancy",
+      "hypothesis": "testable methodological explanation",
+      "changes": ["exact file/config/data-handling change and rationale"],
+      "commands": ["actual rerun command"],
+      "result_after_change": "actual value produced by the rerun",
+      "conclusion": "supported, rejected, or inconclusive, with reason"
+    }
+  ],
+  "final_result": "actual final output reported in result.json"
+}
+```
+{% endif %}
 
 
 # Replication Agent Session
@@ -66,11 +122,11 @@ Write only under the working directory and the output directory above. Other sub
 
 ## Reporting Discipline
 
-The paper may state result values (accuracies, fitted parameters, figure readings, table cells). Use the documentation and code to figure out **how to run** the analysis correctly — not **what answer to produce**.
+The plan and code describe how to run the analysis correctly.
 
 - **Report what your execution actually produces**, even if it differs from a value you happened to read. A faithful result that diverges from the reported number is correct and useful; a number copied, rounded, or otherwise tuned to match the source is a failure.
 - **Do not hard-code** reported values, and do not adjust code, seeds, thresholds, or rounding to make your output land on a reported number. 
-- If your result diverges from a value you saw, that is a finding to record in your evidence — not an error to "correct" by editing toward the reported value.
+- If your result diverges from {% if smart %}a smart-mode anchor{% else %}an expected output shape{% endif %}, that is a finding to investigate and record, never a value to copy into the output.
 - **Setup values are different from results.** Hyperparameters, dataset sizes, version pins, and initial conditions the source *prescribes* tell you how to run — use them. Reported *outcomes* are not targets.
 
 ## Available skills
@@ -103,8 +159,8 @@ uv --version
 nvidia-smi 2>/dev/null && echo "GPU: available" || echo "GPU: not available"
 
 # Create a virtual environment
-uv venv {{ venv_dir }}
-source {{ venv_dir }}/bin/activate
+uv venv {{ codebase_dir }}/.venv
+source {{ codebase_dir }}/.venv/bin/activate
 
 # Install dependencies (try multiple strategies)
 if [ -f requirements.txt ]; then
@@ -159,44 +215,21 @@ A wrong **upstream** result (a sample selection, grouping, coordinate cut, unit/
 
 Surfacing a corrupted intermediate as a logged finding is far more useful than letting it cascade into every claim.
 
-{% if replication_plan.steps | length > 0 %}
-{% set has_gpu_step = [] %}
-{% for step in replication_plan.steps %}
-{% if 'gpu' in (step.command_hint | default('', true)) | lower or 'cuda' in (step.command_hint | default('', true)) | lower %}
-{% if has_gpu_step.append(true) %}{% endif %}
-{% endif %}
-{% endfor %}
-{% if has_gpu_step | length > 0 %}
 ### GPU Guidance
 
-This plan includes GPU-dependent steps.
+If the plan contains GPU-dependent steps, use `nvidia-smi` to verify whether a
+GPU is available. Use it when present. If GPU is unavailable:
 
-{% if gpu_info %}
-A GPU is available in this environment: {{ gpu_info }} — run these steps on it. Do not quietly fall back to CPU (and then to a downsized run) when the hardware is present.
-{% else %}
-If `nvidia-smi` shows a GPU, run GPU-capable steps on it — do not quietly fall back to CPU (and then to a downsized run) when the hardware is present.
-{% endif %}
-{% if not gpu_info %}
-If GPU is not available:
 - Try running with `CUDA_VISIBLE_DEVICES=""` to force CPU mode
 - Check if the code supports a `--device cpu` or `--no-cuda` flag
 - Install missing compilers if GPU code needs to fall back to CPU compilation
 - Record the GPU status in your evidence
-{% endif %}
-{% endif %}
-{% endif %}
 
 ## Replication Plan
 
-Execute the following steps in order. For each step, run the code from `{{ codebase_dir }}/`. If a step fails, try to fix the issue before moving on.
-
-{% for step in replication_plan.steps %}
-### Step {{ step.id }}: {{ step.description }}
-
-- **Command hint:** `{{ step.command_hint }}`
-- **Expected outcome:** {{ step.expected_outcome }}
-
-{% endfor %}
+Read `{{ replicate_plan_path }}` and execute every experiment and step in its
+listed order. Run commands from `{{ codebase_dir }}/`. If a step fails, try to
+fix the issue before moving on.
 
 ## Evidence Collection
 

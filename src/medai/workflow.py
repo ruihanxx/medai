@@ -25,10 +25,12 @@ from medai.models import (
     ExperimentResult,
     ExperimentTodo,
     ReplicationPlan,
+    SmartReplicateLog,
     validate_data_inventory,
     validate_experiment_coverage,
     validate_experiment_result,
     validate_replication_plan,
+    validate_smart_replicate_log,
 )
 from medai.preprocessing import convert_pdf_to_markdown
 from medai.prompts import render_prompt
@@ -275,6 +277,8 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     record_stage(config.output, "replicate_agent", "running")
     transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    claims = load_model(Path(state["claims_path"]), ClaimsFile)
+    claims_by_id = {claim.claim_id: claim for claim in claims.claims}
     mappings = [
         {
             "experiment_id": experiment.experiment_id,
@@ -295,6 +299,21 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         computation_provider_state_path=(
             config.output / "remote_compute" / "instance.json"
         ),
+        smart=config.smart_replicate,
+        smart_anchors=json.dumps(
+            [
+                {
+                    "claim_id": claim_id,
+                    "statement": claims_by_id[claim_id].statement,
+                    "anchor": claims_by_id[claim_id].paper_result,
+                    "provenance": claims_by_id[claim_id].provenance.model_dump(),
+                }
+                for experiment in experiments.experiments
+                for claim_id in experiment.claims
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
     )
     run_agent(
         provider=config.provider,
@@ -307,6 +326,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     )
 
     result_paths = []
+    smart_log_paths = []
     for experiment in experiments.experiments:
         result_path = (
             config.output
@@ -337,13 +357,30 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
                 raise RuntimeError(
                     f"Artifact evidence does not exist for {artifact.artifact_id}: {artifact.path}"
                 )
+        if config.smart_replicate:
+            smart_log_path = (
+                config.output
+                / "replication"
+                / experiment.experiment_id
+                / "smart_replicate_log.json"
+            )
+            smart_log = load_model(smart_log_path, SmartReplicateLog)
+            validate_smart_replicate_log(
+                experiment,
+                smart_log,
+                {
+                    claim_id: claims_by_id[claim_id].paper_result
+                    for claim_id in experiment.claims
+                },
+            )
+            smart_log_paths.append(str(smart_log_path))
         result_paths.append(str(result_path))
 
     record_stage(
         config.output,
         "replicate_agent",
         "completed",
-        outputs=[*result_paths, str(transcript_path)],
+        outputs=[*result_paths, *smart_log_paths, str(transcript_path)],
     )
     return {}
 

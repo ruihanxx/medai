@@ -47,6 +47,7 @@ Options:
   --siliconflow-config FILE
   --codex-model MODEL
   --codex-reasoning-effort EFFORT
+  --smart-replicate
   --help
 EOF
             exit 0
