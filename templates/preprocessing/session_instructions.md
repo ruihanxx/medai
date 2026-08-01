@@ -13,12 +13,12 @@ matches your work; many extractions will not need any skill, and that is fine.
 
 
 Read the paper markdown from path `{{ paper_markdown }}`. This file is the original paper converted in markdown format, and the images of figures are recorded as a path. 
-All of the images are saved at `{{ artifacts_dir }}`. Do not read images by default. Use multimodal capabilities only when a Figure/Table's caption or surrounding text indicates that it may contain a validation anchor not available in the prose.
+All of the images are saved at `{{ artifacts_dir }}` for later stages. Do not invoke multimodal capabilities or read image files during preprocessing. Identify Figure/Table validation anchors from labels, captions, surrounding prose, and Markdown table content.
 
 ## Your task
 
 ### claim extraction
-Read the paper, and inspect only the Figure/Table images needed for validation anchors. Identify every claim that:
+Read the paper Markdown without inspecting image files. Identify every claim that:
 - Reports a result, observation, measurement, or behavior of the system under study, AND
 - Could plausibly be checked by inspecting outputs that the paper's code is expected to produce
 
@@ -57,7 +57,7 @@ Role Definitions
 - **`final`** — the paper's final reproducible results. 
 - **`validation`** — byproducts and method reference anchors, including anchors found in Figures/Tables, such as intermediate measurements, cohort construction statistics, preprocessing observations, which are not final outcomes. This is mostly used to determine how closely the replication process aligns with the original paper.
 
-For a Figure/Table validation anchor, keep the existing claim format: put the checkable observation in `description`, any explicit value in `paper_value`, and the Figure/Table label in `provenance.section`. Extract only the relevant anchor, not the whole visual. Do not duplicate an anchor that is also stated in prose.
+For a Figure/Table validation anchor, keep the existing claim format: put the checkable observation in `description`, any explicit value in `paper_value`, and the Figure/Table label in `provenance.section`. Extract only information explicitly stated in the paper text or table, not details visible only inside an image. Do not duplicate an anchor that is also stated in prose.
 
 When choosing tier, favor `supporting` unless the claim is clearly the paper's central reproducible result. Extract only `headline` and `supporting` claims. Setup-level configuration (e.g., "the model uses 12 layers") belongs in the replication plan, not in claims.
 
