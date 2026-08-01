@@ -60,6 +60,30 @@ def skills_dir() -> Path:
     return Path(__file__).parent / "templates" / "skills"
 
 
+def resolve_run_evidence_path(
+    value: str,
+    codebase_dir: Path,
+    replication_dir: Path,
+) -> Path:
+    raw_path = Path(value).expanduser()
+    if raw_path.is_absolute():
+        candidates = [raw_path]
+    else:
+        candidates = [codebase_dir / raw_path, replication_dir / raw_path]
+        if raw_path.parts and raw_path.parts[0] == "replication":
+            candidates.append(replication_dir.parent / raw_path)
+
+    allowed_roots = [codebase_dir.resolve(), replication_dir.resolve()]
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if any(resolved.is_relative_to(root) for root in allowed_roots) and resolved.is_file():
+            return resolved
+    raise RuntimeError(
+        "Evidence path must name a regular file inside the copied codebase or "
+        f"replication directory: {value}"
+    )
+
+
 def preflight_node(state: WorkflowState) -> dict[str, str]:
     print("enter preflight stage")
     config = state["config"]
@@ -196,7 +220,6 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         experiments_path=state["experiments_path"],
         data_dir=config.data,
         skills_dir=skills_dir(),
-        resources_path=state["resources_path"],
         data_inventory_path=data_inventory_path,
         codegen_plan_path=codegen_plan_path,
         dataset_patch_path=dataset_patch_path,
@@ -249,7 +272,6 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         data_dir=config.data,
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
-        resources_path=state["resources_path"],
         skills_dir=skills_dir(),
         computation_provider_state_path=(
             config.output / "remote_compute" / "instance.json"
@@ -285,20 +307,12 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     record_stage(config.output, "replicate_agent", "running")
     transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
-    claims = load_model(Path(state["claims_path"]), ClaimsFile)
-    claims_by_id = {claim.claim_id: claim for claim in claims.claims}
-    prompt_path = render_prompt(
-        "replication/session_instructions.md",
-        config.output / "prompts" / "replicate.md",
-        replicate_plan_path=state["replicate_plan_path"],
-        codebase_dir=state["codebase_dir"],
-        replication_dir=config.output / "replication",
-        skills_dir=skills_dir(),
-        computation_provider_state_path=(
-            config.output / "remote_compute" / "instance.json"
-        ),
-        smart=config.smart_replicate,
-        smart_anchors=json.dumps(
+    claims_by_id = {}
+    smart_anchors = "[]"
+    if config.smart_replicate:
+        claims = load_model(Path(state["claims_path"]), ClaimsFile)
+        claims_by_id = {claim.claim_id: claim for claim in claims.claims}
+        smart_anchors = json.dumps(
             [
                 {
                     "claim_id": claim_id,
@@ -311,7 +325,19 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
             ],
             ensure_ascii=False,
             indent=2,
+        )
+    prompt_path = render_prompt(
+        "replication/session_instructions.md",
+        config.output / "prompts" / "replicate.md",
+        replicate_plan_path=state["replicate_plan_path"],
+        codebase_dir=state["codebase_dir"],
+        replication_dir=config.output / "replication",
+        skills_dir=skills_dir(),
+        computation_provider_state_path=(
+            config.output / "remote_compute" / "instance.json"
         ),
+        smart=config.smart_replicate,
+        smart_anchors=smart_anchors,
     )
     run_agent(
         provider=config.provider,
@@ -323,6 +349,11 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
 
+    replication_dir = config.output / "replication"
+    result_metadata_paths = {
+        (replication_dir / experiment.experiment_id / "result.json").resolve()
+        for experiment in experiments.experiments
+    }
     result_paths = []
     smart_log_paths = []
     for experiment in experiments.experiments:
@@ -336,24 +367,25 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         validate_experiment_result(experiment, result)
         for claim in result.claims:
             for evidence in claim.evidence:
-                candidates = [
-                    Path(evidence),
-                    Path(state["codebase_dir"]) / evidence,
-                    config.output / evidence,
-                ]
-                if not any(candidate.exists() for candidate in candidates):
+                resolved = resolve_run_evidence_path(
+                    evidence,
+                    Path(state["codebase_dir"]),
+                    replication_dir,
+                )
+                if resolved in result_metadata_paths:
                     raise RuntimeError(
-                        f"Claim evidence does not exist for {claim.claim_id}: {evidence}"
+                        f"Claim evidence cannot cite result.json for {claim.claim_id}: {evidence}"
                     )
         for artifact in result.artifacts:
-            candidates = [
-                Path(artifact.path),
-                Path(state["codebase_dir"]) / artifact.path,
-                config.output / artifact.path,
-            ]
-            if not any(candidate.exists() for candidate in candidates):
+            resolved = resolve_run_evidence_path(
+                artifact.path,
+                Path(state["codebase_dir"]),
+                replication_dir,
+            )
+            if resolved in result_metadata_paths:
                 raise RuntimeError(
-                    f"Artifact evidence does not exist for {artifact.artifact_id}: {artifact.path}"
+                    f"Artifact evidence cannot cite result.json for "
+                    f"{artifact.artifact_id}: {artifact.path}"
                 )
         if config.smart_replicate:
             smart_log_path = (

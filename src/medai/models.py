@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Literal
 
@@ -113,10 +114,10 @@ class CodegenPlan(StrictModel):
 
 
 class ReplicationStep(StrictModel):
-    step_id: str
-    description: str
-    command: str
-    expected_outputs: list[str]
+    step_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    description: str = Field(min_length=1)
+    command: str = Field(min_length=1)
+    expected_outputs: list[str] = Field(min_length=1)
 
 
 class ReplicationExperiment(StrictModel):
@@ -124,6 +125,13 @@ class ReplicationExperiment(StrictModel):
     claims: list[str]
     artifacts: list[str]
     steps: list[ReplicationStep] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_step_ids(self) -> "ReplicationExperiment":
+        step_ids = [step.step_id for step in self.steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("Replication step IDs must be unique within an experiment")
+        return self
 
 
 class ReplicationPlan(StrictModel):
@@ -311,17 +319,23 @@ def validate_reproduction_report(
         required_sections[2], 1
     )[0]
     risk_text = report_text.split(required_sections[2], 1)[1]
+    def contains_identifier(text: str, identifier: str) -> bool:
+        return re.search(
+            rf"(?<![A-Za-z0-9_.-]){re.escape(identifier)}(?![A-Za-z0-9_.-])",
+            text,
+        ) is not None
+
     missing_experiments = [
         experiment.experiment_id
         for experiment in experiments.experiments
-        if experiment.experiment_id not in per_experiment_text
+        if not contains_identifier(per_experiment_text, experiment.experiment_id)
     ]
     if missing_experiments:
         raise ValueError(f"Report is missing experiments: {missing_experiments}")
     missing_claims = [
         claim.claim_id
         for claim in claims.claims
-        if claim.claim_id not in per_experiment_text
+        if not contains_identifier(per_experiment_text, claim.claim_id)
     ]
     if missing_claims:
         raise ValueError(f"Report is missing claims: {missing_claims}")
@@ -336,7 +350,8 @@ def validate_reproduction_report(
     missing_validation_claims = [
         claim.claim_id
         for claim in claims.claims
-        if claim.role == "validation" and claim.claim_id not in validation_text
+        if claim.role == "validation"
+        and not contains_identifier(validation_text, claim.claim_id)
     ]
     if missing_validation_claims:
         raise ValueError(

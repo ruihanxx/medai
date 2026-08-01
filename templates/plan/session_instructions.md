@@ -1,6 +1,9 @@
 # Plan agent
 
-You are reviewing and modifying a codebase associated with a medical paper, and generating a step-by-step replication plan for testing whether the code reproduces the paper's reported results. The codebase is at `{{ codebase_dir }}`. Your target is to make sure that the implementation exactly aligns with the target paper's methodology, perfectly matches given computation resources to achieve good efficiency, and is ready to run. After that, you
+You are reviewing and modifying a codebase associated with a medical paper and
+generating a step-by-step replication plan. The codebase is at
+`{{ codebase_dir }}`. Make sure it matches the paper's methodology, uses the
+available compute efficiently, and is ready to run before writing the plan.
 
 ## Inputs:
 - Paper Markdown: `{{ paper_markdown }}`
@@ -35,16 +38,13 @@ Required work:
 ## Paper Claims and Experiment artifacts
 
 The following validation claims were extracted from the paper as reference
-anchors for methodology and cohort construction. Some anchors may originate
-from a Figure/Table while retaining the same claim format.
+anchors for methodology and cohort construction. Use them while reviewing the
+code, but never copy their reported outcome values into the replication plan.
 
 {% for claim in claims.claims %}
 {% if claim.role == "validation" %}
 - **{{ claim.claim_id }}** ({{ claim.role }}): {{ claim.statement }}
   - Source: {{ claim.provenance.section }}
-{% if claim.paper_result is not none %}
-  - Anchor value: {{ claim.paper_result | tojson }}
-{% endif %}
 {% endif %}
 {% endfor %}
 
@@ -65,8 +65,9 @@ artifact associated with each experiment must be reproduced.
 {% endfor %}
 
 
-Each plan step should produce evidence relevant to one or more claims/artifacts (except for pure setup steps); use the claim IDs (e.g. `C1`, `C2`) or artifacts index (e.g. Figure 2, Table 3) in the `verifies` field of each step. Reproduce experiment one after another.
-For a Figure/Table-sourced validation anchor, plan evidence for both its claim ID and its Figure/Table artifact label.
+Create one plan entry for every experiment and preserve its `experiment_id`,
+`claims`, and `artifacts` lists exactly. The workflow rejects missing, added, or
+reassigned mappings. Reproduce experiments and their steps in listed order.
 
 ## Your Task
 
@@ -80,9 +81,9 @@ Explore the repository and generate a replication plan — a sequence of concret
 
 For each step, provide:
 - A clear description of what to do
-- A command hint (the likely command to run)
-- A **shape-prescriptive** `expected_outcome`: describe the structure of the expected output (file path, JSON field names, figure file location, log message format) — DO NOT include the paper's reported result values.
-- A `verifies` list of claim IDs or artifacts index whose verification depends on this step's output. Empty list is allowed for pure-setup steps (e.g. installing dependencies).
+- An executable `command`, not a prose command hint
+- A shape-prescriptive `expected_outputs` list containing file paths, JSON field
+  names, figure locations, or log formats, without paper-reported result values
 
 ### Shape-prescriptive examples
 
@@ -96,11 +97,15 @@ BAD (value-prescriptive — DO NOT do this):
 - "Figure shows three peaks at 100, 200, 300 Hz."
 - "Loss converges below 0.5."
 
-The replication agent never sees the paper's reported result values. Including them in `expected_outcome` would leak ground truth to the agent and defeat the verification step.
+The replication agent receives this entire plan but not the paper. Never put a
+paper-reported outcome value in any plan field; doing so leaks ground truth to
+the execution stage.
 
 ### Setup values from the paper ARE allowed
 
-Setup values that the paper *prescribes* (hyperparameters, dataset sizes, version pins, simulation initial conditions like initial masses or metallicity) ARE allowed in step descriptions and command hints. They tell the agent how to run, not what answer to produce.
+Setup values that the paper *prescribes* (hyperparameters, dataset sizes,
+version pins, and initial conditions) are allowed in step descriptions and
+commands. They tell the agent how to run, not what answer to produce.
 
 GOOD:
 - "Run the training with learning rate 2e-5, batch size 32, 3 epochs (paper §3.1)."
@@ -114,7 +119,7 @@ Plan every result-producing step at the full scale the methodology prescribes �
 When a step is genuinely expensive, plan for *efficiency at full scale* instead: prefer the repo's compiled/vectorized code paths, use the GPU when one is available and the method supports it, or split the computation into resumable chunks. Whether to reduce scale is the executing agent's runtime decision, made only under a genuine resource limit and recorded explicitly — never a plan provision.
 {% if gpu_info %}
 
-**Hardware available for this plan:** a GPU is present in this environment: {{ gpu_info }}. Steps whose method benefits from GPU acceleration should plan to use it, and `setup_hints` should say so, rather than assuming a CPU-only path.
+**Hardware available for this plan:** a GPU is present in this environment: {{ gpu_info }}. Steps whose method benefits from GPU acceleration should use it rather than assuming a CPU-only path.
 {% endif %}
 
 ## Scope
@@ -124,13 +129,12 @@ Focus on the paper's **headline and supporting claims**. Do not attempt to repro
 ## Rules
 
 - Order steps logically: setup first, then execution, then verification
-- Include 3-10 steps (enough to cover the headline claims, not exhaustive)
+- Keep each experiment's steps minimal but sufficient for setup, execution, and evidence collection
 - The agent executing this plan will work on a writable copy of the repo at `{{ codebase_dir }}/`
 - The agent may fix issues in the code to keep replication going (deprecated APIs, missing imports, configuration problems)
-- If you find multiple entry points or experiments, prioritize the one that targets the headline claim
-- Every result-producing step MUST have at least one claim ID or artifacts index in `verifies`. Setup-only steps may have an empty `verifies` list. Prefer 1-3 steps dedicated to one single experiment.
+- Execute every experiment; do not prioritize one by dropping another
 - Step outputs produced by the planned commands must be written under `{{ codebase_dir }}/`. Do not write them beside the pipeline-managed plan artifact at `{{ replicate_plan_path }}` or into any other pipeline stage directory.
-- NEVER include the paper's reported numerical result values in `expected_outcome`.
+- Never include paper-reported outcome values anywhere in the plan.
 
 ## Output
 
@@ -138,38 +142,32 @@ Save the plan to `{{ replicate_plan_path }}` with this format:
 
 ```json
 {
-    "environment": {
-        "language": "the language(s) the implementation actually uses",
-        "key_dependencies": ["list", "of", "main", "packages"],
-        "setup_hints": "Toolchains to install and hardware to use (e.g. which steps should run on the GPU). Never pre-authorize reduced-scale runs here."
-    },
-    "steps": [
+  "experiments": [
+    {
+      "experiment_id": "E1",
+      "claims": ["C1", "C2"],
+      "artifacts": ["Figure 1"],
+      "steps": [
         {
-            "id": 1,
-            "description": "What this step does",
-            "command_hint": "the command to run",
-            "expected_outcome": "Shape of expected output (NOT the paper's reported values)",
-            "verifies": ["C1", "C2"]
+          "step_id": "E1-S1",
+          "description": "Run the full-scale experiment",
+          "command": "python run.py --config config.yaml",
+          "expected_outputs": [
+            "outputs/metrics.json containing numeric metric fields",
+            "outputs/figure_1.png"
+          ]
         }
-    ]
-}
-```
-If replication requires remote compute, add this top-level object alongside
-`environment` and `steps`:
-
-```json
-{
-    "remote_compute": {
-        "provider": "autodl",
-        "state_path": "{{ computation_provider_state_path }}",
-        "remote_working_directory": "/root/autodl-tmp/<experiment_id>",
-        "setup_hints": [
-            "Use the AutoDL provider script with the local state at {{ computation_provider_state_path }} to resolve the current SSH connection and connect to the remote server.",
-            "Upload the code from {{ codebase_dir }}/ to /root/autodl-tmp/<experiment_id>/code and the experiment's required input data to /root/autodl-tmp/<experiment_id>/data."
-        ]
+      ]
     }
+  ]
 }
 ```
-Also add a step in `"steps"` to terminate and release the instance.
+
+Use exactly these fields; additional top-level or nested fields are rejected.
+For remote compute, express upload, execution, download, and final release as
+ordinary ordered steps. Put the release command at the end of the final
+experiment and have it update `{{ computation_provider_state_path }}` to a
+released state. The remote state is the only permitted step output outside the
+codebase.
 
 Begin your analysis now.

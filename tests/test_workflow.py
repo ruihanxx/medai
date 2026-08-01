@@ -11,6 +11,7 @@ from medai.workflow import (
     create_workflow,
     release_run_computation_instance,
     replicate_agent_node,
+    resolve_run_evidence_path,
 )
 
 
@@ -150,6 +151,9 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
             result_dir = output / "replication" / "E1"
             result_dir.mkdir(parents=True)
             (result_dir / "figure.png").write_bytes(b"png")
+            (result_dir / "metrics.json").write_text(
+                '{"accuracy": 0.89}\n', encoding="utf-8"
+            )
             (result_dir / "result.json").write_text(
                 json.dumps(
                     {
@@ -158,7 +162,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                             {
                                 "claim_id": "C1",
                                 "reproduced_result": 0.89,
-                                "evidence": ["replication/E1/result.json"],
+                                "evidence": ["replication/E1/metrics.json"],
                             }
                         ],
                         "artifacts": [
@@ -225,6 +229,17 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert str(output / "codegen" / "codebase" / "data_inventory.json") in codegen_prompt
     assert '"status": "not_supplied"' in codegen_prompt
     assert "/explore-data/" not in codegen_prompt
+    plan_prompt = (output / "prompts" / "plan.md").read_text(encoding="utf-8")
+    assert '"experiments"' in plan_prompt
+    assert '"step_id"' in plan_prompt
+    assert '"expected_outputs"' in plan_prompt
+    assert '"command_hint"' not in plan_prompt
+    assert '"verifies"' not in plan_prompt
+    replicate_prompt = (output / "prompts" / "replicate.md").read_text(encoding="utf-8")
+    assert "<experiment_id>/result.json" in replicate_prompt
+    assert '"reproduced_result"' in replicate_prompt
+    assert "replication_log.json" not in replicate_prompt
+    assert "evidence_summary.json" not in replicate_prompt
     report_prompt = (output / "prompts" / "report_E1.md").read_text(encoding="utf-8")
     assert "## 1. Per-experiment reports" in report_prompt
     assert "## 2. Validation claim assessment" in report_prompt
@@ -241,6 +256,29 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "replicate_agent",
         "report_agents",
     ]
+
+
+def test_evidence_paths_are_confined_to_run_outputs(tmp_path: Path):
+    codebase = tmp_path / "codebase"
+    replication = tmp_path / "replication"
+    codebase.mkdir()
+    replication.mkdir()
+    evidence = replication / "E1" / "metrics.json"
+    evidence.parent.mkdir()
+    evidence.write_text('{"accuracy": 0.9}\n', encoding="utf-8")
+
+    assert resolve_run_evidence_path("E1/metrics.json", codebase, replication) == evidence
+    assert (
+        resolve_run_evidence_path("replication/E1/metrics.json", codebase, replication)
+        == evidence
+    )
+
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="inside the copied codebase"):
+        resolve_run_evidence_path(str(outside), codebase, replication)
+    with pytest.raises(RuntimeError, match="regular file"):
+        resolve_run_evidence_path("E1", codebase, replication)
 
 
 def test_smart_replicate_injects_anchors_and_requires_round_log(

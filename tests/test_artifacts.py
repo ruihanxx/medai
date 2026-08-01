@@ -223,3 +223,10 @@ def test_reproduction_report_requires_all_audit_content():
             experiments,
             codegen_plan,
         )
+    with pytest.raises(ValueError, match="missing experiments"):
+        validate_reproduction_report(
+            report.replace("E1 C1 Figure 1", "E10 C10 Figure 1"),
+            claims,
+            experiments,
+            codegen_plan,
+        )
