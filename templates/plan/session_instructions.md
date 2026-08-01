@@ -59,6 +59,8 @@ artifact associated with each experiment must be reproduced.
 {% endfor %}
 {% endfor %}
 
+- Step outputs produced by the planned commands must be written under `{{ codebase_dir }}/`. Do not write them beside the pipeline-managed plan artifact at `{{ replicate_plan_path }}` or into any other pipeline stage directory.
+
 
 ```json
 {"experiments":[{"experiment_id":"E1","claims":["C1"],"artifacts":["Figure 1"],"steps":[{"step_id":"S1","description":"...","command":"...","expected_outputs":["path"]}]}]}
