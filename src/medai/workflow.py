@@ -279,22 +279,12 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
     claims = load_model(Path(state["claims_path"]), ClaimsFile)
     claims_by_id = {claim.claim_id: claim for claim in claims.claims}
-    mappings = [
-        {
-            "experiment_id": experiment.experiment_id,
-            "description": experiment.description,
-            "claims": experiment.claims,
-            "artifacts": experiment.artifacts,
-        }
-        for experiment in experiments.experiments
-    ]
     prompt_path = render_prompt(
         "replication/session_instructions.md",
         config.output / "prompts" / "replicate.md",
         replicate_plan_path=state["replicate_plan_path"],
         codebase_dir=state["codebase_dir"],
         replication_dir=config.output / "replication",
-        experiment_mappings=json.dumps(mappings, ensure_ascii=False, indent=2),
         skills_dir=skills_dir(),
         computation_provider_state_path=(
             config.output / "remote_compute" / "instance.json"
