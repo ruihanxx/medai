@@ -24,7 +24,8 @@ The LangGraph stages are:
 
 1. `preflight`: validate inputs and record CPU, RAM, disk, and GPU resources.
 2. `preprocess_pdf`: convert the PDF to Markdown and copy images.
-3. `preprocessing_agent`: write text/numeric claims and experiment definitions.
+3. `preprocessing_agent`: write text/numeric claims, including compact
+   Figure/Table validation anchors, and experiment definitions.
 4. `codegen_agent`: use the `explore-data` skill to write and validate a
    bounded data inventory, compare local GPU capacity with the paper's
    full-scale requirements, use the `computation-provider` skill to rent
@@ -64,13 +65,17 @@ runs/<run_id>/
 └── remote_compute/instance.json
 ```
 
-Claims have unique `claim_id` values and are limited to `text` or `numeric`.
-Experiments have unique `experiment_id` values and list their claim IDs and
-paper artifact labels. The replication plan and result files must preserve
-those mappings. The data inventory records the configured raw root, adapter,
-bounded scan limits, catalog, explored file samples, warnings, and whether a
-scan was truncated. With no `--data` input it must explicitly report
-`not_supplied` and contain no catalog or samples.
+Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
+have a `final` or `validation` role. A validation anchor found only in a
+Figure/Table uses the same claim schema, with the visual label in
+`provenance.section`; its experiment also lists that label under `artifacts`
+when the visual is to be reproduced. Experiments have unique `experiment_id`
+values and list their claim IDs and paper artifact labels. The replication plan
+and result files must preserve those mappings; replication-plan steps use
+`verifies` to cover every mapped claim and artifact. The data inventory records
+the configured raw root, adapter, bounded scan limits, catalog, explored file
+samples, warnings, and whether a scan was truncated. With no `--data` input it
+must explicitly report `not_supplied` and contain no catalog or samples.
 
 Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset

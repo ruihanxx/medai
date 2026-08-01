@@ -235,10 +235,15 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     record_stage(config.output, "plan_agent", "running")
     replicate_plan_path = config.output / "plan" / "replicate_plan.json"
     transcript_path = config.output / "plan" / "plan_transcript.jsonl"
+    claims = load_model(Path(state["claims_path"]), ClaimsFile)
+    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     prompt_path = render_prompt(
         "plan/session_instructions.md",
         config.output / "prompts" / "plan.md",
         codebase_dir=state["codebase_dir"],
+        paper_markdown=state["paper_markdown"],
+        data_dir=config.data,
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
         resources_path=state["resources_path"],
@@ -247,6 +252,9 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
             config.output / "remote_compute" / "instance.json"
         ),
         replicate_plan_path=replicate_plan_path,
+        claims=claims.model_dump(mode="json"),
+        experiments=experiments.model_dump(mode="json"),
+        gpu_info=resources["gpus"],
     )
     run_agent(
         provider=config.provider,
@@ -257,7 +265,6 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
     plan = load_model(replicate_plan_path, ReplicationPlan)
     validate_replication_plan(experiments, plan)
     record_stage(

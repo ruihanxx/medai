@@ -18,8 +18,9 @@ class Provenance(StrictModel):
 class Claim(StrictModel):
     claim_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     statement: str
+    role: Literal["final", "validation"]
     kind: Literal["text", "numeric"]
-    paper_result: Any
+    paper_result: Any = None
     provenance: Provenance
 
 
@@ -115,6 +116,7 @@ class ReplicationStep(StrictModel):
     description: str
     command: str
     expected_outputs: list[str]
+    verifies: list[str]
 
 
 class ReplicationExperiment(StrictModel):
@@ -122,6 +124,18 @@ class ReplicationExperiment(StrictModel):
     claims: list[str]
     artifacts: list[str]
     steps: list[ReplicationStep] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def mapped_outputs_are_covered(self) -> "ReplicationExperiment":
+        expected = set(self.claims) | set(self.artifacts)
+        verified = {item for step in self.steps for item in step.verifies}
+        unknown = verified - expected
+        missing = expected - verified
+        if unknown:
+            raise ValueError(f"Plan steps verify unknown claims/artifacts: {sorted(unknown)}")
+        if missing:
+            raise ValueError(f"Plan steps do not cover claims/artifacts: {sorted(missing)}")
+        return self
 
 
 class ReplicationPlan(StrictModel):

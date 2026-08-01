@@ -51,10 +51,14 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                         "claims": [
                             {
                                 "claim_id": "C1",
-                                "statement": "Accuracy is reported.",
+                                "statement": "The intermediate curve has the expected shape.",
+                                "role": "validation",
                                 "kind": "numeric",
                                 "paper_result": 0.9,
-                                "provenance": {"page": 1, "section": "Results"},
+                                "provenance": {
+                                    "page": 1,
+                                    "section": "Methods; Figure 1",
+                                },
                             }
                         ]
                     }
@@ -127,6 +131,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                                         "description": "Run",
                                         "command": "python run.py",
                                         "expected_outputs": ["figure.png"],
+                                        "verifies": ["C1", "Figure 1"],
                                     }
                                 ],
                             }
@@ -205,6 +210,10 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     codegen_prompt = (output / "prompts" / "codegen.md").read_text(encoding="utf-8")
     assert str(dataset_patch_path) in codegen_prompt
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
+    assert "including anchors extracted from a" in codegen_prompt
+    plan_prompt = (output / "prompts" / "plan.md").read_text(encoding="utf-8")
+    assert "**C1** (validation, Methods; Figure 1)" in plan_prompt
+    assert "- Figure 1" in plan_prompt
     assert "/explore-data/SKILL.md" in codegen_prompt
     assert "explore-data-analysis" not in codegen_prompt
     manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))

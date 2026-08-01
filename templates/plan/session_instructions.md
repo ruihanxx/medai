@@ -1,6 +1,8 @@
 # Plan agent
 
-You are reviewing and modifying a codebase associated with a medical paper, and generating a step-by-step replication plan for testing whether the code reproduces the paper's reported results. The codebase is at `{{ codebase_dir }}`. Your target is to make sure that the implementation exactly aligns with the target paper's methodology, perfectly matches given computation resources to achieve good efficiency, and is ready to run. After that, you
+You are reviewing and modifying a codebase associated with a medical paper,
+then generating a step-by-step plan for testing whether it reproduces the
+paper's results. The codebase is at `{{ codebase_dir }}`.
 
 ## Inputs:
 - Paper Markdown: `{{ paper_markdown }}`
@@ -39,19 +41,25 @@ anchors for methodology and cohort construction.
 
 {% for claim in claims.claims %}
 {% if claim.role == "validation" %}
-- **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+- **{{ claim.claim_id }}** ({{ claim.role }}, {{ claim.provenance.section }}): {{ claim.statement }}
+{% if claim.paper_result is not none %}
+  - Paper anchor: {{ claim.paper_result | tojson }}
+{% endif %}
 {% endif %}
 {% endfor %}
+
+A validation claim whose provenance names a Figure/Table is an intermediate
+reference anchor extracted from that visual, not a final target to hardcode.
 
 The following experiments were extracted from the paper. Every claim and
 artifact associated with each experiment must be reproduced.
 
 {% for experiment in experiments.experiments %}
-- **{{ experiment.id }}**: {{ experiment.description }}
+- **{{ experiment.experiment_id }}**: {{ experiment.description }}
   - Claims:
 {% for claim_id in experiment.claims %}
-{% set claim = claims.claims | selectattr("id", "equalto", claim_id) | first %}
-    - **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+{% set claim = claims.claims | selectattr("claim_id", "equalto", claim_id) | first %}
+    - **{{ claim.claim_id }}** ({{ claim.role }}): {{ claim.statement }}
 {% endfor %}
   - Artifacts:
 {% for artifact in experiment.artifacts %}
@@ -59,31 +67,63 @@ artifact associated with each experiment must be reproduced.
 {% endfor %}
 {% endfor %}
 
-- Step outputs produced by the planned commands must be written under `{{ codebase_dir }}/`. Do not write them beside the pipeline-managed plan artifact at `{{ replicate_plan_path }}` or into any other pipeline stage directory.
 
-If replication requires remote compute, add this top-level object alongside
-`environment` and `steps`:
+## Your Task
+
+Explore the repository and generate concrete steps for environment setup,
+execution, and output collection. Include remote setup and release as steps when
+remote compute is required. Reproduce experiments one after another.
+
+Each experiment entry must preserve its `claims` and `artifacts` mappings
+exactly. Steps for a Figure/Table-sourced validation claim must produce the
+intermediate evidence and the named artifact needed to assess it.
+
+For each step provide a description, command, shape-prescriptive
+`expected_outputs`, and a `verifies` list containing the claim IDs and artifact
+labels that depend on it. Setup-only steps may use an empty list. Across an
+experiment, the steps must cover every mapped claim and artifact.
+
+Good `expected_outputs` describe structure, such as a metrics JSON field or a
+Figure/Table file path. Do not include paper-reported values such as a target
+accuracy, peak location, or loss. Paper-prescribed setup values such as
+hyperparameters and dataset sizes are allowed in `description` and `command`.
+
+Plan at the paper's full scale. Use efficient compiled, vectorized, or GPU paths
+where appropriate; do not include reduced-scale fallbacks.
+{% if gpu_info %}
+
+Available GPUs: {{ gpu_info | tojson }}
+{% endif %}
+
+All step outputs must be written under `{{ codebase_dir }}/`.
+Use 3–10 steps overall, with roughly 1–3 result-producing steps per experiment.
+
+## Output
+
+Save the plan to `{{ replicate_plan_path }}` with this format:
 
 ```json
 {
-    "remote_compute": {
-        "provider": "autodl",
-        "state_path": "{{ computation_provider_state_path }}",
-        "remote_working_directory": "/root/autodl-tmp/<experiment_id>",
-        "setup_hints": [
-            "Use the AutoDL provider script with the local state at {{ computation_provider_state_path }} to resolve the current SSH connection and connect to the remote server.",
-            "Upload the code from {{ codebase_dir }}/ to /root/autodl-tmp/<experiment_id>/code and the experiment's required input data to /root/autodl-tmp/<experiment_id>/data."
-        ]
+  "experiments": [
+    {
+      "experiment_id": "E1",
+      "claims": ["C1"],
+      "artifacts": ["Figure 1"],
+      "steps": [
+        {
+          "step_id": "S1",
+          "description": "What this step does",
+          "command": "the command to run",
+          "expected_outputs": ["Shape of an expected output, without the paper value"],
+          "verifies": ["C1", "Figure 1"]
+        }
+      ]
     }
+  ]
 }
 ```
 
+The mappings must exactly match `{{ experiments_path }}`. Do not change model
+semantics, hardcode results, or write a fallback plan.
 
-```json
-{"experiments":[{"experiment_id":"E1","claims":["C1"],"artifacts":["Figure 1"],"steps":[{"step_id":"S1","description":"...","command":"...","expected_outputs":["path"]}]}]}
-```
-
-The mappings must exactly match `experiment_todo.json`.
-
-Hard constraints: do not change model semantics, provide a fallback plan, reduce
-the prescribed experiment scale, or hardcode experimental results.
+Begin your analysis now.

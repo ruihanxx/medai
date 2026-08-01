@@ -38,7 +38,12 @@ Read the paper carefully. Prioritize:
   dataset specs, initial conditions, cohort construction rules.
 - **Model architecture / Algorithms** — what to build.
 
-Read the claims at `{{ claims_path }}` and experiments at `{{ experiments_path }}` as supplement to make it clear the output to yield and the structure of the experiment.
+Read the claims at `{{ claims_path }}` and experiments at
+`{{ experiments_path }}` to understand the required outputs and experiment
+structure. A `validation` claim may come from a Figure/Table; its
+`provenance.section` records that label. Resolve any linked image path relative
+to `{{ paper_markdown }}` and inspect it when needed to implement the
+corresponding intermediate check.
 
 You may also skim Results and Discussion sections for context, but
 do not memorize numerical results for hardcoding (see Self-Review).
@@ -47,7 +52,17 @@ do not memorize numerical results for hardcoding (see Self-Review).
 
 First choose the computational stack, then outline the file structure.
 
-**Match the paper's computational demands.** You can refer to the extracted experiment at `{{ experiments_path }}` for computational demands of each experiment. If it is recorded `"NA"`, you need to infer the computational demands from the paper. Implement in the language and framework the methodology genuinely needs, not whichever is fastest to write. If the method's scale depends on compiled or GPU performance — a large-N numerical simulation, an iterative sampling or optimization procedure with many steps, large-scale model training or inference — use tools that deliver it: GPU-enabled libraries (PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba), C/C++ extensions via the available gcc toolchain, or R for R-native methods — pure Python/NumPy on CPU is the easy default, but it is only correct when the paper's own scale doesn't need more. An implementation that is faithful on paper but cannot run at the paper's scale will fail the replication. 
+**Match the paper's computational demands.** Infer each experiment's demands
+from the paper and implement in the language and framework the methodology
+genuinely needs, not whichever is fastest to write. If the method's scale
+depends on compiled or GPU performance — a large-N numerical simulation, an
+iterative sampling or optimization procedure with many steps, large-scale
+model training or inference — use tools that deliver it: GPU-enabled libraries
+(PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba),
+C/C++ extensions via the available gcc toolchain, or R for R-native methods —
+pure Python/NumPy on CPU is the easy default, but it is only correct when the
+paper's own scale doesn't need more. An implementation that is faithful on
+paper but cannot run at the paper's scale will fail the replication.
 {% if gpu_info %}
 
 **This environment has local GPU resources**: {{ gpu_info | tojson }}. Compare their
@@ -277,17 +292,14 @@ that depends on it. For each such upstream step, confirm:
   `codegen_plan.json["ambiguities"]`.
 
 - **Validate intermediates against documented METHOD anchors — never against
-  reported results.** If the methodology states an intermediate the step
-  should reproduce *as part of the procedure* (e.g. "features are scaled to
+  final reported results.** Claims at `{{ claims_path }}` whose `role` is
+  `validation` are the available anchors, including anchors extracted from a
+  Figure/Table. If the methodology states an intermediate the step should
+  reproduce *as part of the procedure* (e.g. "features are scaled to
   unit variance", "the cut leaves N=27056 records", a fold count, a member
   count, a fit coefficient), have the code assert/log its own intermediate
-  against that anchor, and if it is off, prefer the documented alternative.
-  **Critical anti-leakage rule:** an anchor is usable here only if it is a
-  *method input* visible in the methodology — NOT a value the paper reports as
-  a result/claim, and NOT a masked placeholder (e.g. `[NUMERICAL_RESULT]`).
-  Never tune a selection or parameter to hit a reported result; if the only
-  nearby number is a result, keep the methodologically-faithful choice and
-  record the ambiguity instead.
+  against that anchor. Use an anchor to detect divergence, never to hardcode or
+  tune the computation to the paper's answer.
 
 - **Sanity-check the step's output before using it downstream.** If a
   selection yields an implausible count (e.g. one sub-group far smaller than
