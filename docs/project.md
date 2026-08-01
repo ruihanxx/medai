@@ -29,7 +29,7 @@ The LangGraph stages are:
    bounded data inventory, compare local GPU capacity with the paper's
    full-scale requirements, use the `computation-provider` skill to rent
    matching configured remote compute when needed, plan files, and write code.
-5. `audit_agent`: check coverage, install dependencies, smoke-test, and write the replication plan.
+5. `plan_agent`: check coverage, install dependencies, smoke-test, and write the replication plan.
 6. `replicate_agent`: execute every experiment and write evidence.
 7. `report_agents`: sequentially compare each experiment with the paper in one report.
 
@@ -53,8 +53,8 @@ runs/<run_id>/
 ├── codegen/codebase/data_inventory.json
 ├── codegen/codebase/codegen_plan.json
 ├── codegen/codegen_transcript.jsonl
-├── audit/replicate_plan.json
-├── audit/audit_transcript.jsonl
+├── plan/replicate_plan.json
+├── plan/plan_transcript.jsonl
 ├── replication/<experiment_id>/result.json
 ├── replication/replication_transcript.jsonl
 ├── report/reproduction_report.md
@@ -89,7 +89,7 @@ automatically.
   transcript beside that stage's artifacts. Transcript files are diagnostic
   records and are never used as the agent's structured result.
 - Replication agents do not receive paper target values.
-- Audit agents may modify the writable codebase but may not change model
+- Plan agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.
 - Remote compute access is exposed through the `computation-provider` skill;
   its first supported provider is AutoDL. Only instances created by the current

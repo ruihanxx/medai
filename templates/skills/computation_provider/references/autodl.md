@@ -115,7 +115,7 @@ owns the exact `provider_state` format and requires `instance_uuid`. That UUID
 is sufficient for the script to fetch current SSH host, port, and password from
 the snapshot API immediately before each connection or transfer. Do not persist
 the returned password or Jupyter token. Record the selected GPU specification
-and count in the run's plan or audit artifacts; do not hand-edit the provider,
+and count in the run's plan artifacts; do not hand-edit the provider,
 ownership, lifecycle, or provider-state fields.
 
 The script uses these reviewed Pro API operations:

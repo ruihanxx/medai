@@ -112,8 +112,8 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 ),
                 encoding="utf-8",
             )
-        elif name == "audit.md":
-            (output / "audit" / "replicate_plan.json").write_text(
+        elif name == "plan.md":
+            (output / "plan" / "replicate_plan.json").write_text(
                 json.dumps(
                     {
                         "experiments": [
@@ -186,7 +186,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "enter preprocessing stage",
         "enter preprocessing agent stage",
         "enter codegen stage",
-        "enter codegen audit stage",
+        "enter plan stage",
         "enter replicate stage",
         "enter report stage",
     ]
@@ -194,7 +194,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert transcript_paths == [
         "preprocessing/preprocessing_transcript.jsonl",
         "codegen/codegen_transcript.jsonl",
-        "audit/audit_transcript.jsonl",
+        "plan/plan_transcript.jsonl",
         "replication/replication_transcript.jsonl",
         "report/E1_transcript.jsonl",
     ]
@@ -214,7 +214,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "preprocess_pdf",
         "preprocessing_agent",
         "codegen_agent",
-        "audit_agent",
+        "plan_agent",
         "replicate_agent",
         "report_agents",
     ]
@@ -241,7 +241,7 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     monkeypatch.setattr(workflow, "preprocess_pdf_node", fails)
     monkeypatch.setattr(workflow, "preprocessing_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "codegen_agent_node", must_not_run)
-    monkeypatch.setattr(workflow, "audit_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "plan_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "replicate_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "report_agents_node", must_not_run)
 

@@ -66,7 +66,7 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         "preflight",
         "preprocessing",
         "codegen",
-        "audit",
+        "plan",
         "replication",
         "report",
         "prompts",
@@ -229,15 +229,15 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     return {"codebase_dir": str(codebase_dir)}
 
 
-def audit_agent_node(state: WorkflowState) -> dict[str, str]:
-    print("enter codegen audit stage")
+def plan_agent_node(state: WorkflowState) -> dict[str, str]:
+    print("enter plan stage")
     config = state["config"]
-    record_stage(config.output, "audit_agent", "running")
-    replicate_plan_path = config.output / "audit" / "replicate_plan.json"
-    transcript_path = config.output / "audit" / "audit_transcript.jsonl"
+    record_stage(config.output, "plan_agent", "running")
+    replicate_plan_path = config.output / "plan" / "replicate_plan.json"
+    transcript_path = config.output / "plan" / "plan_transcript.jsonl"
     prompt_path = render_prompt(
-        "audit/session_instructions.md",
-        config.output / "prompts" / "audit.md",
+        "plan/session_instructions.md",
+        config.output / "prompts" / "plan.md",
         codebase_dir=state["codebase_dir"],
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
@@ -262,7 +262,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
     validate_replication_plan(experiments, plan)
     record_stage(
         config.output,
-        "audit_agent",
+        "plan_agent",
         "completed",
         outputs=[str(replicate_plan_path), str(transcript_path)],
     )
@@ -416,15 +416,15 @@ def create_workflow():
     builder.add_node("preprocess_pdf", preprocess_pdf_node)
     builder.add_node("preprocessing_agent", preprocessing_agent_node)
     builder.add_node("codegen_agent", codegen_agent_node)
-    builder.add_node("audit_agent", audit_agent_node)
+    builder.add_node("plan_agent", plan_agent_node)
     builder.add_node("replicate_agent", replicate_agent_node)
     builder.add_node("report_agents", report_agents_node)
     builder.add_edge(START, "preflight")
     builder.add_edge("preflight", "preprocess_pdf")
     builder.add_edge("preprocess_pdf", "preprocessing_agent")
     builder.add_edge("preprocessing_agent", "codegen_agent")
-    builder.add_edge("codegen_agent", "audit_agent")
-    builder.add_edge("audit_agent", "replicate_agent")
+    builder.add_edge("codegen_agent", "plan_agent")
+    builder.add_edge("plan_agent", "replicate_agent")
     builder.add_edge("replicate_agent", "report_agents")
     builder.add_edge("report_agents", END)
     return builder.compile()
