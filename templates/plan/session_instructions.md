@@ -61,6 +61,29 @@ artifact associated with each experiment must be reproduced.
 
 - Step outputs produced by the planned commands must be written under `{{ codebase_dir }}/`. Do not write them beside the pipeline-managed plan artifact at `{{ replicate_plan_path }}` or into any other pipeline stage directory.
 
+If replication requires remote compute, add this top-level object alongside
+`environment` and `steps`:
+
+```json
+{
+    "remote_compute": {
+        "provider": "autodl",
+        "state_path": "{{ computation_provider_state_path }}",
+        "remote_working_directory": "/root/autodl-tmp/<experiment_id>",
+        "setup_hints": [
+            "Read {{ skills_dir }}/computation_provider/SKILL.md and its AutoDL provider reference before any remote operation.",
+            "Use the provider script with {{ computation_provider_state_path }} for every status, upload, execution, download, and lifecycle operation; never hand-edit provider state.",
+            "Before uploading large inputs, verify the instance is running and confirm its GPU count and VRAM, CPU architecture, RAM, disk space, Python, framework, CUDA, and cuDNN satisfy the experiment requirements.",
+            "Run environment-dependent commands through bash -lc and source /root/.bashrc in each command because remote shell state does not persist between executions.",
+            "Install dependencies from the codebase manifest with paper-specified versions, run a minimal accelerator smoke test, and record all setup commands and failures.",
+            "Keep code, input data, checkpoints, logs, and results under separate paths inside /root/autodl-tmp/<experiment_id>; verify transferred file counts, sizes, and checksums when required.",
+            "Run long experiments through a detached wrapper that records the exact command, PID, stdout/stderr log, and numeric exit status; treat missing or nonzero status and incomplete outputs as failures.",
+            "Download all required results, logs, and evidence into {{ codebase_dir }}/ before the instance is released, and never persist passwords, tokens, or other credentials in plans, commands, logs, or artifacts."
+        ]
+    }
+}
+```
+
 
 ```json
 {"experiments":[{"experiment_id":"E1","claims":["C1"],"artifacts":["Figure 1"],"steps":[{"step_id":"S1","description":"...","command":"...","expected_outputs":["path"]}]}]}
