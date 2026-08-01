@@ -90,6 +90,44 @@ Track Python dependencies in `pyproject.toml` or `requirements.txt` (your choice
 
 **Dataset Processing and Cohort Construction**
 
+Before writing `codegen_plan.json`, write the data inventory to
+`{{ data_inventory_path }}`. This artifact is required even when no data was
+supplied.
+
+{% if data_dir %}
+Inspect `{{ data_dir }}` directly and record:
+
+- `schema_version`: `1`;
+- `dataset`: a meaningful dataset `id`, the exact root `{{ data_dir }}`, an
+  `adapter` value naming the inspection method used, and status `explored`;
+- `scan`: actual files and bytes inspected, whether inspection was truncated,
+  and the numeric limits used;
+- `catalog`: the relevant files, formats, sizes, and structural metadata;
+- `explored_files`: representative schemas and bounded samples needed to
+  implement the paper; and
+- `warnings`: missing readers, unsupported formats, truncation, and unresolved
+  ambiguities.
+
+Keep the raw root read-only. Bound the number of files, bytes, rows, and field
+lengths read, and record those bounds in `scan.limits`. Never extract archives
+or deserialize pickle, joblib, model checkpoints, or any other format that may
+execute code. Prefer dataset documentation and metadata before sampling large
+files; inspect only the representative content required for implementation.
+{% else %}
+No data was supplied. Write this exact empty inventory structure:
+
+```json
+{
+  "schema_version": 1,
+  "dataset": {"id": null, "root": null, "adapter": null, "status": "not_supplied"},
+  "scan": {"files_scanned": 0, "bytes_scanned": 0, "truncated": false, "limits": {}},
+  "catalog": [],
+  "explored_files": [],
+  "warnings": []
+}
+```
+{% endif %}
+
 Strictly follow the paper's dataset processing and cohort construction procedures.
 
 When the paper uses specialized cohort, clinical, or methodological terms that cannot be mapped directly to the available dataset, infer the closest executable implementation using the dataset schema, metadata, and relevant medical knowledge. If the mapping remains unclear, search external sources.
@@ -293,7 +331,8 @@ that depends on it. For each such upstream step, confirm:
 - Write into `{{ codebase_dir }}/`, except that dataset-document improvements
   may be written to `{{ dataset_patch_path }}` as described above. Do not modify
   the source dataset documents or raw data.
-- `codegen_plan.json` and `config.yaml` both live at the codebase root.
+- `data_inventory.json`, `codegen_plan.json`, and `config.yaml` all live at the
+  codebase root.
 - Do not commit (no `git commit`) — the host-side EXIT trap captures
   the diff against an empty initial state.
 - Do not run the methodology end-to-end; that is the next phase.

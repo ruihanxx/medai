@@ -33,10 +33,11 @@ The LangGraph stages are:
 1. `preflight`: validate inputs and record CPU, RAM, disk, and GPU resources.
 2. `preprocess_pdf`: convert the PDF to Markdown and copy images.
 3. `preprocessing_agent`: write text/numeric claims and experiment definitions.
-4. `codegen_agent`: use the `explore-data` skill to write and validate a
-   bounded data inventory, compare local GPU capacity with the paper's
-   full-scale requirements, use the `computation-provider` skill to rent
-   matching configured remote compute when needed, plan files, and write code.
+4. `codegen_agent`: inspect supplied data directly through bounded, read-only,
+   non-executing reads and write a validated data inventory, compare local GPU
+   capacity with the paper's full-scale requirements, use the
+   `computation-provider` skill to rent matching configured remote compute when
+   needed, plan files, and write code.
 5. `plan_agent`: check coverage, install dependencies, smoke-test, and write the replication plan.
 6. `replicate_agent`: execute every experiment and write evidence.
 7. `report_agents`: sequentially update one report with per-experiment

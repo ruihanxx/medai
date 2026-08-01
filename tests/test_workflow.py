@@ -222,8 +222,9 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     codegen_prompt = (output / "prompts" / "codegen.md").read_text(encoding="utf-8")
     assert str(dataset_patch_path) in codegen_prompt
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
-    assert "/explore-data/SKILL.md" in codegen_prompt
-    assert "explore-data-analysis" not in codegen_prompt
+    assert str(output / "codegen" / "codebase" / "data_inventory.json") in codegen_prompt
+    assert '"status": "not_supplied"' in codegen_prompt
+    assert "/explore-data/" not in codegen_prompt
     report_prompt = (output / "prompts" / "report_E1.md").read_text(encoding="utf-8")
     assert "## 1. Per-experiment reports" in report_prompt
     assert "## 2. Validation claim assessment" in report_prompt
