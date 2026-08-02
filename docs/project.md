@@ -20,9 +20,10 @@ The `VERITAS_PLATFORM` build argument and wrapper both default to
 Desktop Veritas launcher.
 Dependency installation uses PyPI by default; `MEDAI_PYPI_INDEX` may select a
 compatible package index at build time without changing the resulting runtime
-configuration. The image build imports MinerU's hybrid analysis entrypoint
-after installation so undeclared transitive dependencies fail during the build
-rather than during PDF preprocessing.
+configuration. The PDF extra explicitly installs Accelerate for MinerU's hybrid
+VLM backend. The image build imports Accelerate and MinerU's hybrid analysis
+entrypoint after installation so undeclared transitive dependencies fail during
+the build rather than during PDF preprocessing.
 
 The `codex` provider accepts `--codex-model` and
 `--codex-reasoning-effort`. When omitted, these values come from

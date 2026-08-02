@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /opt/medai/.venv --python 3.12 \
     && uv pip install --python /opt/medai/.venv/bin/python ".[pdf]" \
     && /opt/medai/.venv/bin/python -c \
-        "import mineru.backend.hybrid.hybrid_analyze"
+        "import accelerate; import mineru.backend.hybrid.hybrid_analyze"
 
 ENV PATH="/opt/medai/.venv/bin:${PATH}" \
     VIRTUAL_ENV=/opt/medai/.venv \
