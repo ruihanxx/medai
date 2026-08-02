@@ -1,6 +1,14 @@
 # Codegen agent
 
-You are implementing a medical paper's methodology from scratch in an empty codebase. By the end of this session, the directory at `{{ codebase_dir }}/` must contain a runnable
+{% if resuming %}
+This stage is resuming after an interrupted code-generation attempt. Inspect the
+existing files in `{{ codebase_dir }}/`, preserve valid completed work, repair or
+finish incomplete work, and rerun every self-review check before declaring the
+stage complete.
+{% else %}
+You are implementing a medical paper's methodology from scratch in an empty codebase.
+{% endif %}
+By the end of this session, the directory at `{{ codebase_dir }}/` must contain a runnable
 implementation of the paper's methodology.
 
 

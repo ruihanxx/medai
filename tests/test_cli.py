@@ -1,10 +1,10 @@
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
-
 from medai.cli import app
 from medai.config import RunConfig
+from medai.pipeline_state import PipelineState, build_run_inputs
+from typer.testing import CliRunner
 
 runner = CliRunner()
 
@@ -100,3 +100,43 @@ def test_output_cannot_be_inside_repo(tmp_path: Path):
             data=None,
             siliconflow_config=None,
         )
+
+
+def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+    PipelineState.create(output, build_run_inputs(config))
+    invoked = []
+
+    class FakeWorkflow:
+        def invoke(self, state):
+            invoked.append(state["config"].output)
+
+    monkeypatch.setattr("medai.cli.create_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr("medai.cli.release_run_computation_instance", lambda config: None)
+
+    result = runner.invoke(
+        app,
+        [
+            "--paper",
+            str(paper),
+            "--output",
+            str(output),
+            "--provider",
+            "codex",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert f"Resuming MedAI run: {output}" in result.stdout
+    assert invoked == [output]
+    assert PipelineState(output).state["resume_count"] == 1

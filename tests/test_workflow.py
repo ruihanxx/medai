@@ -2,9 +2,8 @@ import json
 from pathlib import Path
 
 import pytest
-
-from medai.artifacts import initialize_manifest
 from medai.config import RunConfig
+from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.workflow import (
     codegen_agent_node,
@@ -31,7 +30,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         data=None,
         siliconflow_config=None,
     )
-    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    PipelineState.create(output, {"paper": str(paper), "provider": "codex"})
     transcript_paths = []
 
     def fake_convert(paper_path, preprocessing_dir):
@@ -311,6 +310,13 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "report_agents",
     ]
 
+    resumed = create_workflow().invoke({"config": config})
+    resumed_lines = capsys.readouterr().out.splitlines()
+    assert not [line for line in resumed_lines if line.startswith("enter ")]
+    assert len([line for line in resumed_lines if line.startswith("resume ")]) == 7
+    assert Path(resumed["report_path"]) == output / "report" / "reproduction_report.md"
+    assert len(transcript_paths) == 5
+
 
 def test_replication_outputs_stay_inside_run_roots(tmp_path: Path):
     codebase = tmp_path / "codebase"
@@ -339,7 +345,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
     codebase.mkdir(parents=True)
     (output / "prompts").mkdir()
     (output / "replication").mkdir()
-    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    PipelineState.create(output, {"paper": str(paper), "provider": "codex"})
     config = RunConfig.create(
         paper=paper,
         output=output,
@@ -556,6 +562,7 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
         computation_provider_state_path=tmp_path / "instance.json",
         gpu_info=[],
         computation_provider="AutoDL",
+        resuming=False,
     )
 
     prompt = prompt_path.read_text(encoding="utf-8")
@@ -637,7 +644,7 @@ def test_codegen_requires_data_inventory(tmp_path: Path, monkeypatch):
         data=None,
         siliconflow_config=None,
     )
-    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    PipelineState.create(output, {"paper": str(paper), "provider": "codex"})
     resources_path = tmp_path / "resources.json"
     resources_path.write_text(
         json.dumps({"cpu": {}, "memory": {}, "disk": {}, "gpus": []}),
@@ -689,7 +696,7 @@ def test_codegen_rejects_inventory_that_disagrees_with_data_input(
         data=data,
         siliconflow_config=None,
     )
-    initialize_manifest(output, {"paper": str(paper), "provider": "codex"})
+    PipelineState.create(output, {"paper": str(paper), "provider": "codex"})
     resources_path = tmp_path / "resources.json"
     resources_path.write_text(
         json.dumps({"cpu": {}, "memory": {}, "disk": {}, "gpus": []}),

@@ -35,6 +35,7 @@ def test_codex_prompt_uses_stdin_and_writes_transcript(tmp_path: Path, monkeypat
     prompt = tmp_path / "prompt.md"
     prompt.write_text("do the work", encoding="utf-8")
     transcript = tmp_path / "agent_transcript.jsonl"
+    transcript.write_text('{"type":"interrupted"}\n', encoding="utf-8")
 
     run_agent(
         provider="codex",
@@ -55,6 +56,9 @@ def test_codex_prompt_uses_stdin_and_writes_transcript(tmp_path: Path, monkeypat
     ]
     assert captured["process"].stdin.getvalue() == "do the work"
     assert '"type":"done"' in transcript.read_text(encoding="utf-8")
+    assert '"type":"interrupted"' in (
+        tmp_path / "agent_transcript.attempt-1.jsonl"
+    ).read_text(encoding="utf-8")
 
 
 def test_siliconflow_key_is_removed_from_child_environment():

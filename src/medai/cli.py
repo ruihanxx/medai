@@ -5,8 +5,8 @@ from typing import Optional
 
 import typer
 
-from medai.artifacts import fail_manifest, initialize_manifest
 from medai.config import RunConfig
+from medai.pipeline_state import PipelineState, build_run_inputs
 from medai.workflow import create_workflow, release_run_computation_instance
 
 app = typer.Typer(
@@ -19,7 +19,11 @@ app = typer.Typer(
 @app.callback(invoke_without_command=True)
 def run(
     paper: Path = typer.Option(..., "--paper", help="Path to paper.pdf"),
-    output: Path = typer.Option(..., "--output", help="Writable output directory"),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        help="New output directory or existing run to resume",
+    ),
     provider: str = typer.Option("codex", "--provider"),
     repo: Optional[Path] = typer.Option(None, "--repo", help="Optional code repository"),
     data: Optional[Path] = typer.Option(None, "--data", help="Optional local data directory"),
@@ -56,27 +60,22 @@ def run(
             codex_reasoning_effort=codex_reasoning_effort,
             smart_replicate=smart_replicate,
         )
+        inputs = build_run_inputs(config)
         if (config.output / "manifest.json").exists():
-            raise ValueError(
-                f"Output already contains a medai run: {config.output}. Use a new output directory."
-            )
-        config.output.mkdir(parents=True, exist_ok=True)
-        initialize_manifest(
-            config.output,
-            {
-                "paper": str(config.paper),
-                "repo": str(config.repo) if config.repo else None,
-                "data": str(config.data) if config.data else None,
-                "provider": config.provider,
-                "codex_model": config.codex_model,
-                "codex_reasoning_effort": config.codex_reasoning_effort,
-                "smart_replicate": config.smart_replicate,
-            },
-        )
+            pipeline_state = PipelineState(config.output)
+            pipeline_state.resume(inputs)
+            typer.echo(f"Resuming MedAI run: {config.output}")
+        else:
+            if config.output.is_dir() and any(config.output.iterdir()):
+                raise ValueError(
+                    f"Output is not empty and has no MedAI pipeline state: {config.output}"
+                )
+            pipeline_state = PipelineState.create(config.output, inputs)
+        run_active = True
         create_workflow().invoke({"config": config})
         release_run_computation_instance(config)
     except Exception as exc:
-        if "config" in locals() and (config.output / "manifest.json").exists():
+        if "run_active" in locals():
             cleanup_error = None
             try:
                 release_run_computation_instance(config)
@@ -85,7 +84,7 @@ def run(
             message = str(exc)
             if cleanup_error:
                 message = f"{message}; cleanup error: {cleanup_error}"
-            fail_manifest(config.output, message)
+            pipeline_state.fail(message)
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 

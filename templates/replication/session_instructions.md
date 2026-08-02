@@ -201,6 +201,17 @@ Read `{{ replicate_plan_path }}` and execute every step in its listed order.
 Run commands from `{{ codebase_dir }}/`. If a step fails, try to
 fix the issue before moving on.
 
+### Resume an interrupted attempt
+
+If `{{ replication_dir }}/replication_log.json` already exists, treat it as a
+partial checkpoint, not as proof that the stage is complete. Validate the
+longest ordered prefix of logged plan steps against the current plan and verify
+that every cited output file still exists. Preserve successful steps in that
+valid prefix and continue from the first missing, failed, mismatched, or
+artifact-less result-producing step. Rerun that step and all later steps. Never
+skip work merely because an output filename exists, and never discard valid
+earlier evidence when continuing.
+
 ## Evidence Collection
 
 Maintain two files. Update `replication_log.json` after **each completed step** (rewrite the full JSON each time), not only at the end — if the session is cut short, the steps already logged survive, whereas an end-only log is lost entirely.

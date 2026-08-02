@@ -47,6 +47,17 @@ def run_agent(
     """Run an agent and stream its provider JSONL transcript to disk."""
     prompt = prompt_path.read_text(encoding="utf-8")
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
+    if transcript_path.is_file() and transcript_path.stat().st_size:
+        attempt = 1
+        archived = transcript_path.with_name(
+            f"{transcript_path.stem}.attempt-{attempt}{transcript_path.suffix}"
+        )
+        while archived.exists():
+            attempt += 1
+            archived = transcript_path.with_name(
+                f"{transcript_path.stem}.attempt-{attempt}{transcript_path.suffix}"
+            )
+        transcript_path.replace(archived)
 
     adapter_context = nullcontext(None)
     if provider == "codex-siliconflow":
