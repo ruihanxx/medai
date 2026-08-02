@@ -5,10 +5,11 @@
 `./medai` requires `--paper` and `--provider`; `--repo` and `--data` are
 optional. Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
-mounted read-only. Each invocation creates a unique run directory under the
+mounted read-only. A new invocation creates a unique run directory under the
 repository-root `runs/` directory, named from its UTC start time and paper
-filename. That run directory is the only writable host path mounted into the
-container.
+filename. Passing `--output runs/<run_id>` mounts that existing directory and
+resumes it. The selected run directory is the only writable host path mounted
+into the container.
 
 The local `medai:local` image is a thin overlay on the canonical Veritas image
 `ghcr.io/chicagohai/veritas:latest` (configurable with the Docker build argument
@@ -65,11 +66,23 @@ when it starts.
 There is no reduced-scale fallback. Missing evidence, invalid artifacts, or an
 agent failure stops the run explicitly.
 
+`manifest.json` is the canonical pipeline state. It records a versioned input
+fingerprint, overall and per-stage status, attempts, timestamps, outputs, and
+stage checkpoints. On reuse of an output directory, version 1 manifests are
+migrated, the paper hash and output-affecting configuration must match, and
+only stages marked `completed` are skipped. Every skipped stage reloads and
+validates its canonical artifacts before downstream work proceeds. A
+`running` or `failed` stage starts another attempt while retaining its writable
+artifacts. Code generation records source preparation before invoking its
+agent; replication continues from the valid ordered prefix in its step log;
+report generation checkpoints every completed experiment. A completed run is
+therefore safe to invoke again and becomes a validation-only no-op.
+
 ## Persistent artifacts
 
 ```text
 runs/<run_id>/
-├── manifest.json
+├── manifest.json  # canonical pipeline state and input fingerprint
 ├── preflight/resources.json
 ├── preprocessing/paper.md
 ├── preprocessing/artifacts/
@@ -122,8 +135,10 @@ automatically.
   `templates/skills/`. Neither is stored under `src/`.
 - Prompts are rendered with Jinja2 and saved before invocation.
 - Each agent invocation's provider event stream is preserved as a JSONL
-  transcript beside that stage's artifacts. Transcript files are diagnostic
-  records and are never used as the agent's structured result.
+  transcript beside that stage's artifacts. Before a retried invocation, an
+  existing transcript is preserved as `<name>.attempt-<N>.jsonl`. Transcript
+  files are diagnostic records and are never used as the agent's structured
+  result.
 - Replication agents do not receive paper target values by default. Smart
   Replicate exposes only claim-level audited anchors and requires the baseline,
   comparisons, hypotheses, changes, commands, and actual round results in

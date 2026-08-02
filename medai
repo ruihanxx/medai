@@ -9,6 +9,7 @@ repo=""
 data=""
 provider="codex"
 siliconflow_config=""
+requested_output=""
 forwarded=()
 
 while [[ $# -gt 0 ]]; do
@@ -25,9 +26,25 @@ while [[ $# -gt 0 ]]; do
             data="$(realpath "$2")"
             shift 2
             ;;
-        --output|--output=*)
-            echo "ERROR: output is created automatically under $PROJECT_ROOT/runs" >&2
-            exit 2
+        --output)
+            if [[ $# -lt 2 ]]; then
+                echo "ERROR: --output requires a run directory" >&2
+                exit 2
+            fi
+            requested_output="$2"
+            if [[ -z "$requested_output" ]]; then
+                echo "ERROR: --output requires a run directory" >&2
+                exit 2
+            fi
+            shift 2
+            ;;
+        --output=*)
+            requested_output="${1#--output=}"
+            if [[ -z "$requested_output" ]]; then
+                echo "ERROR: --output requires a run directory" >&2
+                exit 2
+            fi
+            shift
             ;;
         --provider)
             provider="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')"
@@ -48,6 +65,7 @@ Options:
   --codex-model MODEL
   --codex-reasoning-effort EFFORT
   --smart-replicate
+  --output RUN_DIR              Resume an existing run under ./runs
   --help
 EOF
             exit 0
@@ -83,15 +101,33 @@ paper_name="$(basename "$paper")"
 paper_name="${paper_name%.*}"
 paper_name="$(printf '%s' "$paper_name" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//')"
 [[ -n "$paper_name" ]] || paper_name="paper"
-run_prefix="$(date -u +%Y%m%dT%H%M%SZ)_${paper_name}"
-output="$PROJECT_ROOT/runs/$run_prefix"
-run_suffix=1
 mkdir -p "$PROJECT_ROOT/runs"
-while ! mkdir "$output" 2>/dev/null; do
-    output="$PROJECT_ROOT/runs/${run_prefix}_$run_suffix"
-    run_suffix=$((run_suffix + 1))
-done
-printf 'Run output: %s\n' "$output"
+runs_root="$(cd "$PROJECT_ROOT/runs" && pwd -P)"
+if [[ -n "$requested_output" ]]; then
+    if [[ ! -d "$requested_output" ]]; then
+        echo "ERROR: --output must be an existing MedAI run directory" >&2
+        exit 2
+    fi
+    output="$(cd "$requested_output" && pwd -P)"
+    if [[ "$output" != "$runs_root/"* ]]; then
+        echo "ERROR: --output must be an existing directory under $runs_root" >&2
+        exit 2
+    fi
+    if [[ ! -f "$output/manifest.json" ]]; then
+        echo "ERROR: --output does not contain manifest.json: $output" >&2
+        exit 2
+    fi
+    printf 'Resuming run output: %s\n' "$output"
+else
+    run_prefix="$(date -u +%Y%m%dT%H%M%SZ)_${paper_name}"
+    output="$runs_root/$run_prefix"
+    run_suffix=1
+    while ! mkdir "$output" 2>/dev/null; do
+        output="$runs_root/${run_prefix}_$run_suffix"
+        run_suffix=$((run_suffix + 1))
+    done
+    printf 'Run output: %s\n' "$output"
+fi
 
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
     docker build --platform linux/amd64 \
@@ -102,6 +138,7 @@ fi
 
 docker_args=(
     --rm
+    --env "MEDAI_HOST_PAPER=$paper"
     --mount "type=bind,src=$paper,dst=/workspace/inputs/paper.pdf,readonly"
     --mount "type=bind,src=$output,dst=/workspace/output"
 )
@@ -112,10 +149,12 @@ cli_args=(
 )
 
 if [[ -n "$repo" ]]; then
+    docker_args+=(--env "MEDAI_HOST_REPO=$repo")
     docker_args+=(--mount "type=bind,src=$repo,dst=/workspace/repo,readonly")
     cli_args+=(--repo /workspace/repo)
 fi
 if [[ -n "$data" ]]; then
+    docker_args+=(--env "MEDAI_HOST_DATA=$data")
     docker_args+=(--mount "type=bind,src=$data,dst=/workspace/data,readonly")
     cli_args+=(--data /workspace/data)
 fi
