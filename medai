@@ -94,7 +94,10 @@ done
 printf 'Run output: %s\n' "$output"
 
 if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-    docker build -f "$PROJECT_ROOT/docker/Dockerfile" -t "$IMAGE_NAME" "$PROJECT_ROOT"
+    docker build --platform linux/amd64 \
+        -f "$PROJECT_ROOT/docker/Dockerfile" \
+        -t "$IMAGE_NAME" \
+        "$PROJECT_ROOT"
 fi
 
 docker_args=(

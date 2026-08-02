@@ -64,8 +64,7 @@ def generate_sample_data():
 
 def create_line_plot(data, ax=None):
     """Create line plot with best practices."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
     ax.plot(data['x'], data['y1'], label='sin(x)', linewidth=2, marker='o',
@@ -82,15 +81,14 @@ def create_line_plot(data, ax=None):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
 
 def create_scatter_plot(data, ax=None):
     """Create scatter plot with color and size variations."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
     # Color based on distance from origin
@@ -110,15 +108,14 @@ def create_scatter_plot(data, ax=None):
     cbar = plt.colorbar(scatter, ax=ax)
     cbar.set_label('Distance from origin')
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
 
 def create_bar_chart(data, ax=None):
     """Create bar chart with error bars and styling."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
     x_pos = np.arange(len(data['categories']))
@@ -144,15 +141,14 @@ def create_bar_chart(data, ax=None):
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
 
 def create_histogram(data, ax=None):
     """Create histogram with density overlay."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
     n, bins, patches = ax.hist(data['hist_data'], bins=30, density=True,
@@ -171,15 +167,14 @@ def create_histogram(data, ax=None):
     ax.legend()
     ax.grid(True, axis='y', alpha=0.3, linestyle='--')
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
 
 def create_heatmap(data, ax=None):
     """Create heatmap with colorbar and annotations."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 8), constrained_layout=True)
 
     im = ax.imshow(data['matrix'], cmap='coolwarm', aspect='auto',
@@ -199,15 +194,14 @@ def create_heatmap(data, ax=None):
     ax.set_ylabel('Y Index')
     ax.set_title('Heatmap Example')
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
 
 def create_contour_plot(data, ax=None):
     """Create contour plot with filled contours and labels."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 8), constrained_layout=True)
 
     # Filled contours
@@ -230,40 +224,38 @@ def create_contour_plot(data, ax=None):
     ax.set_title('Contour Plot Example')
     ax.set_aspect('equal')
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
 
 def create_box_plot(data, ax=None):
     """Create box plot comparing distributions."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
     # Generate multiple distributions
     box_data = [np.random.normal(0, std, 100) for std in range(1, 5)]
 
-    ax.boxplot(box_data, labels=['Group 1', 'Group 2', 'Group 3', 'Group 4'],
-               patch_artist=True, showmeans=True,
-               boxprops=dict(facecolor='lightblue', edgecolor='black'),
-               medianprops=dict(color='red', linewidth=2),
-               meanprops=dict(marker='D', markerfacecolor='green', markersize=8))
+    _bp = ax.boxplot(box_data, labels=['Group 1', 'Group 2', 'Group 3', 'Group 4'],
+                     patch_artist=True, showmeans=True,
+                     boxprops=dict(facecolor='lightblue', edgecolor='black'),
+                     medianprops=dict(color='red', linewidth=2),
+                     meanprops=dict(marker='D', markerfacecolor='green', markersize=8))
 
     ax.set_xlabel('Groups')
     ax.set_ylabel('Values')
     ax.set_title('Box Plot Example')
     ax.grid(True, axis='y', alpha=0.3, linestyle='--')
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
 
 def create_violin_plot(data, ax=None):
     """Create violin plot showing distribution shapes."""
-    created_figure = ax is None
-    if created_figure:
+    if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
 
     # Generate multiple distributions
@@ -285,7 +277,7 @@ def create_violin_plot(data, ax=None):
     ax.set_xticklabels(['Group 1', 'Group 2', 'Group 3', 'Group 4'])
     ax.grid(True, axis='y', alpha=0.3, linestyle='--')
 
-    if created_figure:
+    if ax is None:
         return fig
     return ax
 
@@ -391,11 +383,11 @@ def main():
     }
 
     if args.plot_type == '3d':
-        create_3d_plot()
+        _fig = create_3d_plot()
     elif args.plot_type == 'all':
-        create_comprehensive_figure()
+        _fig = create_comprehensive_figure()
     else:
-        plot_functions[args.plot_type](data)
+        _fig = plot_functions[args.plot_type](data)
 
     # Save figure
     plt.savefig(args.output, dpi=300, bbox_inches='tight')

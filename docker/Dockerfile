@@ -1,29 +1,27 @@
-FROM python:3.11-slim
+ARG VERITAS_IMAGE=ghcr.io/chicagohai/veritas:latest
+ARG VERITAS_PLATFORM=linux/amd64
+FROM --platform=${VERITAS_PLATFORM} ${VERITAS_IMAGE}
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
-        curl \
-        git \
-        nodejs \
-        npm \
-        openssh-client \
-        rsync \
-        sshpass \
-    && npm install -g @anthropic-ai/claude-code @openai/codex \
-    && rm -rf /var/lib/apt/lists/*
-
+USER root
 WORKDIR /opt/medai
+ARG MEDAI_PYPI_INDEX=https://pypi.org/simple
+
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY templates ./templates
-RUN pip install ".[pdf]"
 
-COPY docker/entrypoint.sh /usr/local/bin/medai-entrypoint
-RUN chmod +x /usr/local/bin/medai-entrypoint
+RUN --mount=type=cache,target=/root/.cache/uv \
+    UV_DEFAULT_INDEX="${MEDAI_PYPI_INDEX}" \
+    UV_HTTP_TIMEOUT=120 UV_HTTP_RETRIES=5 UV_CONCURRENT_DOWNLOADS=4 \
+    uv venv /opt/medai/.venv --python 3.12 \
+    && uv pip install --python /opt/medai/.venv/bin/python ".[pdf]"
 
+ENV PATH="/opt/medai/.venv/bin:${PATH}" \
+    VIRTUAL_ENV=/opt/medai/.venv \
+    PYTHONPATH=""
+
+COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/medai-entrypoint
+
+USER veritas
+WORKDIR /workspace
 ENTRYPOINT ["medai-entrypoint"]

@@ -10,6 +10,18 @@ repository-root `runs/` directory, named from its UTC start time and paper
 filename. That run directory is the only writable host path mounted into the
 container.
 
+The local `medai:local` image is a thin overlay on the canonical Veritas image
+`ghcr.io/chicagohai/veritas:latest` (configurable with the Docker build argument
+`VERITAS_IMAGE`). It reuses the Veritas CUDA and scientific runtime while
+installing MedAI into an isolated `/opt/medai/.venv` and replacing only the
+container entrypoint. The Veritas image and its `/app/.venv` remain unchanged.
+The `VERITAS_PLATFORM` build argument and wrapper both default to
+`linux/amd64`, matching the platform published by Veritas and used by the
+Desktop Veritas launcher.
+Dependency installation uses PyPI by default; `MEDAI_PYPI_INDEX` may select a
+compatible package index at build time without changing the resulting runtime
+configuration.
+
 The `codex` provider accepts `--codex-model` and
 `--codex-reasoning-effort`. When omitted, these values come from
 `MEDAI_CODEX_MODEL` and `MEDAI_CODEX_REASONING_EFFORT` in the project `.env`.
