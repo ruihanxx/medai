@@ -18,7 +18,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pdf = ["mineru[pipeline]>=3,<4"]
+pdf = [
+    "mineru[pipeline]>=3,<4",
+    "six>=1.16,<2",
+]
 dev = [
     "pytest>=8,<9",
     "ruff>=0.12,<1",

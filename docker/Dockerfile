@@ -14,7 +14,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     UV_DEFAULT_INDEX="${MEDAI_PYPI_INDEX}" \
     UV_HTTP_TIMEOUT=120 UV_HTTP_RETRIES=5 UV_CONCURRENT_DOWNLOADS=4 \
     uv venv /opt/medai/.venv --python 3.12 \
-    && uv pip install --python /opt/medai/.venv/bin/python ".[pdf]"
+    && uv pip install --python /opt/medai/.venv/bin/python ".[pdf]" \
+    && /opt/medai/.venv/bin/python -c \
+        "import mineru.backend.hybrid.hybrid_analyze"
 
 ENV PATH="/opt/medai/.venv/bin:${PATH}" \
     VIRTUAL_ENV=/opt/medai/.venv \
