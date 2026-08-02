@@ -3,9 +3,17 @@
 `medai` runs an evidence-bound medical-paper replication workflow in Docker.
 The paper, optional repository, and optional local data are mounted read-only.
 Each run writes to a unique directory under the repository-root `runs/`
-directory; only that run directory is writable in the container. To resume an
-interrupted run, repeat the same inputs and configuration and pass its existing
-run directory with `--output`:
+directory; only that run directory is writable in the container.
+
+Initialize the Docker image and MinerU models once before the first run:
+
+```bash
+./medai init
+```
+
+The models are persisted outside disposable run containers and reused for
+every paper. To resume an interrupted run, repeat the same inputs and
+configuration and pass its existing run directory with `--output`:
 
 ```bash
 ./medai \

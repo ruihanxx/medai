@@ -2,8 +2,19 @@
 
 ## CLI and isolation
 
-`./medai` requires `--paper` and `--provider`; `--repo` and `--data` are
-optional. Supported providers are `claude`, `codex`, and `codex-siliconflow`.
+`./medai init` performs all shared initialization: it builds `medai:local`,
+downloads all MinerU pipeline and VLM models, and records the initialized image
+ID. Models are stored under `.medai/mineru/` by default; `MEDAI_MODEL_CACHE`
+may select another host directory and `MEDAI_MINERU_MODEL_SOURCE` may select
+`auto`, `huggingface`, or `modelscope`. Initialization is idempotent because
+the model clients reuse completed downloads.
+
+Normal `./medai` runs never build an image or download models. They require the
+current image ID and model cache to match the last successful initialization,
+mount the model directory read-only, and fail with an instruction to run
+`./medai init` when initialization is missing or stale. A normal run requires
+`--paper` and `--provider`; `--repo` and `--data` are optional. Supported
+providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. A new invocation creates a unique run directory under the
 repository-root `runs/` directory, named from its UTC start time and paper

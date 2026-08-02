@@ -3,6 +3,57 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 IMAGE_NAME="${MEDAI_IMAGE:-medai:local}"
+DOCKER_PLATFORM="linux/amd64"
+MODEL_CACHE="${MEDAI_MODEL_CACHE:-$PROJECT_ROOT/.medai/mineru}"
+MODEL_CONFIG="$MODEL_CACHE/mineru.json"
+MODEL_MARKER="$MODEL_CACHE/.medai-image-id"
+
+if [[ "${1:-}" == "init" ]]; then
+    shift
+    if [[ $# -ne 0 ]]; then
+        echo "ERROR: ./medai init does not accept additional arguments" >&2
+        exit 2
+    fi
+
+    model_source="${MEDAI_MINERU_MODEL_SOURCE:-auto}"
+    if [[ "$model_source" != "auto" && "$model_source" != "huggingface" && "$model_source" != "modelscope" ]]; then
+        echo "ERROR: MEDAI_MINERU_MODEL_SOURCE must be auto, huggingface, or modelscope" >&2
+        exit 2
+    fi
+
+    mkdir -p "$MODEL_CACHE"
+    MODEL_CACHE="$(cd "$MODEL_CACHE" && pwd -P)"
+    MODEL_CONFIG="$MODEL_CACHE/mineru.json"
+    MODEL_MARKER="$MODEL_CACHE/.medai-image-id"
+
+    printf 'Building MedAI image: %s\n' "$IMAGE_NAME"
+    docker build --platform "$DOCKER_PLATFORM" \
+        -f "$PROJECT_ROOT/docker/Dockerfile" \
+        -t "$IMAGE_NAME" \
+        "$PROJECT_ROOT"
+
+    printf 'Initializing MinerU models in: %s\n' "$MODEL_CACHE"
+    docker run --rm --platform "$DOCKER_PLATFORM" \
+        --user "$(id -u):$(id -g)" \
+        --env "HOME=/opt/medai-models/home" \
+        --env "HF_HOME=/opt/medai-models/huggingface" \
+        --env "MODELSCOPE_CACHE=/opt/medai-models/modelscope" \
+        --env "MINERU_TOOLS_CONFIG_JSON=/opt/medai-models/mineru.json" \
+        --mount "type=bind,src=$MODEL_CACHE,dst=/opt/medai-models" \
+        --entrypoint mineru-models-download \
+        "$IMAGE_NAME" \
+        --source "$model_source" \
+        --model_type all
+
+    if [[ ! -s "$MODEL_CONFIG" ]]; then
+        echo "ERROR: MinerU initialization completed without creating $MODEL_CONFIG" >&2
+        exit 1
+    fi
+    image_id="$(docker image inspect "$IMAGE_NAME" --format '{{.Id}}')"
+    printf '%s\n' "$image_id" > "$MODEL_MARKER"
+    printf 'MedAI initialization completed.\n'
+    exit 0
+fi
 
 paper=""
 repo=""
@@ -56,7 +107,9 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             cat <<'EOF'
-Usage: ./medai --paper PAPER.pdf --provider PROVIDER [options]
+Usage:
+  ./medai init
+  ./medai --paper PAPER.pdf --provider PROVIDER [options]
 
 Options:
   --repo DIR
@@ -97,6 +150,20 @@ if [[ "$provider" == "codex-siliconflow" && ( -z "$siliconflow_config" || ! -f "
     echo "ERROR: codex-siliconflow requires --siliconflow-config" >&2
     exit 2
 fi
+if ! image_id="$(docker image inspect "$IMAGE_NAME" --format '{{.Id}}' 2>/dev/null)"; then
+    echo "ERROR: MedAI is not initialized; run ./medai init first" >&2
+    exit 2
+fi
+if [[ ! -s "$MODEL_CONFIG" || ! -s "$MODEL_MARKER" ]]; then
+    echo "ERROR: MinerU models are not initialized; run ./medai init first" >&2
+    exit 2
+fi
+initialized_image_id="$(<"$MODEL_MARKER")"
+if [[ "$initialized_image_id" != "$image_id" ]]; then
+    echo "ERROR: MedAI image changed after initialization; run ./medai init again" >&2
+    exit 2
+fi
+MODEL_CACHE="$(cd "$MODEL_CACHE" && pwd -P)"
 paper_name="$(basename "$paper")"
 paper_name="${paper_name%.*}"
 paper_name="$(printf '%s' "$paper_name" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//')"
@@ -129,17 +196,16 @@ else
     printf 'Run output: %s\n' "$output"
 fi
 
-if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-    docker build --platform linux/amd64 \
-        -f "$PROJECT_ROOT/docker/Dockerfile" \
-        -t "$IMAGE_NAME" \
-        "$PROJECT_ROOT"
-fi
-
 docker_args=(
     --rm
+    --platform "$DOCKER_PLATFORM"
     --env "MEDAI_HOST_PAPER=$paper"
+    --env "HF_HOME=/opt/medai-models/huggingface"
+    --env "MODELSCOPE_CACHE=/opt/medai-models/modelscope"
+    --env "MINERU_MODEL_SOURCE=local"
+    --env "MINERU_TOOLS_CONFIG_JSON=/opt/medai-models/mineru.json"
     --mount "type=bind,src=$paper,dst=/workspace/inputs/paper.pdf,readonly"
+    --mount "type=bind,src=$MODEL_CACHE,dst=/opt/medai-models,readonly"
     --mount "type=bind,src=$output,dst=/workspace/output"
 )
 cli_args=(
