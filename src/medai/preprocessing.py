@@ -30,7 +30,7 @@ def convert_pdf_to_markdown(paper: Path, preprocessing_dir: Path) -> Path:
                 command,
                 capture_output=True,
                 text=True,
-                timeout=int(os.environ.get("MINERU_TIMEOUT_SECONDS", "7200")),
+                timeout=int(os.environ.get("MINERU_TIMEOUT_SECONDS", "300")),
             )
         except FileNotFoundError as exc:
             raise RuntimeError("MinerU is not installed or MINERU_COMMAND is invalid") from exc

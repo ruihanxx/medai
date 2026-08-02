@@ -47,7 +47,8 @@ modify only that copy.
 The LangGraph stages are:
 
 1. `preflight`: validate inputs and record CPU, RAM, disk, and GPU resources.
-2. `preprocess_pdf`: convert the PDF to Markdown and copy images.
+2. `preprocess_pdf`: convert the PDF to Markdown and copy images. MinerU has a
+   300-second default timeout, configurable with `MINERU_TIMEOUT_SECONDS`.
 3. `preprocessing_agent`: write text/numeric claims and experiment definitions.
 4. `codegen_agent`: inspect supplied data directly through bounded, read-only,
    non-executing reads and write a validated data inventory, compare local GPU

@@ -8,8 +8,11 @@ def test_mineru_images_are_copied_and_links_rewritten(tmp_path: Path, monkeypatc
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
     preprocessing = tmp_path / "preprocessing"
+    seen_timeout = None
 
     def fake_run(command, capture_output, text, timeout):
+        nonlocal seen_timeout
+        seen_timeout = timeout
         output = Path(command[-1])
         document = output / "paper" / "auto"
         images = document / "images"
@@ -27,6 +30,7 @@ def test_mineru_images_are_copied_and_links_rewritten(tmp_path: Path, monkeypatc
     markdown = output.read_text(encoding="utf-8")
     assert "artifacts/paper/auto/images/figure.png" in markdown
     assert (preprocessing / "artifacts" / "paper" / "auto" / "images" / "figure.png").is_file()
+    assert seen_timeout == 300
 
 
 def test_mineru_failure_is_explicit(tmp_path: Path, monkeypatch):
