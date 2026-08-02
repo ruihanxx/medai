@@ -139,4 +139,8 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     docker_args+=(--gpus all)
 fi
 
-docker run "${docker_args[@]}" "$IMAGE_NAME" "${cli_args[@]}" "${forwarded[@]}"
+docker_command=(docker run "${docker_args[@]}" "$IMAGE_NAME" "${cli_args[@]}")
+if (( ${#forwarded[@]} > 0 )); then
+    docker_command+=("${forwarded[@]}")
+fi
+"${docker_command[@]}"
