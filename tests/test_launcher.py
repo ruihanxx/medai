@@ -83,6 +83,21 @@ fi
     )
     fake_python.chmod(0o755)
 
+    fake_uname = fake_bin / "uname"
+    fake_uname.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1" == "-s" ]]; then
+    printf 'Linux\\n'
+elif [[ "$1" == "-m" ]]; then
+    printf 'x86_64\\n'
+else
+    exit 2
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_uname.chmod(0o755)
+
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["MEDAI_MODEL_CACHE"] = str(model_cache)
@@ -140,6 +155,7 @@ def test_init_builds_image_and_initializes_reusable_models(tmp_path: Path):
 
 def test_init_rejects_rosetta_python_on_apple_silicon(tmp_path: Path):
     launcher, env, docker_log, model_cache = prepare_launcher(tmp_path)
+    env["MEDAI_MINERU_PYTHON"] = str(Path(env["PATH"].split(":", maxsplit=1)[0]) / "python3")
     fake_uname = Path(env["PATH"].split(":", maxsplit=1)[0]) / "uname"
     fake_uname.write_text(
         """#!/usr/bin/env bash
@@ -180,6 +196,45 @@ fi
     assert "native arm64 Python" in initialized.stderr
     assert not model_cache.exists()
     assert docker_log.read_text(encoding="utf-8") == ""
+
+
+def test_init_archives_incompatible_host_environment(tmp_path: Path):
+    launcher, env, _, model_cache = prepare_launcher(tmp_path)
+    initialized = subprocess.run(
+        [str(launcher), "init"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+
+    stale_python = model_cache / ".venv" / "bin" / "python"
+    stale_python.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1" == "-c" ]]; then
+    printf '3.11:x86_64\\n'
+else
+    exit 2
+fi
+""",
+        encoding="utf-8",
+    )
+    stale_python.chmod(0o755)
+
+    reinitialized = subprocess.run(
+        [str(launcher), "init"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert reinitialized.returncode == 0, reinitialized.stderr
+    assert (model_cache / ".venv.incompatible-3.11-x86_64").is_dir()
+    assert (model_cache / ".venv" / "bin" / "mineru").is_file()
 
 
 def test_run_requires_successful_init(tmp_path: Path):

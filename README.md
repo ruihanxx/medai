@@ -13,9 +13,11 @@ Initialize the Docker image and host MinerU environment once:
 
 Initialization creates a dedicated Python environment under the model cache,
 installs the MinerU pipeline runtime, and downloads the models. It requires
-Python 3.10+ and uses `python3` by default; `MEDAI_MINERU_PYTHON` may select
-another native host interpreter. On Apple Silicon, this must be an arm64 Python,
-not an x86_64 Python running under Rosetta. For example:
+Python 3.10+ and uses `python3` by default. On Apple Silicon, when that is not
+a native arm64 Python, `init` automatically uses or installs Homebrew's native
+`python@3.12`; one `./medai init` command then completes the setup. Native
+Homebrew itself must already be installed. `MEDAI_MINERU_PYTHON` can select an
+explicit native interpreter instead. For example:
 
 ```bash
 MEDAI_MINERU_PYTHON=/opt/homebrew/bin/python3.12 ./medai init

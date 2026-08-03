@@ -12,11 +12,13 @@ and initialized image ID. The environment and models are stored under
 may select another host directory and `MEDAI_MINERU_MODEL_SOURCE` may select
 `auto`, `huggingface`, or `modelscope`. `MEDAI_MINERU_PYTHON` may select the
 native host Python used to create the environment, and `MEDAI_PYPI_INDEX` is
-also used for its package installation. If an existing environment differs from
-the selected interpreter's version or architecture, initialization stops without
-altering it and names the environment that must be moved or removed. Initialization
-is otherwise idempotent because the environment and model clients reuse completed
-installations and downloads.
+also used for its package installation. When no Python is explicitly selected
+on Apple Silicon, initialization uses an existing native Homebrew Python 3.12 or
+installs `python@3.12` using `/opt/homebrew/bin/brew`; native Homebrew must be
+installed beforehand. If an existing environment differs from the selected
+interpreter's version or architecture, initialization archives it beside the
+replacement environment. Initialization is otherwise idempotent because the
+environment and model clients reuse completed installations and downloads.
 
 Normal `./medai` runs never build an image or download models. They require the
 current image ID and host model cache to match the last successful

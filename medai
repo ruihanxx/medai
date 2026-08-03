@@ -21,23 +21,6 @@ if [[ "${1:-}" == "init" ]]; then
         echo "ERROR: MEDAI_MINERU_MODEL_SOURCE must be auto, huggingface, or modelscope" >&2
         exit 2
     fi
-    host_python="${MEDAI_MINERU_PYTHON:-python3}"
-    if ! command -v "$host_python" >/dev/null 2>&1; then
-        echo "ERROR: Host Python is not available: $host_python" >&2
-        exit 2
-    fi
-    if ! host_python_info="$("$host_python" -c 'import platform, sys; print(f"{sys.version_info.major}.{sys.version_info.minor}:{platform.machine()}")')"; then
-        echo "ERROR: Could not inspect host Python: $host_python" >&2
-        exit 2
-    fi
-    host_python_version="${host_python_info%%:*}"
-    host_python_arch="${host_python_info##*:}"
-    host_python_major="${host_python_version%%.*}"
-    host_python_minor="${host_python_version#*.}"
-    if (( host_python_major < 3 || (host_python_major == 3 && host_python_minor < 10) )); then
-        echo "ERROR: Host Python must be version 3.10 or newer: $host_python ($host_python_version)" >&2
-        exit 2
-    fi
     host_is_apple_silicon=false
     if [[ "$(uname -s)" == "Darwin" ]]; then
         macos_arch="$(uname -m)"
@@ -45,6 +28,66 @@ if [[ "${1:-}" == "init" ]]; then
         if [[ "$macos_arch" == "arm64" || "$macos_translated" == "1" ]]; then
             host_is_apple_silicon=true
         fi
+    fi
+    host_python_explicit=false
+    if [[ -n "${MEDAI_MINERU_PYTHON:-}" ]]; then
+        host_python="$MEDAI_MINERU_PYTHON"
+        host_python_explicit=true
+    else
+        host_python="python3"
+    fi
+    host_python_info=""
+    if command -v "$host_python" >/dev/null 2>&1; then
+        if ! host_python_info="$("$host_python" -c 'import platform, sys; print(f"{sys.version_info.major}.{sys.version_info.minor}:{platform.machine()}")')"; then
+            echo "ERROR: Could not inspect host Python: $host_python" >&2
+            exit 2
+        fi
+    fi
+    host_python_version="${host_python_info%%:*}"
+    host_python_arch="${host_python_info##*:}"
+    host_python_major="${host_python_version%%.*}"
+    host_python_minor="${host_python_version#*.}"
+    host_python_is_supported=false
+    if [[ -n "$host_python_info" ]] \
+        && (( host_python_major > 3 || (host_python_major == 3 && host_python_minor >= 10) )); then
+        host_python_is_supported=true
+    fi
+    if [[ "$host_is_apple_silicon" == "true" \
+        && "$host_python_arch" != "arm64" && "$host_python_arch" != "arm64e" ]]; then
+        host_python_is_supported=false
+    fi
+    if [[ "$host_python_explicit" == "false" && "$host_is_apple_silicon" == "true" \
+        && "$host_python_is_supported" == "false" ]]; then
+        native_python="/opt/homebrew/opt/python@3.12/bin/python3.12"
+        if [[ ! -x "$native_python" ]]; then
+            native_brew="/opt/homebrew/bin/brew"
+            if [[ ! -x "$native_brew" ]]; then
+                echo "ERROR: A native arm64 Python is required. Install native Homebrew from https://brew.sh, then rerun ./medai init." >&2
+                exit 2
+            fi
+            printf 'Installing native Python 3.12 with Homebrew.\n'
+            if ! "$native_brew" install python@3.12; then
+                echo "ERROR: Homebrew could not install Python 3.12." >&2
+                exit 1
+            fi
+        fi
+        host_python="$native_python"
+        if ! host_python_info="$("$host_python" -c 'import platform, sys; print(f"{sys.version_info.major}.{sys.version_info.minor}:{platform.machine()}")')"; then
+            echo "ERROR: Could not inspect installed native Python: $host_python" >&2
+            exit 1
+        fi
+        host_python_version="${host_python_info%%:*}"
+        host_python_arch="${host_python_info##*:}"
+        host_python_major="${host_python_version%%.*}"
+        host_python_minor="${host_python_version#*.}"
+    fi
+    if [[ -z "$host_python_info" ]]; then
+        echo "ERROR: Host Python is not available: $host_python" >&2
+        exit 2
+    fi
+    if (( host_python_major < 3 || (host_python_major == 3 && host_python_minor < 10) )); then
+        echo "ERROR: Host Python must be version 3.10 or newer: $host_python ($host_python_version)" >&2
+        exit 2
     fi
     if [[ "$host_is_apple_silicon" == "true" \
         && "$host_python_arch" != "arm64" && "$host_python_arch" != "arm64e" ]]; then
@@ -65,9 +108,12 @@ if [[ "${1:-}" == "init" ]]; then
             exit 2
         fi
         if [[ "$venv_python_info" != "$host_python_info" ]]; then
-            echo "ERROR: Existing host MinerU environment uses $venv_python_info, but selected Python uses $host_python_info." >&2
-            echo "Move or remove $MINERU_VENV, then rerun ./medai init." >&2
-            exit 2
+            incompatible_venv="${MINERU_VENV}.incompatible-${venv_python_info//:/-}"
+            if [[ -e "$incompatible_venv" ]]; then
+                incompatible_venv="${incompatible_venv}-$(date -u +%Y%m%dT%H%M%SZ)"
+            fi
+            printf 'Archiving incompatible host MinerU environment to: %s\n' "$incompatible_venv"
+            mv "$MINERU_VENV" "$incompatible_venv"
         fi
     fi
     if [[ ! -x "$MINERU_VENV/bin/python" ]]; then
