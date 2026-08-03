@@ -98,7 +98,9 @@ The LangGraph stages are:
 2. `preprocess_pdf`: import the host MinerU result, convert it to canonical
    Markdown, and copy images. Host MinerU output remains temporary; only the
    canonical Markdown and artifacts persist in the run directory.
-3. `preprocessing_agent`: write text/numeric claims and experiment definitions.
+3. `preprocessing_agent`: audit `paper.md` in place by labeling linked
+   Figure/Table assets with captions and correcting image-verified LaTeX,
+   then write text/numeric claims and experiment definitions.
 4. `codegen_agent`: inspect supplied data directly through bounded, read-only,
    non-executing reads, compare local GPU capacity with the paper's full-scale
    requirements, use the
@@ -195,7 +197,7 @@ round-by-idea verdict grid, with missing results displayed as N/A.
 runs/<run_id>/
 ├── manifest.json  # canonical pipeline state and input fingerprint
 ├── preflight/resources.json
-├── preprocessing/paper.md
+├── preprocessing/paper.md  # MinerU Markdown audited for asset labels and formulas
 ├── preprocessing/artifacts/
 ├── preprocessing/claims.json
 ├── preprocessing/experiment_todo.json

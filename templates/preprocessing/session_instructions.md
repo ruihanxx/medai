@@ -12,13 +12,20 @@ You may browse the catalog and use a skill if its description genuinely
 matches your work; many extractions will not need any skill, and that is fine.
 
 
-Read the paper markdown from path `{{ paper_markdown }}`. This file is the original paper converted in markdown format, and the images of figures are recorded as a path. 
-All of the images are saved at `{{ artifacts_dir }}` for later stages. Do not invoke multimodal capabilities or read image files during preprocessing. Identify Figure/Table validation anchors from labels, captions, surrounding prose, and Markdown table content.
+Read and edit the paper Markdown at `{{ paper_markdown }}`. Linked paper assets are under `{{ artifacts_dir }}`.
+
+## First: audit the paper Markdown
+
+Before extracting claims, revise `{{ paper_markdown }}` in place.
+- For every local `artifacts/...` image link, use its surrounding text and the linked image to identify its Figure/Table number and original caption. Annotate the link once as `Figure N. <caption>` or `Table N. <caption>` (use the image alt text; consolidate an adjacent duplicate caption). Preserve the exact asset path and do not invent labels or captions.
+- For each LaTeX formula, infer the corresponding source image from its position in the Markdown, open that exact local image with multimodal understanding, and compare its notation with the LaTeX. Correct only image-supported transcription errors, including symbols, operators, and subscripts/superscripts. If no corresponding image is available, leave the formula unchanged.
+
+Use the audited Markdown, labels, captions, and table content for Figure/Table validation anchors.
 
 ## Your task
 
 ### claim extraction
-Read the paper Markdown without inspecting image files. Identify every claim that:
+Read the audited paper Markdown. Identify every claim that:
 - Reports a result, observation, measurement, or behavior of the system under study, AND
 - Could plausibly be checked by inspecting outputs that the paper's code is expected to produce
 

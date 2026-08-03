@@ -229,12 +229,19 @@ def preprocess_pdf_node(state: WorkflowState) -> dict[str, str]:
 def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
+    paper_markdown = Path(state["paper_markdown"])
     claims_path = config.output / "preprocessing" / "claims.json"
     experiments_path = config.output / "preprocessing" / "experiment_todo.json"
     transcript_path = (
         config.output / "preprocessing" / "preprocessing_transcript.jsonl"
     )
     if pipeline_state.is_stage_completed("preprocessing_agent"):
+        if not paper_markdown.is_file() or not paper_markdown.read_text(
+            encoding="utf-8"
+        ).strip():
+            raise RuntimeError(
+                f"Completed preprocessing paper artifact is missing or empty: {paper_markdown}"
+            )
         claims = load_model(claims_path, ClaimsFile)
         experiments = load_model(experiments_path, ExperimentTodo)
         validate_experiment_coverage(claims, experiments)
@@ -251,7 +258,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     prompt_path = render_prompt(
         "preprocessing/session_instructions.md",
         config.output / "prompts" / "preprocessing.md",
-        paper_markdown=state["paper_markdown"],
+        paper_markdown=paper_markdown,
         artifacts_dir=config.output / "preprocessing" / "artifacts",
         skills_dir=skills_dir(),
         claims_path=claims_path,
@@ -266,12 +273,23 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
+    if not paper_markdown.is_file() or not paper_markdown.read_text(
+        encoding="utf-8"
+    ).strip():
+        raise RuntimeError(
+            f"Preprocessing agent left paper artifact missing or empty: {paper_markdown}"
+        )
     claims = load_model(claims_path, ClaimsFile)
     experiments = load_model(experiments_path, ExperimentTodo)
     validate_experiment_coverage(claims, experiments)
     pipeline_state.complete_stage(
         "preprocessing_agent",
-        [str(claims_path), str(experiments_path), str(transcript_path)],
+        [
+            str(paper_markdown),
+            str(claims_path),
+            str(experiments_path),
+            str(transcript_path),
+        ],
     )
     return {
         "claims_path": str(claims_path),
