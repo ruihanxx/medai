@@ -3,7 +3,8 @@
 ## CLI and isolation
 
 `./medai init` performs all shared initialization: it creates a dedicated host
-Python environment, installs the repository's `pdf` extra, builds
+Python environment, validates that the selected Python is version 3.10 or newer
+and native arm64 on Apple Silicon, installs the MinerU pipeline runtime, builds
 `medai:local`, uses that environment's `mineru-models-download` command to
 download all MinerU pipeline and VLM models, and records the host-runtime marker
 and initialized image ID. The environment and models are stored under
@@ -11,8 +12,11 @@ and initialized image ID. The environment and models are stored under
 may select another host directory and `MEDAI_MINERU_MODEL_SOURCE` may select
 `auto`, `huggingface`, or `modelscope`. `MEDAI_MINERU_PYTHON` may select the
 native host Python used to create the environment, and `MEDAI_PYPI_INDEX` is
-also used for its package installation. Initialization is idempotent because
-the environment and model clients reuse completed installations and downloads.
+also used for its package installation. If an existing environment differs from
+the selected interpreter's version or architecture, initialization stops without
+altering it and names the environment that must be moved or removed. Initialization
+is otherwise idempotent because the environment and model clients reuse completed
+installations and downloads.
 
 Normal `./medai` runs never build an image or download models. They require the
 current image ID and host model cache to match the last successful

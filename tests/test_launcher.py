@@ -71,6 +71,8 @@ if [[ "${1:-}" == "-m" && "${2:-}" == "venv" ]]; then
     cp "$0" "$venv/bin/python"
     cp "$MEDAI_TEST_FAKE_MINERU" "$venv/bin/mineru"
     cp "$MEDAI_TEST_FAKE_MODELS_DOWNLOAD" "$venv/bin/mineru-models-download"
+elif [[ "${1:-}" == "-c" ]]; then
+    printf '3.12:x86_64\\n'
 elif [[ "${1:-}" == "-m" && "${2:-}" == "pip" ]]; then
     printf 'pip %s\\n' "$*" >> "$MEDAI_TEST_DOCKER_LOG"
 else
@@ -111,7 +113,7 @@ def test_init_builds_image_and_initializes_reusable_models(tmp_path: Path):
     )
     init_calls = docker_log.read_text(encoding="utf-8")
     assert "pip -m pip install" in init_calls
-    assert f"{tmp_path}[pdf]" in init_calls
+    assert "mineru[pipeline]>=3,<4" in init_calls
     assert "build --platform linux/amd64" in init_calls
     assert "models-download --source auto --model_type all" in init_calls
 
@@ -134,6 +136,50 @@ def test_init_builds_image_and_initializes_reusable_models(tmp_path: Path):
     assert "MEDAI_MINERU_OUTPUT=/workspace/mineru-output" in run_calls
     assert "dst=/workspace/mineru-output,readonly" in run_calls
     assert f"src={model_cache},dst=/opt/medai-models,readonly" not in run_calls
+
+
+def test_init_rejects_rosetta_python_on_apple_silicon(tmp_path: Path):
+    launcher, env, docker_log, model_cache = prepare_launcher(tmp_path)
+    fake_uname = Path(env["PATH"].split(":", maxsplit=1)[0]) / "uname"
+    fake_uname.write_text(
+        """#!/usr/bin/env bash
+if [[ "$1" == "-s" ]]; then
+    printf 'Darwin\\n'
+elif [[ "$1" == "-m" ]]; then
+    printf 'x86_64\\n'
+else
+    exit 2
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_uname.chmod(0o755)
+    fake_sysctl = fake_uname.with_name("sysctl")
+    fake_sysctl.write_text(
+        """#!/usr/bin/env bash
+if [[ "$*" == *"sysctl.proc_translated"* ]]; then
+    printf '1\\n'
+else
+    exit 2
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_sysctl.chmod(0o755)
+
+    initialized = subprocess.run(
+        [str(launcher), "init"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert initialized.returncode == 2
+    assert "native arm64 Python" in initialized.stderr
+    assert not model_cache.exists()
+    assert docker_log.read_text(encoding="utf-8") == ""
 
 
 def test_run_requires_successful_init(tmp_path: Path):

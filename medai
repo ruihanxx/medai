@@ -26,6 +26,32 @@ if [[ "${1:-}" == "init" ]]; then
         echo "ERROR: Host Python is not available: $host_python" >&2
         exit 2
     fi
+    if ! host_python_info="$("$host_python" -c 'import platform, sys; print(f"{sys.version_info.major}.{sys.version_info.minor}:{platform.machine()}")')"; then
+        echo "ERROR: Could not inspect host Python: $host_python" >&2
+        exit 2
+    fi
+    host_python_version="${host_python_info%%:*}"
+    host_python_arch="${host_python_info##*:}"
+    host_python_major="${host_python_version%%.*}"
+    host_python_minor="${host_python_version#*.}"
+    if (( host_python_major < 3 || (host_python_major == 3 && host_python_minor < 10) )); then
+        echo "ERROR: Host Python must be version 3.10 or newer: $host_python ($host_python_version)" >&2
+        exit 2
+    fi
+    host_is_apple_silicon=false
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        macos_arch="$(uname -m)"
+        macos_translated="$(sysctl -in sysctl.proc_translated 2>/dev/null || true)"
+        if [[ "$macos_arch" == "arm64" || "$macos_translated" == "1" ]]; then
+            host_is_apple_silicon=true
+        fi
+    fi
+    if [[ "$host_is_apple_silicon" == "true" \
+        && "$host_python_arch" != "arm64" && "$host_python_arch" != "arm64e" ]]; then
+        echo "ERROR: Apple Silicon requires a native arm64 Python for MinerU; $host_python is $host_python_arch (Rosetta)." >&2
+        echo "Install a native Python 3.10+ and rerun with MEDAI_MINERU_PYTHON=/path/to/python3 ./medai init" >&2
+        exit 2
+    fi
 
     mkdir -p "$MODEL_CACHE/home"
     MODEL_CACHE="$(cd "$MODEL_CACHE" && pwd -P)"
@@ -33,6 +59,17 @@ if [[ "${1:-}" == "init" ]]; then
     MODEL_MARKER="$MODEL_CACHE/.medai-image-id"
     MINERU_VENV="$MODEL_CACHE/.venv"
 
+    if [[ -x "$MINERU_VENV/bin/python" ]]; then
+        if ! venv_python_info="$("$MINERU_VENV/bin/python" -c 'import platform, sys; print(f"{sys.version_info.major}.{sys.version_info.minor}:{platform.machine()}")')"; then
+            echo "ERROR: Could not inspect existing host MinerU environment: $MINERU_VENV" >&2
+            exit 2
+        fi
+        if [[ "$venv_python_info" != "$host_python_info" ]]; then
+            echo "ERROR: Existing host MinerU environment uses $venv_python_info, but selected Python uses $host_python_info." >&2
+            echo "Move or remove $MINERU_VENV, then rerun ./medai init." >&2
+            exit 2
+        fi
+    fi
     if [[ ! -x "$MINERU_VENV/bin/python" ]]; then
         printf 'Creating host MinerU environment: %s\n' "$MINERU_VENV"
         "$host_python" -m venv "$MINERU_VENV"
@@ -46,9 +83,11 @@ if [[ "${1:-}" == "init" ]]; then
     printf 'Installing host MinerU runtime.\n'
     if [[ -n "${MEDAI_PYPI_INDEX:-}" ]]; then
         "$MINERU_VENV/bin/python" -m pip install \
-            --index-url "$MEDAI_PYPI_INDEX" "$PROJECT_ROOT[pdf]"
+            --index-url "$MEDAI_PYPI_INDEX" \
+            "accelerate>=1.5.1,<2" "mineru[pipeline]>=3,<4" "six>=1.16,<2"
     else
-        "$MINERU_VENV/bin/python" -m pip install "$PROJECT_ROOT[pdf]"
+        "$MINERU_VENV/bin/python" -m pip install \
+            "accelerate>=1.5.1,<2" "mineru[pipeline]>=3,<4" "six>=1.16,<2"
     fi
 
     printf 'Building MedAI image: %s\n' "$IMAGE_NAME"

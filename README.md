@@ -12,13 +12,20 @@ Initialize the Docker image and host MinerU environment once:
 ```
 
 Initialization creates a dedicated Python environment under the model cache,
-installs the `pdf` extra, and downloads the models. It uses `python3` by default;
-`MEDAI_MINERU_PYTHON` may select another native host Python interpreter. PDF
-parsing runs natively on the host and inherits MinerU's automatic CUDA, MPS, or
-CPU device selection. Models and the Python environment are persisted outside
+installs the MinerU pipeline runtime, and downloads the models. It requires
+Python 3.10+ and uses `python3` by default; `MEDAI_MINERU_PYTHON` may select
+another native host interpreter. On Apple Silicon, this must be an arm64 Python,
+not an x86_64 Python running under Rosetta. For example:
+
+```bash
+MEDAI_MINERU_PYTHON=/opt/homebrew/bin/python3.12 ./medai init
+```
+
+PDF parsing runs natively on the host and inherits MinerU's automatic CUDA, MPS,
+or CPU device selection. Models and the Python environment are persisted outside
 disposable run containers and reused for every paper. To resume an interrupted
-run, repeat the same inputs and configuration and pass its existing run
-directory with `--output`:
+run, repeat the same inputs and configuration and pass its existing run directory
+with `--output`:
 
 ```bash
 ./medai \
