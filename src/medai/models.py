@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import Any, Literal
 
@@ -191,6 +192,215 @@ class SmartReplicateLog(StrictModel):
         round_numbers = [round_record.round for round_record in self.rounds]
         if round_numbers != list(range(1, len(self.rounds) + 1)):
             raise ValueError("Smart-replicate rounds must be sequential from 1")
+        return self
+
+
+AnchorName = Literal[
+    "task_and_prediction_target",
+    "dataset_cohort_and_io",
+    "metrics_and_protocol",
+    "baseline_method",
+]
+
+
+class ResearchAnchors(StrictModel):
+    task: str = Field(min_length=1)
+    prediction_target: str = Field(min_length=1)
+    dataset: str = Field(min_length=1)
+    cohort: str = Field(min_length=1)
+    inputs: list[str] = Field(min_length=1)
+    outputs: list[str] = Field(min_length=1)
+    metrics: list[str] = Field(min_length=1)
+    experiment_protocol: list[str] = Field(min_length=1)
+    baseline_method: str = Field(min_length=1)
+
+
+class EligibilityResult(StrictModel):
+    eligible: bool
+    reason: str = Field(min_length=1)
+    evidence_paths: list[str]
+    anchors: ResearchAnchors | None = None
+
+    @model_validator(mode="after")
+    def eligible_run_has_anchors(self) -> "EligibilityResult":
+        if self.eligible and self.anchors is None:
+            raise ValueError("Eligible Auto Research runs must define research anchors")
+        return self
+
+
+class IdeaChangePoint(StrictModel):
+    path: str = Field(min_length=1)
+    change: str = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+
+class IdeaImplementationPlan(StrictModel):
+    idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
+    summary: str = Field(min_length=1)
+    change_points: list[IdeaChangePoint] = Field(min_length=1)
+    baseline_entry_points: list[str] = Field(min_length=1)
+    refinement_entry_points: list[str] = Field(min_length=1)
+    preserved_anchors: list[AnchorName]
+
+    @model_validator(mode="after")
+    def preserves_every_anchor(self) -> "IdeaImplementationPlan":
+        expected = {
+            "task_and_prediction_target",
+            "dataset_cohort_and_io",
+            "metrics_and_protocol",
+            "baseline_method",
+        }
+        if len(self.preserved_anchors) != len(set(self.preserved_anchors)):
+            raise ValueError("preserved_anchors must be unique")
+        if set(self.preserved_anchors) != expected:
+            raise ValueError("implementation plan must preserve all four research anchors")
+        return self
+
+
+class CodegenAuditCheck(StrictModel):
+    anchor: AnchorName
+    verdict: Literal["pass", "fail"]
+    evidence: list[str] = Field(min_length=1)
+    issue: str | None = None
+
+    @model_validator(mode="after")
+    def failed_check_has_issue(self) -> "CodegenAuditCheck":
+        if self.verdict == "fail" and not self.issue:
+            raise ValueError("A failed codegen audit check must describe its issue")
+        return self
+
+
+class CodegenAudit(StrictModel):
+    idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
+    verdict: Literal["pass", "fail"]
+    checks: list[CodegenAuditCheck]
+    required_fixes: list[str]
+
+    @model_validator(mode="after")
+    def covers_exact_anchor_contract(self) -> "CodegenAudit":
+        anchors = [check.anchor for check in self.checks]
+        expected = {
+            "task_and_prediction_target",
+            "dataset_cohort_and_io",
+            "metrics_and_protocol",
+            "baseline_method",
+        }
+        if len(anchors) != 4 or set(anchors) != expected:
+            raise ValueError("codegen audit must check each research anchor exactly once")
+        expected_verdict = "pass" if all(check.verdict == "pass" for check in self.checks) else "fail"
+        if self.verdict != expected_verdict:
+            raise ValueError("codegen audit verdict does not match its checks")
+        if self.verdict == "fail" and not self.required_fixes:
+            raise ValueError("A failed codegen audit must list required fixes")
+        if self.verdict == "pass" and self.required_fixes:
+            raise ValueError("A passing codegen audit cannot list required fixes")
+        return self
+
+
+class MetricComparison(StrictModel):
+    name: str = Field(min_length=1)
+    direction: Literal["higher", "lower"]
+    baseline_value: float | None
+    refined_value: float | None
+    absolute_delta: float | None
+    relative_delta: float | None
+    uncertainty_available: bool
+    noise_threshold: float | None = Field(default=None, ge=0)
+    uncertainty_method: str | None = None
+    improvement_supported: bool
+
+    @model_validator(mode="after")
+    def validate_comparison(self) -> "MetricComparison":
+        if self.baseline_value is None or self.refined_value is None:
+            if self.improvement_supported:
+                raise ValueError("A metric without both values cannot support improvement")
+            return self
+
+        expected_delta = self.refined_value - self.baseline_value
+        if self.absolute_delta is None or not math.isclose(
+            self.absolute_delta,
+            expected_delta,
+            rel_tol=1e-6,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("absolute_delta must equal refined_value - baseline_value")
+        if self.baseline_value == 0:
+            if self.relative_delta is not None:
+                raise ValueError("relative_delta must be null when baseline_value is zero")
+        else:
+            expected_relative = expected_delta / abs(self.baseline_value)
+            if self.relative_delta is None or not math.isclose(
+                self.relative_delta,
+                expected_relative,
+                rel_tol=1e-6,
+                abs_tol=1e-9,
+            ):
+                raise ValueError("relative_delta is inconsistent with the metric values")
+
+        if self.uncertainty_available:
+            if self.noise_threshold is None or not self.uncertainty_method:
+                raise ValueError(
+                    "Metrics with uncertainty must record its method and noise threshold"
+                )
+            threshold = self.noise_threshold
+        else:
+            if self.noise_threshold is not None or self.uncertainty_method is not None:
+                raise ValueError(
+                    "Metrics without uncertainty cannot record an uncertainty threshold"
+                )
+            threshold = 0.0
+        directed_delta = expected_delta if self.direction == "higher" else -expected_delta
+        if self.improvement_supported != (directed_delta > threshold):
+            raise ValueError("improvement_supported does not match the declared criterion")
+        return self
+
+
+class IdeaAssessment(StrictModel):
+    idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
+    verdict: Literal["valid", "invalid", "inconclusive"]
+    summary: str = Field(min_length=1)
+    audit_passed: bool
+    protocol_consistent: bool
+    primary_metric: MetricComparison | None
+    secondary_metrics: list[MetricComparison]
+    evidence_paths: list[str]
+    failure_reasons: list[str]
+
+    @model_validator(mode="after")
+    def valid_verdict_has_supported_improvement(self) -> "IdeaAssessment":
+        supported = self.primary_metric is not None and self.primary_metric.improvement_supported
+        if self.verdict == "valid" and not (
+            self.audit_passed and self.protocol_consistent and supported
+        ):
+            raise ValueError(
+                "A valid refinement requires a passing audit, consistent protocol, "
+                "and supported primary-metric improvement"
+            )
+        if self.verdict == "valid" and self.failure_reasons:
+            raise ValueError("A valid refinement cannot list failure reasons")
+        return self
+
+
+class RoundIdeaSummary(StrictModel):
+    idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
+    verdict: Literal["valid", "invalid", "inconclusive"]
+    reason: str = Field(min_length=1)
+    assessment_path: str = Field(min_length=1)
+
+
+class RoundSummary(StrictModel):
+    round: int = Field(ge=1, le=10)
+    ideas: list[RoundIdeaSummary]
+    has_valid_refinement: bool
+
+    @model_validator(mode="after")
+    def summarizes_three_unique_ideas(self) -> "RoundSummary":
+        idea_ids = [idea.idea_id for idea in self.ideas]
+        expected = [f"R{self.round:02d}-I{index:02d}" for index in range(1, 4)]
+        if idea_ids != expected:
+            raise ValueError("round summary must list its three ideas in order")
+        if self.has_valid_refinement != any(idea.verdict == "valid" for idea in self.ideas):
+            raise ValueError("has_valid_refinement does not match idea verdicts")
         return self
 
 

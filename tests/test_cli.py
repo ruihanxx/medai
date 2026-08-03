@@ -1,10 +1,11 @@
+import json
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from medai.cli import app
-from medai.config import RunConfig
+from medai.config import AutoResearchConfig, RunConfig
 from medai.pipeline_state import PipelineState, build_run_inputs
 
 runner = CliRunner()
@@ -182,3 +183,45 @@ def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, mon
     manifest = PipelineState(output).state
     assert manifest["stages"]["plan_agent"]["status"] == "failed"
     assert manifest["stages"]["plan_agent"]["error"] == "plan failed"
+
+
+def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
+    base_run = tmp_path / "base"
+    base_run.mkdir()
+    data = tmp_path / "data"
+    data.mkdir()
+    (base_run / "manifest.json").write_text(
+        json.dumps(
+            {
+                "inputs": {
+                    "provider": "codex",
+                    "codex_model": "gpt-test",
+                    "codex_reasoning_effort": "high",
+                    "data": str(data),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = AutoResearchConfig.create(
+        base_run=base_run,
+        output=base_run / "autoresearch",
+        provider=None,
+        max_iter=1,
+        siliconflow_config=None,
+    )
+
+    assert config.provider == "codex"
+    assert config.codex_model == "gpt-test"
+    assert config.codex_reasoning_effort == "high"
+    assert config.data == data
+
+    with pytest.raises(ValueError, match="between 1 and 10"):
+        AutoResearchConfig.create(
+            base_run=base_run,
+            output=base_run / "autoresearch",
+            provider=None,
+            max_iter=11,
+            siliconflow_config=None,
+        )

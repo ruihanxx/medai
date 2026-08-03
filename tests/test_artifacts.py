@@ -1,13 +1,19 @@
 import json
 
 import pytest
+
 from medai.models import (
     ClaimsFile,
+    CodegenAudit,
     CodegenPlan,
+    EligibilityResult,
     EvidenceSummary,
     ExperimentTodo,
+    IdeaAssessment,
+    IdeaImplementationPlan,
     ReplicationLog,
     ReplicationPlan,
+    RoundSummary,
     validate_experiment_coverage,
     validate_replication_log,
     validate_replication_plan,
@@ -204,4 +210,100 @@ def test_reproduction_report_requires_all_audit_content():
             claims,
             experiments,
             codegen_plan,
+        )
+
+
+def test_autoresearch_artifacts_enforce_anchor_and_improvement_contracts():
+    with pytest.raises(ValueError, match="research anchors"):
+        EligibilityResult.model_validate(
+            {"eligible": True, "reason": "Predictive task", "evidence_paths": []}
+        )
+
+    implementation = IdeaImplementationPlan.model_validate(
+        {
+            "idea_id": "R01-I01",
+            "summary": "Add a calibrated refinement head.",
+            "change_points": [
+                {
+                    "path": "src/refinement.py",
+                    "change": "Add the refinement.",
+                    "rationale": "Test the idea without replacing the baseline.",
+                }
+            ],
+            "baseline_entry_points": ["python run.py --model baseline"],
+            "refinement_entry_points": ["python run.py --model refinement"],
+            "preserved_anchors": [
+                "task_and_prediction_target",
+                "dataset_cohort_and_io",
+                "metrics_and_protocol",
+                "baseline_method",
+            ],
+        }
+    )
+    assert implementation.idea_id == "R01-I01"
+
+    audit = CodegenAudit.model_validate(
+        {
+            "idea_id": "R01-I01",
+            "verdict": "pass",
+            "checks": [
+                {"anchor": anchor, "verdict": "pass", "evidence": ["diff"]}
+                for anchor in implementation.preserved_anchors
+            ],
+            "required_fixes": [],
+        }
+    )
+    assert audit.verdict == "pass"
+
+    assessment = IdeaAssessment.model_validate(
+        {
+            "idea_id": "R01-I01",
+            "verdict": "valid",
+            "summary": "Accuracy improved.",
+            "audit_passed": True,
+            "protocol_consistent": True,
+            "primary_metric": {
+                "name": "accuracy",
+                "direction": "higher",
+                "baseline_value": 0.8,
+                "refined_value": 0.82,
+                "absolute_delta": 0.02,
+                "relative_delta": 0.025,
+                "uncertainty_available": False,
+                "noise_threshold": None,
+                "uncertainty_method": None,
+                "improvement_supported": True,
+            },
+            "secondary_metrics": [],
+            "evidence_paths": ["metrics.json"],
+            "failure_reasons": [],
+        }
+    )
+    summary = RoundSummary.model_validate(
+        {
+            "round": 1,
+            "ideas": [
+                {
+                    "idea_id": f"R01-I{index:02d}",
+                    "verdict": "valid" if index == 1 else "invalid",
+                    "reason": "assessment complete",
+                    "assessment_path": f"idea_{index:02d}/assessment.json",
+                }
+                for index in range(1, 4)
+            ],
+            "has_valid_refinement": True,
+        }
+    )
+    assert assessment.primary_metric is not None
+    assert summary.has_valid_refinement is True
+
+    with pytest.raises(ValueError, match="declared criterion"):
+        IdeaAssessment.model_validate(
+            {
+                **assessment.model_dump(mode="json"),
+                "primary_metric": {
+                    **assessment.primary_metric.model_dump(mode="json"),
+                    "improvement_supported": False,
+                },
+            }
         )

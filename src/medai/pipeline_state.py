@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from medai.config import RunConfig
+from medai.config import AutoResearchConfig, RunConfig
 
 MANIFEST_VERSION = 2
 SUPPORTED_MANIFEST_VERSIONS = {1, MANIFEST_VERSION}
@@ -37,6 +37,48 @@ def build_run_inputs(config: RunConfig) -> dict[str, Any]:
         "codex_model": config.codex_model,
         "codex_reasoning_effort": config.codex_reasoning_effort,
         "smart_replicate": config.smart_replicate,
+        "computation_provider": (
+            "autodl"
+            if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
+            else None
+        ),
+        "autodl_image_uuid": (
+            os.environ.get("AUTODL_IMAGE_UUID")
+            if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
+            else None
+        ),
+    }
+    if config.siliconflow_config is not None:
+        from medai.siliconflow_adapter import SiliconFlowConfig
+
+        siliconflow = SiliconFlowConfig.from_dotenv(config.siliconflow_config)
+        inputs.update(
+            {
+                "siliconflow_base_url": siliconflow.base_url,
+                "siliconflow_model": siliconflow.model,
+                "siliconflow_context_window": siliconflow.context_window,
+            }
+        )
+    return inputs
+
+
+def build_autoresearch_inputs(config: AutoResearchConfig) -> dict[str, Any]:
+    """Build the immutable campaign fingerprint for an Auto Research run."""
+    inputs = {
+        "workflow": "autoresearch",
+        "base_run": str(config.base_run),
+        "base_run_source": os.environ.get("MEDAI_HOST_BASE_RUN", str(config.base_run)),
+        "base_artifact_fingerprint": _base_artifact_fingerprint(config.base_run),
+        "data": str(config.data) if config.data else None,
+        "data_source": os.environ.get(
+            "MEDAI_HOST_DATA",
+            str(config.data) if config.data else "",
+        )
+        or None,
+        "provider": config.provider,
+        "codex_model": config.codex_model,
+        "codex_reasoning_effort": config.codex_reasoning_effort,
+        "max_iter": config.max_iter,
         "computation_provider": (
             "autodl"
             if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
@@ -187,6 +229,14 @@ class PipelineState:
         self.state.pop("error", None)
         self._save()
 
+    def mark_ineligible(self, reason: str) -> None:
+        self.state["status"] = "ineligible"
+        self.state["completed_at"] = _now()
+        self.state["current_stage"] = None
+        self.state["ineligible_reason"] = reason
+        self.state.pop("error", None)
+        self._save()
+
     def fail(self, error: str) -> None:
         current_stage = self.state.get("current_stage")
         if current_stage:
@@ -223,6 +273,53 @@ def _sha256(path: Path | None) -> str | None:
         for chunk in iter(lambda: stream.read(65536), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _base_artifact_fingerprint(base_run: Path) -> str:
+    required_files = [
+        "manifest.json",
+        "preprocessing/paper.md",
+        "preprocessing/claims.json",
+        "preprocessing/experiment_todo.json",
+        "codegen/codebase/codegen_plan.json",
+        "plan/replicate_plan.json",
+        "replication/replication_log.json",
+        "replication/evidence_summary.json",
+        "report/reproduction_report.md",
+    ]
+    digest = hashlib.sha256()
+    for relative in required_files:
+        path = base_run / relative
+        if not path.is_file():
+            raise ValueError(f"Base run artifact is missing: {path}")
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        _update_digest_from_file(digest, path)
+
+    codebase = base_run / "codegen" / "codebase"
+    if not codebase.is_dir():
+        raise ValueError(f"Base run codebase is missing: {codebase}")
+    ignored_names = {
+        ".git",
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
+    for path in sorted(codebase.rglob("*")):
+        relative = path.relative_to(codebase)
+        if any(part in ignored_names for part in relative.parts) or not path.is_file():
+            continue
+        digest.update(f"codegen/codebase/{relative.as_posix()}".encode("utf-8"))
+        digest.update(b"\0")
+        _update_digest_from_file(digest, path)
+    return digest.hexdigest()
+
+
+def _update_digest_from_file(digest: Any, path: Path) -> None:
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            digest.update(chunk)
 
 
 def _now() -> str:
