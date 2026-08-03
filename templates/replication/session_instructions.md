@@ -228,7 +228,7 @@ Maintain two files. Update `replication_log.json` after **each completed step** 
             "exit_code": 0,
             "stdout": "first 2000 chars of stdout",
             "stderr": "first 2000 chars of stderr",
-            "output_files": ["list", "of", "files", "created"],
+            "output_files": ["files", "or", "directories", "created"],
             "duration_seconds": 12.5,
             "fixes_applied": [
                 {
@@ -244,6 +244,10 @@ Maintain two files. Update `replication_log.json` after **each completed step** 
     ]
 }
 ```
+
+Each `output_files` entry may reference a real file or directory created under
+the working directory or replication output directory; do not reference paths
+outside those locations.
 
 **Reporting fixes:** For each fix you apply — whether modifying a source file or a non-trivial environment workaround (e.g., pinning a specific package version to work around an incompatibility) — add an entry to `fixes_applied` with:
 - `file_path`: the file you changed, or `"environment"` for env workarounds

@@ -82,10 +82,12 @@ def resolve_replication_output(
     allowed_roots = [codebase_dir.resolve(), replication_dir.resolve()]
     for candidate in candidates:
         resolved = candidate.resolve()
-        if any(resolved.is_relative_to(root) for root in allowed_roots) and resolved.is_file():
+        if any(resolved.is_relative_to(root) for root in allowed_roots) and (
+            resolved.is_file() or resolved.is_dir()
+        ):
             return resolved
     raise RuntimeError(
-        "Replication output must be a regular file inside the copied codebase or "
+        "Replication output must be a file or directory inside the copied codebase or "
         f"replication directory: {value}"
     )
 

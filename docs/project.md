@@ -230,8 +230,8 @@ Experiments have unique `experiment_id` values and list their claim IDs and
 paper artifact labels. The replication plan uses ordered steps whose
 `verifies` lists collectively cover those claim IDs and artifact labels. The
 replication log covers the plan steps in order, and every result-producing
-step names real output files inside the copied codebase or replication
-directory. The evidence summary records the execution environment. Its core
+step names real output files or directories inside the copied codebase or
+replication directory. The evidence summary records the execution environment. Its core
 environment fields record Python, GPU availability/model, and key package
 versions; additional environment metadata is accepted for auditability. The
 reproduction report contains exactly three top-level audit

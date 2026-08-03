@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from medai.config import RunConfig
 from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
@@ -302,6 +301,9 @@ def test_replication_outputs_stay_inside_run_roots(tmp_path: Path):
     evidence.write_text("{}\n", encoding="utf-8")
 
     assert resolve_replication_output("E1/metrics.json", codebase, replication) == evidence
+    package_dir = codebase / "output" / "R" / "library" / "duckdb"
+    package_dir.mkdir(parents=True)
+    assert resolve_replication_output(str(package_dir), codebase, replication) == package_dir
     previous_mount = tmp_path / "old-mount" / "replication" / "E1" / "metrics.json"
     assert resolve_replication_output(str(previous_mount), codebase, replication) == evidence
     outside = tmp_path / "outside.json"
