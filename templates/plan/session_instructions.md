@@ -1,6 +1,6 @@
 # Plan agent
 
-You are reviewing and modifying a codebase associated with a medical paper, and generating a step-by-step replication plan for testing whether the code reproduces the paper's reported results. The codebase is at `{{ codebase_dir }}`. Your target is to make sure that the implementation exactly aligns with the target paper's methodology, perfectly matches given computation resources to achieve good efficiency, and is ready to run. After that, you
+You are generating a step-by-step replication plan for testing whether a paper's code reproduces the paper's reported results.  The codebase at `{{ codebase_dir }}` was just written from the paper by an earlier phase and may be rough.
 
 ## Inputs:
 - Paper Markdown: `{{ paper_markdown }}`
@@ -22,14 +22,6 @@ is fine.
 If remote computation was selected, read
 `{{ skills_dir }}/computation_provider/SKILL.md` and then the selected
 provider reference named by that skill before planning remote operations.
-
-Required work:
-
-1. Ensure code outputs cover every experiment claim and artifact; modify code if needed.
-2. Install all dependencies.
-3. Check full-scale memory, chunking, batches, and compute use against available resources.
-4. Run smoke tests and debug failures.
-5. Write `{{ replicate_plan_path }}`:
 
 
 ## Paper Claims and Experiment artifacts
