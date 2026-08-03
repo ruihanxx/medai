@@ -120,6 +120,14 @@ def _python_info(executable: Path) -> PythonInfo:
     )
 
 
+def _native_homebrew_install_command(brew: Path, arch: Path) -> list[str]:
+    if not arch.is_file():
+        raise LauncherError(
+            "Apple Silicon Python bootstrap requires /usr/bin/arch."
+        )
+    return [str(arch), "-arm64", str(brew), "install", "python@3.12"]
+
+
 def _host_is_apple_silicon() -> bool:
     if platform.system() != "Darwin":
         return False
@@ -209,7 +217,13 @@ def _select_host_python() -> PythonInfo:
                     "Homebrew from https://brew.sh or set MEDAI_MINERU_PYTHON"
                 )
             print("Installing native Python 3.12 with Homebrew.", flush=True)
-            subprocess.run([str(native_brew), "install", "python@3.12"], check=True)
+            subprocess.run(
+                _native_homebrew_install_command(
+                    native_brew,
+                    Path("/usr/bin/arch"),
+                ),
+                check=True,
+            )
         info = _python_info(native_python)
         if _python_supported(info, system, apple_silicon):
             return info

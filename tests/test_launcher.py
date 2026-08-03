@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from medai.launcher import PythonInfo, _python_supported, _runtime_commands
+from medai.launcher import (
+    PythonInfo,
+    _native_homebrew_install_command,
+    _python_supported,
+    _runtime_commands,
+)
 
 
 def prepare_launcher(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
@@ -170,6 +175,20 @@ def test_python_and_virtualenv_platform_policy():
     assert windows.python == Path(".venv/Scripts/python.exe")
     assert windows.mineru == Path(".venv/Scripts/mineru.exe")
     assert windows.models_download == Path(".venv/Scripts/mineru-models-download.exe")
+
+
+def test_native_homebrew_install_command_runs_as_arm64(tmp_path: Path):
+    arch = tmp_path / "arch"
+    arch.write_text("", encoding="utf-8")
+    assert _native_homebrew_install_command(
+        Path("/opt/homebrew/bin/brew"), arch
+    ) == [
+        str(arch),
+        "-arm64",
+        "/opt/homebrew/bin/brew",
+        "install",
+        "python@3.12",
+    ]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")
