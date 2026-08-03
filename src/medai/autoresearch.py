@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import shutil
 from pathlib import Path
@@ -13,19 +14,29 @@ from medai.artifacts import load_model, write_json
 from medai.autoresearch_visualization import generate_autoresearch_visualizations
 from medai.config import AutoResearchConfig
 from medai.models import (
+    AutoResearchExperimentLog,
+    AutoResearchExperimentPlan,
     ClaimsFile,
     CodegenAudit,
     CodegenPlan,
     EligibilityResult,
     EvidenceSummary,
+    ExperimentContracts,
     ExperimentTodo,
+    ExperimentWeights,
     IdeaAssessment,
     IdeaImplementationPlan,
     ReplicationLog,
     ReplicationPlan,
     RoundSummary,
     SmartReplicateLog,
+    validate_autoresearch_experiment_log,
+    validate_autoresearch_experiment_plan,
+    validate_codegen_audit,
+    validate_experiment_contracts,
     validate_experiment_coverage,
+    validate_experiment_weights,
+    validate_idea_implementation_plan,
     validate_replication_log,
     validate_replication_plan,
     validate_reproduction_report,
@@ -47,7 +58,7 @@ REQUIRED_BASE_STAGES = (
     "report_agents",
 )
 AUTORESEARCH_REPORT_SECTIONS = (
-    "## 1. Base problem and anchors",
+    "## 1. Base problem and research context",
     "## 2. Idea ledger",
     "## 3. Experiment comparisons",
     "## 4. Validity and failure assessment",
@@ -175,6 +186,173 @@ def _stage_name(round_index: int, idea_index: int | None, stage: str) -> str:
     return f"{prefix}.{stage}"
 
 
+def _relative_code_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute() or not path.parts or ".." in path.parts:
+        raise RuntimeError(f"Code artifact path must be repository-relative: {value}")
+    return path
+
+
+def _validate_contract_code_paths(
+    contracts: ExperimentContracts,
+    base_codebase_dir: Path,
+) -> None:
+    for contract in contracts.experiments:
+        for value in (
+            *contract.model_implementation_paths,
+            *contract.integration_paths,
+        ):
+            path = _relative_code_path(value)
+            if not (base_codebase_dir / path).is_file():
+                raise RuntimeError(
+                    f"Experiment contract references a missing base code file: {value}"
+                )
+
+
+def _codebase_file_hashes(codebase_dir: Path) -> dict[str, str]:
+    ignored = {
+        ".git",
+        ".venv",
+        ".cache",
+        ".hypothesis",
+        ".ipynb_checkpoints",
+        ".mypy_cache",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
+    files = {}
+    for path in sorted(codebase_dir.rglob("*")):
+        relative = path.relative_to(codebase_dir)
+        if (
+            any(part in ignored for part in relative.parts)
+            or path.suffix in {".pyc", ".pyo"}
+            or not path.is_file()
+        ):
+            continue
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(65536), b""):
+                digest.update(chunk)
+        files[relative.as_posix()] = digest.hexdigest()
+    return files
+
+
+def _source_code_fingerprint(codebase_dir: Path) -> str:
+    source_suffixes = {
+        ".bash",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cu",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".jl",
+        ".js",
+        ".kt",
+        ".m",
+        ".ps1",
+        ".py",
+        ".r",
+        ".rs",
+        ".scala",
+        ".sh",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".yaml",
+        ".yml",
+    }
+    source_names = {
+        "DESCRIPTION",
+        "Dockerfile",
+        "Makefile",
+        "environment.yml",
+        "requirements.txt",
+    }
+    digest = hashlib.sha256()
+    for path, file_digest in _codebase_file_hashes(codebase_dir).items():
+        relative = Path(path)
+        if relative.suffix.casefold() not in source_suffixes and relative.name not in source_names:
+            continue
+        digest.update(path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(file_digest.encode("ascii"))
+    return digest.hexdigest()
+
+
+def _validate_model_only_implementation(
+    config: AutoResearchConfig,
+    codebase_dir: Path,
+    plan: IdeaImplementationPlan,
+) -> None:
+    base_codebase_dir = config.base_run / "codegen" / "codebase"
+    contracts = load_model(
+        config.output / "experiment_setup" / "experiment_contracts.json",
+        ExperimentContracts,
+    )
+    validate_idea_implementation_plan(contracts, plan)
+    contracts_by_id = {
+        contract.experiment_id: contract for contract in contracts.experiments
+    }
+
+    new_model_files = {
+        _relative_code_path(value).as_posix() for value in plan.new_model_files
+    }
+    integration_files = set()
+    for integration in plan.experiment_integrations:
+        contract = contracts_by_id[integration.experiment_id]
+        if integration.baseline_entry_points != contract.baseline_entry_points:
+            raise RuntimeError(
+                f"Implementation changed baseline entry points for "
+                f"{integration.experiment_id}"
+            )
+        contract_paths = {
+            _relative_code_path(value).as_posix()
+            for value in contract.integration_paths
+        }
+        for change in integration.integration_changes:
+            path = _relative_code_path(change.path).as_posix()
+            if path not in contract_paths:
+                raise RuntimeError(
+                    f"Implementation changes undeclared integration path for "
+                    f"{integration.experiment_id}: {path}"
+                )
+            integration_files.add(path)
+
+    for relative in new_model_files:
+        if (base_codebase_dir / relative).exists():
+            raise RuntimeError(f"Refinement model file already exists in base code: {relative}")
+        if not (codebase_dir / relative).is_file():
+            raise RuntimeError(f"Declared refinement model file is missing: {relative}")
+    for relative in integration_files:
+        if not (base_codebase_dir / relative).is_file():
+            raise RuntimeError(f"Declared integration file is missing from base code: {relative}")
+        if not (codebase_dir / relative).is_file():
+            raise RuntimeError(f"Refinement deleted an integration file: {relative}")
+
+    base_files = _codebase_file_hashes(base_codebase_dir)
+    refined_files = _codebase_file_hashes(codebase_dir)
+    changed_files = {
+        path
+        for path in set(base_files) | set(refined_files)
+        if base_files.get(path) != refined_files.get(path)
+    }
+    allowed_files = new_model_files | integration_files
+    undeclared = changed_files - allowed_files
+    if undeclared:
+        raise RuntimeError(
+            f"Refinement changed files outside the model-only boundary: {sorted(undeclared)}"
+        )
+    unchanged_declared = allowed_files - changed_files
+    if unchanged_declared:
+        raise RuntimeError(
+            f"Implementation plan declares unchanged files: {sorted(unchanged_declared)}"
+        )
+
+
 def _validate_base_run(config: AutoResearchConfig) -> None:
     base_state = PipelineState(config.base_run)
     if base_state.state.get("status") != "completed":
@@ -283,6 +461,7 @@ def autoresearch_preflight_node(state: AutoResearchState) -> dict[str, Any]:
     for name in (
         "preflight",
         "eligibility",
+        "experiment_setup",
         "rounds",
         "report",
         "prompts",
@@ -318,16 +497,7 @@ def autoresearch_eligibility_node(state: AutoResearchState) -> dict[str, Any]:
     prompt_path = render_prompt(
         "autoresearch/eligibility/session_instructions.md",
         config.output / "prompts" / "eligibility.md",
-        base_manifest=config.base_run / "manifest.json",
         paper_markdown=config.base_run / "preprocessing" / "paper.md",
-        claims_path=config.base_run / "preprocessing" / "claims.json",
-        experiments_path=config.base_run / "preprocessing" / "experiment_todo.json",
-        codegen_plan_path=config.base_run / "codegen" / "codebase" / "codegen_plan.json",
-        codebase_dir=config.base_run / "codegen" / "codebase",
-        replicate_plan_path=config.base_run / "plan" / "replicate_plan.json",
-        replication_log_path=config.base_run / "replication" / "replication_log.json",
-        evidence_summary_path=config.base_run / "replication" / "evidence_summary.json",
-        reproduction_report_path=config.base_run / "report" / "reproduction_report.md",
         eligibility_path=eligibility_path,
     )
     run_agent(
@@ -350,6 +520,102 @@ def autoresearch_eligibility_node(state: AutoResearchState) -> dict[str, Any]:
         "eligibility_path": str(eligibility_path),
         "eligible": eligibility.eligible,
     }
+
+
+def autoresearch_experiment_setup_node(state: AutoResearchState) -> dict[str, Any]:
+    config = state["config"]
+    pipeline_state = PipelineState(config.output)
+    setup_dir = config.output / "experiment_setup"
+    experiments_path = config.base_run / "preprocessing" / "experiment_todo.json"
+    experiments = load_model(experiments_path, ExperimentTodo)
+    weights_path = setup_dir / "experiment_weights.json"
+    weights_transcript_path = setup_dir / "experiment_weighting_transcript.jsonl"
+
+    if pipeline_state.is_stage_completed("experiment_weighting"):
+        weights = load_model(weights_path, ExperimentWeights)
+        validate_experiment_weights(experiments, weights)
+        if not weights_transcript_path.is_file():
+            raise RuntimeError(
+                f"Completed experiment-weighting transcript is missing: "
+                f"{weights_transcript_path}"
+            )
+        print("resume experiment_weighting stage: skipped (already completed)")
+    else:
+        print("enter experiment_weighting stage")
+        pipeline_state.start_stage("experiment_weighting")
+        setup_dir.mkdir(parents=True, exist_ok=True)
+        prompt_path = render_prompt(
+            "autoresearch/experiment_weighting/session_instructions.md",
+            config.output / "prompts" / "experiment_setup" / "weighting.md",
+            paper_markdown=config.base_run / "preprocessing" / "paper.md",
+            experiments_path=experiments_path,
+            weights_path=weights_path,
+        )
+        run_agent(
+            provider=config.provider,
+            prompt_path=prompt_path,
+            working_dir=setup_dir,
+            transcript_path=weights_transcript_path,
+            siliconflow_config_path=config.siliconflow_config,
+            codex_model=config.codex_model,
+            codex_reasoning_effort=config.codex_reasoning_effort,
+        )
+        weights = load_model(weights_path, ExperimentWeights)
+        validate_experiment_weights(experiments, weights)
+        pipeline_state.complete_stage(
+            "experiment_weighting",
+            [str(weights_path), str(weights_transcript_path)],
+        )
+
+    contracts_path = setup_dir / "experiment_contracts.json"
+    contracts_transcript_path = setup_dir / "experiment_contracts_transcript.jsonl"
+    if pipeline_state.is_stage_completed("experiment_contracts"):
+        contracts = load_model(contracts_path, ExperimentContracts)
+        validate_experiment_contracts(experiments, contracts)
+        _validate_contract_code_paths(
+            contracts,
+            config.base_run / "codegen" / "codebase",
+        )
+        if not contracts_transcript_path.is_file():
+            raise RuntimeError(
+                f"Completed experiment-contract transcript is missing: "
+                f"{contracts_transcript_path}"
+            )
+        print("resume experiment_contracts stage: skipped (already completed)")
+        return {}
+
+    print("enter experiment_contracts stage")
+    pipeline_state.start_stage("experiment_contracts")
+    base_codebase_dir = config.base_run / "codegen" / "codebase"
+    before = _codebase_fingerprint(base_codebase_dir)
+    prompt_path = render_prompt(
+        "autoresearch/experiment_contracts/session_instructions.md",
+        config.output / "prompts" / "experiment_setup" / "contracts.md",
+        experiments_path=experiments_path,
+        codegen_plan_path=base_codebase_dir / "codegen_plan.json",
+        replicate_plan_path=config.base_run / "plan" / "replicate_plan.json",
+        base_codebase_dir=base_codebase_dir,
+        contracts_path=contracts_path,
+    )
+    run_agent(
+        provider=config.provider,
+        prompt_path=prompt_path,
+        working_dir=setup_dir,
+        transcript_path=contracts_transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+    )
+    if _codebase_fingerprint(base_codebase_dir) != before:
+        raise RuntimeError("Experiment-contract agent modified the base codebase")
+    contracts = load_model(contracts_path, ExperimentContracts)
+    validate_experiment_contracts(experiments, contracts)
+    _validate_contract_code_paths(contracts, base_codebase_dir)
+    pipeline_state.complete_stage(
+        "experiment_contracts",
+        [str(contracts_path), str(contracts_transcript_path)],
+    )
+    return {}
 
 
 def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
@@ -459,6 +725,7 @@ def _run_codegen(
             )
         if not codebase_dir.is_dir() or not transcript_path.is_file():
             raise RuntimeError(f"Completed {stage_suffix} artifacts are missing for {idea_id}")
+        _validate_model_only_implementation(config, codebase_dir, plan)
         print(f"resume {stage_name} stage: skipped (already completed)")
         return codebase_dir, implementation_plan_path
 
@@ -485,11 +752,21 @@ def _run_codegen(
         / f"idea_{idea_index:02d}"
         / prompt_name,
         idea_id=idea_id,
+        paper_markdown=config.base_run / "preprocessing" / "paper.md",
         ideas_path=ideas_path,
         eligibility_path=config.output / "eligibility" / "eligibility.json",
+        contracts_path=(
+            config.output / "experiment_setup" / "experiment_contracts.json"
+        ),
+        experiments_path=(
+            config.base_run / "preprocessing" / "experiment_todo.json"
+        ),
+        base_codegen_plan_path=(
+            config.base_run / "codegen" / "codebase" / "codegen_plan.json"
+        ),
+        base_replicate_plan_path=config.base_run / "plan" / "replicate_plan.json",
         base_codebase_dir=config.base_run / "codegen" / "codebase",
         codebase_dir=codebase_dir,
-        data_dir=config.data,
         implementation_plan_path=implementation_plan_path,
         repair_audit_path=repair_audit_path,
     )
@@ -505,6 +782,7 @@ def _run_codegen(
     plan = load_model(implementation_plan_path, IdeaImplementationPlan)
     if plan.idea_id != idea_id:
         raise RuntimeError(f"Implementation plan ID {plan.idea_id} does not match {idea_id}")
+    _validate_model_only_implementation(config, codebase_dir, plan)
     pipeline_state.complete_stage(
         stage_name,
         [str(codebase_dir), str(implementation_plan_path), str(transcript_path)],
@@ -556,8 +834,11 @@ def _run_codegen_audit(
     attempt_path = audit_dir / f"audit_{attempt}.json"
     canonical_path = audit_dir / "audit.json"
     transcript_path = audit_dir / f"audit_{attempt}_transcript.jsonl"
+    contracts_path = config.output / "experiment_setup" / "experiment_contracts.json"
+    contracts = load_model(contracts_path, ExperimentContracts)
     if pipeline_state.is_stage_completed(stage_name):
         audit = load_model(attempt_path, CodegenAudit)
+        validate_codegen_audit(contracts, audit)
         if audit.idea_id != idea_id or not transcript_path.is_file():
             raise RuntimeError(f"Completed audit artifacts are invalid for {idea_id}")
         shutil.copy2(attempt_path, canonical_path)
@@ -576,7 +857,7 @@ def _run_codegen_audit(
         / f"idea_{idea_index:02d}"
         / f"audit_{attempt}.md",
         idea_id=idea_id,
-        eligibility_path=config.output / "eligibility" / "eligibility.json",
+        contracts_path=contracts_path,
         base_codebase_dir=config.base_run / "codegen" / "codebase",
         codebase_dir=codebase_dir,
         implementation_plan_path=implementation_plan_path,
@@ -597,6 +878,7 @@ def _run_codegen_audit(
     audit = load_model(attempt_path, CodegenAudit)
     if audit.idea_id != idea_id:
         raise RuntimeError(f"Codegen audit ID {audit.idea_id} does not match {idea_id}")
+    validate_codegen_audit(contracts, audit)
     shutil.copy2(attempt_path, canonical_path)
     pipeline_state.complete_stage(
         stage_name,
@@ -609,7 +891,6 @@ def _run_experiment_plan(
     config: AutoResearchConfig,
     round_index: int,
     idea_index: int,
-    ideas_path: Path,
     codebase_dir: Path,
     implementation_plan_path: Path,
     audit_path: Path,
@@ -620,8 +901,12 @@ def _run_experiment_plan(
     plan_dir = _idea_dir(config, round_index, idea_index) / "plan"
     plan_path = plan_dir / "experiment_plan.json"
     transcript_path = plan_dir / "plan_transcript.jsonl"
+    contracts_path = config.output / "experiment_setup" / "experiment_contracts.json"
+    contracts = load_model(contracts_path, ExperimentContracts)
+    implementation = load_model(implementation_plan_path, IdeaImplementationPlan)
     if pipeline_state.is_stage_completed(stage_name):
-        load_model(plan_path, ReplicationPlan)
+        plan = load_model(plan_path, AutoResearchExperimentPlan)
+        validate_autoresearch_experiment_plan(contracts, implementation, plan)
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed experiment-plan transcript is missing: {transcript_path}")
         print(f"resume {stage_name} stage: skipped (already completed)")
@@ -638,12 +923,11 @@ def _run_experiment_plan(
         / f"idea_{idea_index:02d}"
         / "plan.md",
         idea_id=idea_id,
-        ideas_path=ideas_path,
-        eligibility_path=config.output / "eligibility" / "eligibility.json",
+        contracts_path=contracts_path,
+        weights_path=config.output / "experiment_setup" / "experiment_weights.json",
         implementation_plan_path=implementation_plan_path,
         audit_path=audit_path,
         codebase_dir=codebase_dir,
-        base_replication_log=config.base_run / "replication" / "replication_log.json",
         experiment_plan_path=plan_path,
         computation_provider_state_path=config.output / "remote_compute" / "instance.json",
     )
@@ -656,7 +940,8 @@ def _run_experiment_plan(
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    load_model(plan_path, ReplicationPlan)
+    plan = load_model(plan_path, AutoResearchExperimentPlan)
+    validate_autoresearch_experiment_plan(contracts, implementation, plan)
     pipeline_state.complete_stage(stage_name, [str(plan_path), str(transcript_path)])
     return plan_path
 
@@ -677,25 +962,51 @@ def _resolve_experiment_output(value: str, codebase_dir: Path, experiment_dir: P
 
 def _validate_experiment_artifacts(
     plan_path: Path,
+    implementation_plan_path: Path,
     log_path: Path,
     evidence_path: Path,
     codebase_dir: Path,
     experiment_dir: Path,
 ) -> list[str]:
-    plan = load_model(plan_path, ReplicationPlan)
-    log = load_model(log_path, ReplicationLog)
-    validate_replication_log(plan, log)
+    plan = load_model(plan_path, AutoResearchExperimentPlan)
+    implementation = load_model(implementation_plan_path, IdeaImplementationPlan)
+    log = load_model(log_path, AutoResearchExperimentLog)
+    validate_autoresearch_experiment_log(plan, log)
     load_model(evidence_path, EvidenceSummary)
     managed = {log_path.resolve(), evidence_path.resolve()}
     outputs = [str(log_path), str(evidence_path)]
-    for outcome in log.step_outcomes:
-        for output_file in outcome.output_files:
-            resolved = _resolve_experiment_output(output_file, codebase_dir, experiment_dir)
-            if resolved in managed:
+    integrations = {
+        integration.experiment_id: integration
+        for integration in implementation.experiment_integrations
+    }
+    for experiment in log.experiments:
+        baseline_commands = {
+            command.strip()
+            for command in integrations[experiment.experiment_id].baseline_entry_points
+        }
+        for outcome in experiment.step_outcomes:
+            if outcome.command_executed.strip() in baseline_commands:
                 raise RuntimeError(
-                    f"Experiment step {outcome.step_id} cannot cite a managed log as output"
+                    f"Auto Research experiment reran a baseline: "
+                    f"{experiment.experiment_id} step {outcome.step_id}"
                 )
-            outputs.append(str(resolved))
+            if outcome.code_modified or outcome.fixes_applied:
+                raise RuntimeError(
+                    f"Auto Research experiment modified audited code: "
+                    f"{experiment.experiment_id} step {outcome.step_id}"
+                )
+            for output_file in outcome.output_files:
+                resolved = _resolve_experiment_output(
+                    output_file,
+                    codebase_dir,
+                    experiment_dir,
+                )
+                if resolved in managed:
+                    raise RuntimeError(
+                        f"Experiment step {outcome.step_id} cannot cite a managed log "
+                        "as output"
+                    )
+                outputs.append(str(resolved))
     return outputs
 
 
@@ -715,9 +1026,15 @@ def _run_experiment(
     log_path = experiment_dir / "experiment_log.json"
     evidence_path = experiment_dir / "evidence_summary.json"
     transcript_path = experiment_dir / "experiment_transcript.jsonl"
+    codebase_fingerprint = _source_code_fingerprint(codebase_dir)
+    checkpoints = pipeline_state.get_stage_checkpoints(stage_name)
+    audited_fingerprint = checkpoints.get("audited_source_fingerprint")
+    if audited_fingerprint and audited_fingerprint != codebase_fingerprint:
+        raise RuntimeError(f"Audited idea code changed before experiment: {idea_id}")
     if pipeline_state.is_stage_completed(stage_name):
         _validate_experiment_artifacts(
             plan_path,
+            implementation_plan_path,
             log_path,
             evidence_path,
             codebase_dir,
@@ -730,6 +1047,11 @@ def _run_experiment(
 
     print(f"enter {stage_name} stage")
     pipeline_state.start_stage(stage_name)
+    if not audited_fingerprint:
+        pipeline_state.update_stage_checkpoints(
+            stage_name,
+            {"audited_source_fingerprint": codebase_fingerprint},
+        )
     experiment_dir.mkdir(parents=True, exist_ok=True)
     prompt_path = render_prompt(
         "autoresearch/experiment/session_instructions.md",
@@ -739,6 +1061,9 @@ def _run_experiment(
         / f"idea_{idea_index:02d}"
         / "experiment.md",
         idea_id=idea_id,
+        contracts_path=(
+            config.output / "experiment_setup" / "experiment_contracts.json"
+        ),
         experiment_plan_path=plan_path,
         implementation_plan_path=implementation_plan_path,
         audit_path=audit_path,
@@ -760,8 +1085,11 @@ def _run_experiment(
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
+    if _source_code_fingerprint(codebase_dir) != codebase_fingerprint:
+        raise RuntimeError(f"Experiment agent modified audited idea code: {idea_id}")
     outputs = _validate_experiment_artifacts(
         plan_path,
+        implementation_plan_path,
         log_path,
         evidence_path,
         codebase_dir,
@@ -777,10 +1105,6 @@ def _validate_assessment_evidence(
     round_index: int,
     idea_index: int,
 ) -> None:
-    if not assessment.evidence_paths:
-        raise RuntimeError(
-            f"Assessment must cite actual evidence files: {assessment.idea_id}"
-        )
     idea_dir = _idea_dir(config, round_index, idea_index)
     roots = [config.base_run.resolve(), idea_dir.resolve()]
     relative_roots = [
@@ -791,27 +1115,84 @@ def _validate_assessment_evidence(
         config.base_run / "codegen" / "codebase",
         config.base_run / "replication",
     ]
-    for value in assessment.evidence_paths:
-        raw = Path(value).expanduser()
-        candidates = [raw] if raw.is_absolute() else [root / raw for root in relative_roots]
-        if raw.is_absolute():
-            for marker, destination in (
-                (("codegen", "codebase"), config.base_run / "codegen" / "codebase"),
-                (("replication",), config.base_run / "replication"),
+    for experiment in assessment.experiments:
+        for value in experiment.evidence_paths:
+            raw = Path(value).expanduser()
+            candidates = (
+                [raw]
+                if raw.is_absolute()
+                else [root / raw for root in relative_roots]
+            )
+            if raw.is_absolute():
+                for marker, destination in (
+                    (("codegen", "codebase"), config.base_run / "codegen" / "codebase"),
+                    (("replication",), config.base_run / "replication"),
+                ):
+                    parts = raw.parts
+                    for index in range(len(parts) - len(marker) + 1):
+                        if tuple(parts[index : index + len(marker)]) == marker:
+                            candidates.append(
+                                destination.joinpath(*parts[index + len(marker) :])
+                            )
+                            break
+            if not any(
+                candidate.resolve().is_file()
+                and any(candidate.resolve().is_relative_to(root) for root in roots)
+                for candidate in candidates
             ):
-                parts = raw.parts
-                for index in range(len(parts) - len(marker) + 1):
-                    if tuple(parts[index : index + len(marker)]) == marker:
-                        candidates.append(destination.joinpath(*parts[index + len(marker) :]))
-                        break
-        if not any(
-            candidate.resolve().is_file()
-            and any(candidate.resolve().is_relative_to(root) for root in roots)
-            for candidate in candidates
+                raise RuntimeError(
+                    "Assessment evidence must be an existing file inside the base run or "
+                    f"idea artifacts: {value}"
+                )
+
+
+def _validate_assessment_contract(
+    assessment: IdeaAssessment,
+    config: AutoResearchConfig,
+) -> None:
+    if not math.isclose(
+        assessment.threshold,
+        config.assessment_threshold,
+        rel_tol=0,
+        abs_tol=1e-12,
+    ):
+        raise RuntimeError(
+            f"Assessment threshold does not match campaign configuration: "
+            f"{assessment.idea_id}"
+        )
+    weights = load_model(
+        config.output / "experiment_setup" / "experiment_weights.json",
+        ExperimentWeights,
+    )
+    contracts = load_model(
+        config.output / "experiment_setup" / "experiment_contracts.json",
+        ExperimentContracts,
+    )
+    expected_ids = [experiment.experiment_id for experiment in weights.experiments]
+    actual_ids = [experiment.experiment_id for experiment in assessment.experiments]
+    if actual_ids != expected_ids:
+        raise RuntimeError(
+            f"Assessment must cover every weighted experiment in order: {assessment.idea_id}"
+        )
+    for importance, contract, comparison in zip(
+        weights.experiments,
+        contracts.experiments,
+        assessment.experiments,
+        strict=True,
+    ):
+        if (
+            comparison.metric_name != contract.primary_metric
+            or comparison.direction != contract.metric_direction
+            or not math.isclose(
+                comparison.weight,
+                importance.weight,
+                rel_tol=1e-6,
+                abs_tol=1e-9,
+            )
         ):
             raise RuntimeError(
-                "Assessment evidence must be an existing file inside the base run or "
-                f"idea artifacts: {value}"
+                f"Assessment changed frozen weight or metric for "
+                f"{comparison.experiment_id}"
             )
 
 
@@ -819,7 +1200,6 @@ def _run_assessment(
     config: AutoResearchConfig,
     round_index: int,
     idea_index: int,
-    ideas_path: Path,
     implementation_plan_path: Path,
     audit_path: Path,
     plan_path: Path,
@@ -836,6 +1216,7 @@ def _run_assessment(
         assessment = load_model(assessment_path, IdeaAssessment)
         if assessment.idea_id != idea_id or not transcript_path.is_file():
             raise RuntimeError(f"Completed assessment artifacts are invalid for {idea_id}")
+        _validate_assessment_contract(assessment, config)
         _validate_assessment_evidence(
             assessment,
             config,
@@ -856,8 +1237,10 @@ def _run_assessment(
         / f"idea_{idea_index:02d}"
         / "assessment.md",
         idea_id=idea_id,
-        ideas_path=ideas_path,
-        eligibility_path=config.output / "eligibility" / "eligibility.json",
+        contracts_path=(
+            config.output / "experiment_setup" / "experiment_contracts.json"
+        ),
+        weights_path=config.output / "experiment_setup" / "experiment_weights.json",
         implementation_plan_path=implementation_plan_path,
         audit_path=audit_path,
         experiment_plan_path=plan_path,
@@ -868,6 +1251,11 @@ def _run_assessment(
         base_reproduction_report=config.base_run / "report" / "reproduction_report.md",
         base_codebase_dir=config.base_run / "codegen" / "codebase",
         base_replication_dir=config.base_run / "replication",
+        codebase_dir=_idea_dir(config, round_index, idea_index)
+        / "codegen"
+        / "codebase",
+        experiment_dir=_idea_dir(config, round_index, idea_index) / "experiment",
+        assessment_threshold=config.assessment_threshold,
         assessment_path=assessment_path,
     )
     run_agent(
@@ -885,6 +1273,7 @@ def _run_assessment(
     audit = load_model(audit_path, CodegenAudit)
     if assessment.audit_passed != (audit.verdict == "pass"):
         raise RuntimeError(f"Assessment audit status does not match codegen audit: {idea_id}")
+    _validate_assessment_contract(assessment, config)
     _validate_assessment_evidence(
         assessment,
         config,
@@ -927,9 +1316,9 @@ def _write_audit_failure_assessment(
         summary="Codegen audit failed after one repair; experiment was not run.",
         audit_passed=False,
         protocol_consistent=False,
-        primary_metric=None,
-        secondary_metrics=[],
-        evidence_paths=[],
+        experiments=[],
+        weighted_score=None,
+        threshold=config.assessment_threshold,
         failure_reasons=failure_reasons or audit.required_fixes,
     )
     write_json(assessment_path, assessment.model_dump(mode="json"))
@@ -985,7 +1374,6 @@ def _run_idea(
         config,
         round_index,
         idea_index,
-        ideas_path,
         codebase_dir,
         implementation_plan_path,
         audit_path,
@@ -1003,7 +1391,6 @@ def _run_idea(
         config,
         round_index,
         idea_index,
-        ideas_path,
         implementation_plan_path,
         audit_path,
         plan_path,
@@ -1161,6 +1548,10 @@ def autoresearch_report_node(state: AutoResearchState) -> dict[str, str]:
         "autoresearch/report/session_instructions.md",
         config.output / "prompts" / "final_report.md",
         eligibility_path=config.output / "eligibility" / "eligibility.json",
+        weights_path=config.output / "experiment_setup" / "experiment_weights.json",
+        contracts_path=(
+            config.output / "experiment_setup" / "experiment_contracts.json"
+        ),
         base_reproduction_report=config.base_run / "report" / "reproduction_report.md",
         rounds_json=json.dumps(
             [_round_artifact_context(config, summary.round) for summary in summaries],
@@ -1199,13 +1590,14 @@ def autoresearch_report_node(state: AutoResearchState) -> dict[str, str]:
 
 
 def _eligibility_route(state: AutoResearchState) -> str:
-    return "research" if state.get("eligible") else "ineligible"
+    return "experiment_setup" if state.get("eligible") else "ineligible"
 
 
 def create_autoresearch_workflow():
     builder = StateGraph(AutoResearchState)
     builder.add_node("preflight", autoresearch_preflight_node)
     builder.add_node("eligibility", autoresearch_eligibility_node)
+    builder.add_node("experiment_setup", autoresearch_experiment_setup_node)
     builder.add_node("research", autoresearch_loop_node)
     builder.add_node("report", autoresearch_report_node)
     builder.add_edge(START, "preflight")
@@ -1213,8 +1605,9 @@ def create_autoresearch_workflow():
     builder.add_conditional_edges(
         "eligibility",
         _eligibility_route,
-        {"research": "research", "ineligible": END},
+        {"experiment_setup": "experiment_setup", "ineligible": END},
     )
+    builder.add_edge("experiment_setup", "research")
     builder.add_edge("research", "report")
     builder.add_edge("report", END)
     return builder.compile()

@@ -79,6 +79,7 @@ def build_autoresearch_inputs(config: AutoResearchConfig) -> dict[str, Any]:
         "codex_model": config.codex_model,
         "codex_reasoning_effort": config.codex_reasoning_effort,
         "max_iter": config.max_iter,
+        "assessment_threshold": config.assessment_threshold,
         "computation_provider": (
             "autodl"
             if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")

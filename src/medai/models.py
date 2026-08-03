@@ -195,36 +195,81 @@ class SmartReplicateLog(StrictModel):
         return self
 
 
-AnchorName = Literal[
-    "task_and_prediction_target",
-    "dataset_cohort_and_io",
-    "metrics_and_protocol",
-    "baseline_method",
-]
-
-
-class ResearchAnchors(StrictModel):
-    task: str = Field(min_length=1)
-    prediction_target: str = Field(min_length=1)
-    dataset: str = Field(min_length=1)
-    cohort: str = Field(min_length=1)
-    inputs: list[str] = Field(min_length=1)
-    outputs: list[str] = Field(min_length=1)
-    metrics: list[str] = Field(min_length=1)
-    experiment_protocol: list[str] = Field(min_length=1)
-    baseline_method: str = Field(min_length=1)
+class ResearchBrief(StrictModel):
+    problem: str = Field(min_length=1)
+    context: str = Field(min_length=1)
+    proposed_method: str = Field(min_length=1)
+    datasets: list[str] = Field(min_length=1)
 
 
 class EligibilityResult(StrictModel):
     eligible: bool
     reason: str = Field(min_length=1)
     evidence_paths: list[str]
-    anchors: ResearchAnchors | None = None
+    research_brief: ResearchBrief | None = None
 
     @model_validator(mode="after")
-    def eligible_run_has_anchors(self) -> "EligibilityResult":
-        if self.eligible and self.anchors is None:
-            raise ValueError("Eligible Auto Research runs must define research anchors")
+    def eligible_run_has_research_brief(self) -> "EligibilityResult":
+        if self.eligible and self.research_brief is None:
+            raise ValueError("Eligible Auto Research runs must define a research brief")
+        if not self.eligible and self.research_brief is not None:
+            raise ValueError("Ineligible Auto Research runs cannot define a research brief")
+        return self
+
+
+class ExperimentImportance(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    weight: float = Field(gt=0, le=1)
+    rationale: str = Field(min_length=1)
+
+
+class ExperimentWeights(StrictModel):
+    experiments: list[ExperimentImportance] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_ids_and_normalized_weights(self) -> "ExperimentWeights":
+        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
+        if len(experiment_ids) != len(set(experiment_ids)):
+            raise ValueError("Experiment-weight IDs must be unique")
+        if not math.isclose(
+            sum(experiment.weight for experiment in self.experiments),
+            1.0,
+            rel_tol=1e-6,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("Experiment weights must sum to 1")
+        return self
+
+
+class ExperimentContract(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    baseline_entry_points: list[str] = Field(min_length=1)
+    model_implementation_paths: list[str] = Field(min_length=1)
+    integration_paths: list[str] = Field(min_length=1)
+    input_contract: str = Field(min_length=1)
+    target_contract: str = Field(min_length=1)
+    output_contract: str = Field(min_length=1)
+    training_contract: str = Field(min_length=1)
+    evaluation_contract: str = Field(min_length=1)
+    metrics: list[str] = Field(min_length=1)
+    primary_metric: str = Field(min_length=1)
+    metric_direction: Literal["higher", "lower"]
+
+    @model_validator(mode="after")
+    def primary_metric_is_declared(self) -> "ExperimentContract":
+        if self.primary_metric not in self.metrics:
+            raise ValueError("Experiment primary_metric must appear in metrics")
+        return self
+
+
+class ExperimentContracts(StrictModel):
+    experiments: list[ExperimentContract] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_experiment_ids(self) -> "ExperimentContracts":
+        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
+        if len(experiment_ids) != len(set(experiment_ids)):
+            raise ValueError("Experiment-contract IDs must be unique")
         return self
 
 
@@ -234,31 +279,38 @@ class IdeaChangePoint(StrictModel):
     rationale: str = Field(min_length=1)
 
 
+class IdeaExperimentIntegration(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    integration_changes: list[IdeaChangePoint] = Field(min_length=1)
+    baseline_entry_points: list[str] = Field(min_length=1)
+    refinement_entry_points: list[str] = Field(min_length=1)
+
+
 class IdeaImplementationPlan(StrictModel):
     idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
     summary: str = Field(min_length=1)
-    change_points: list[IdeaChangePoint] = Field(min_length=1)
-    baseline_entry_points: list[str] = Field(min_length=1)
-    refinement_entry_points: list[str] = Field(min_length=1)
-    preserved_anchors: list[AnchorName]
+    model_description: str = Field(min_length=1)
+    new_model_files: list[str] = Field(min_length=1)
+    experiment_integrations: list[IdeaExperimentIntegration] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def preserves_every_anchor(self) -> "IdeaImplementationPlan":
-        expected = {
-            "task_and_prediction_target",
-            "dataset_cohort_and_io",
-            "metrics_and_protocol",
-            "baseline_method",
-        }
-        if len(self.preserved_anchors) != len(set(self.preserved_anchors)):
-            raise ValueError("preserved_anchors must be unique")
-        if set(self.preserved_anchors) != expected:
-            raise ValueError("implementation plan must preserve all four research anchors")
+    def unique_model_files_and_experiment_ids(self) -> "IdeaImplementationPlan":
+        if len(self.new_model_files) != len(set(self.new_model_files)):
+            raise ValueError("new_model_files must be unique")
+        experiment_ids = [
+            integration.experiment_id for integration in self.experiment_integrations
+        ]
+        if len(experiment_ids) != len(set(experiment_ids)):
+            raise ValueError("Implementation experiment IDs must be unique")
         return self
 
 
+ContractAspect = Literal["input", "target", "output", "training", "evaluation"]
+
+
 class CodegenAuditCheck(StrictModel):
-    anchor: AnchorName
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    aspect: ContractAspect
     verdict: Literal["pass", "fail"]
     evidence: list[str] = Field(min_length=1)
     issue: str | None = None
@@ -273,21 +325,26 @@ class CodegenAuditCheck(StrictModel):
 class CodegenAudit(StrictModel):
     idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
     verdict: Literal["pass", "fail"]
-    checks: list[CodegenAuditCheck]
+    model_only: bool
+    scope_evidence: list[str] = Field(min_length=1)
+    scope_issue: str | None = None
+    checks: list[CodegenAuditCheck] = Field(min_length=1)
     required_fixes: list[str]
 
     @model_validator(mode="after")
-    def covers_exact_anchor_contract(self) -> "CodegenAudit":
-        anchors = [check.anchor for check in self.checks]
-        expected = {
-            "task_and_prediction_target",
-            "dataset_cohort_and_io",
-            "metrics_and_protocol",
-            "baseline_method",
-        }
-        if len(anchors) != 4 or set(anchors) != expected:
-            raise ValueError("codegen audit must check each research anchor exactly once")
-        expected_verdict = "pass" if all(check.verdict == "pass" for check in self.checks) else "fail"
+    def verdict_matches_scope_and_checks(self) -> "CodegenAudit":
+        pairs = [(check.experiment_id, check.aspect) for check in self.checks]
+        if len(pairs) != len(set(pairs)):
+            raise ValueError("Codegen audit experiment/aspect checks must be unique")
+        if not self.model_only and not self.scope_issue:
+            raise ValueError("A non-model-only audit must describe the scope issue")
+        if self.model_only and self.scope_issue:
+            raise ValueError("A model-only audit cannot report a scope issue")
+        expected_verdict = (
+            "pass"
+            if self.model_only and all(check.verdict == "pass" for check in self.checks)
+            else "fail"
+        )
         if self.verdict != expected_verdict:
             raise ValueError("codegen audit verdict does not match its checks")
         if self.verdict == "fail" and not self.required_fixes:
@@ -297,23 +354,73 @@ class CodegenAudit(StrictModel):
         return self
 
 
-class MetricComparison(StrictModel):
-    name: str = Field(min_length=1)
+class RefinementExperimentPlan(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    steps: list[ReplicationStep] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def unique_step_ids(self) -> "RefinementExperimentPlan":
+        step_ids = [step.id for step in self.steps]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("Refinement experiment step IDs must be unique")
+        return self
+
+
+class AutoResearchExperimentPlan(StrictModel):
+    environment: PlanEnvironment
+    experiments: list[RefinementExperimentPlan] = Field(min_length=1)
+    remote_compute: RemoteComputePlan | None = None
+
+    @model_validator(mode="after")
+    def unique_experiment_ids(self) -> "AutoResearchExperimentPlan":
+        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
+        if len(experiment_ids) != len(set(experiment_ids)):
+            raise ValueError("Auto Research experiment-plan IDs must be unique")
+        return self
+
+
+class RefinementExperimentLog(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    step_outcomes: list[ReplicationStepOutcome] = Field(min_length=1)
+
+
+class AutoResearchExperimentLog(StrictModel):
+    experiments: list[RefinementExperimentLog] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_experiment_ids(self) -> "AutoResearchExperimentLog":
+        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
+        if len(experiment_ids) != len(set(experiment_ids)):
+            raise ValueError("Auto Research experiment-log IDs must be unique")
+        return self
+
+
+class ExperimentMetricComparison(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    metric_name: str = Field(min_length=1)
     direction: Literal["higher", "lower"]
+    weight: float = Field(gt=0, le=1)
     baseline_value: float | None
     refined_value: float | None
     absolute_delta: float | None
     relative_delta: float | None
-    uncertainty_available: bool
-    noise_threshold: float | None = Field(default=None, ge=0)
-    uncertainty_method: str | None = None
-    improvement_supported: bool
+    score: float | None
+    weighted_score: float | None
+    evidence_paths: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_comparison(self) -> "MetricComparison":
+    def validate_comparison(self) -> "ExperimentMetricComparison":
         if self.baseline_value is None or self.refined_value is None:
-            if self.improvement_supported:
-                raise ValueError("A metric without both values cannot support improvement")
+            if any(
+                value is not None
+                for value in (
+                    self.absolute_delta,
+                    self.relative_delta,
+                    self.score,
+                    self.weighted_score,
+                )
+            ):
+                raise ValueError("An incomplete comparison cannot define derived scores")
             return self
 
         expected_delta = self.refined_value - self.baseline_value
@@ -325,8 +432,13 @@ class MetricComparison(StrictModel):
         ):
             raise ValueError("absolute_delta must equal refined_value - baseline_value")
         if self.baseline_value == 0:
-            if self.relative_delta is not None:
-                raise ValueError("relative_delta must be null when baseline_value is zero")
+            if any(
+                value is not None
+                for value in (self.relative_delta, self.score, self.weighted_score)
+            ):
+                raise ValueError(
+                    "Relative and weighted scores must be null when baseline_value is zero"
+                )
         else:
             expected_relative = expected_delta / abs(self.baseline_value)
             if self.relative_delta is None or not math.isclose(
@@ -336,22 +448,24 @@ class MetricComparison(StrictModel):
                 abs_tol=1e-9,
             ):
                 raise ValueError("relative_delta is inconsistent with the metric values")
-
-        if self.uncertainty_available:
-            if self.noise_threshold is None or not self.uncertainty_method:
-                raise ValueError(
-                    "Metrics with uncertainty must record its method and noise threshold"
-                )
-            threshold = self.noise_threshold
-        else:
-            if self.noise_threshold is not None or self.uncertainty_method is not None:
-                raise ValueError(
-                    "Metrics without uncertainty cannot record an uncertainty threshold"
-                )
-            threshold = 0.0
-        directed_delta = expected_delta if self.direction == "higher" else -expected_delta
-        if self.improvement_supported != (directed_delta > threshold):
-            raise ValueError("improvement_supported does not match the declared criterion")
+            expected_score = (
+                expected_relative if self.direction == "higher" else -expected_relative
+            )
+            if self.score is None or not math.isclose(
+                self.score,
+                expected_score,
+                rel_tol=1e-6,
+                abs_tol=1e-9,
+            ):
+                raise ValueError("score is inconsistent with metric direction")
+            expected_weighted = expected_score * self.weight
+            if self.weighted_score is None or not math.isclose(
+                self.weighted_score,
+                expected_weighted,
+                rel_tol=1e-6,
+                abs_tol=1e-9,
+            ):
+                raise ValueError("weighted_score is inconsistent with score and weight")
         return self
 
 
@@ -361,31 +475,54 @@ class IdeaAssessment(StrictModel):
     summary: str = Field(min_length=1)
     audit_passed: bool
     protocol_consistent: bool
-    primary_metric: MetricComparison | None
-    secondary_metrics: list[MetricComparison]
-    evidence_paths: list[str]
+    experiments: list[ExperimentMetricComparison]
+    weighted_score: float | None
+    threshold: float = Field(ge=0)
     failure_reasons: list[str]
 
     @model_validator(mode="after")
-    def valid_verdict_has_supported_improvement(self) -> "IdeaAssessment":
-        supported = self.primary_metric is not None and self.primary_metric.improvement_supported
+    def verdict_matches_weighted_score(self) -> "IdeaAssessment":
+        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
+        if len(experiment_ids) != len(set(experiment_ids)):
+            raise ValueError("Assessment experiment IDs must be unique")
+        expected_score = None
+        if self.experiments and all(
+            experiment.weighted_score is not None for experiment in self.experiments
+        ):
+            expected_score = sum(
+                experiment.weighted_score
+                for experiment in self.experiments
+                if experiment.weighted_score is not None
+            )
+        if expected_score is None:
+            if self.weighted_score is not None:
+                raise ValueError("Incomplete experiment comparisons require a null weighted score")
+        elif self.weighted_score is None or not math.isclose(
+            self.weighted_score,
+            expected_score,
+            rel_tol=1e-6,
+            abs_tol=1e-9,
+        ):
+            raise ValueError("Assessment weighted score does not match experiment scores")
+
         if (not self.audit_passed or not self.protocol_consistent) and self.verdict != "invalid":
             raise ValueError(
                 "A failed audit or inconsistent protocol requires an invalid verdict"
             )
-        if self.verdict == "valid" and not (
-            self.audit_passed and self.protocol_consistent and supported
-        ):
-            raise ValueError(
-                "A valid refinement requires a passing audit, consistent protocol, "
-                "and supported primary-metric improvement"
+        if self.audit_passed and self.protocol_consistent:
+            expected_verdict = (
+                "inconclusive"
+                if expected_score is None
+                else "valid"
+                if expected_score > self.threshold
+                else "invalid"
             )
+            if self.verdict != expected_verdict:
+                raise ValueError("Assessment verdict does not match its weighted score")
         if self.verdict == "valid" and self.failure_reasons:
             raise ValueError("A valid refinement cannot list failure reasons")
         if self.verdict != "valid" and not self.failure_reasons:
             raise ValueError("A non-valid refinement must list failure reasons")
-        if self.verdict == "inconclusive" and supported:
-            raise ValueError("An inconclusive refinement cannot claim supported improvement")
         return self
 
 
@@ -455,6 +592,122 @@ def validate_replication_log(plan: ReplicationPlan, log: ReplicationLog) -> None
         raise ValueError(
             f"Result-producing replication steps have no output files: {missing_outputs}"
         )
+
+
+def validate_experiment_weights(
+    todo: ExperimentTodo,
+    weights: ExperimentWeights,
+) -> None:
+    expected = [experiment.experiment_id for experiment in todo.experiments]
+    actual = [experiment.experiment_id for experiment in weights.experiments]
+    if actual != expected:
+        raise ValueError("Experiment weights must cover every experiment in order")
+
+
+def validate_experiment_contracts(
+    todo: ExperimentTodo,
+    contracts: ExperimentContracts,
+) -> None:
+    expected = [experiment.experiment_id for experiment in todo.experiments]
+    actual = [experiment.experiment_id for experiment in contracts.experiments]
+    if actual != expected:
+        raise ValueError("Experiment contracts must cover every experiment in order")
+
+
+def validate_idea_implementation_plan(
+    contracts: ExperimentContracts,
+    plan: IdeaImplementationPlan,
+) -> None:
+    expected = [experiment.experiment_id for experiment in contracts.experiments]
+    actual = [integration.experiment_id for integration in plan.experiment_integrations]
+    if actual != expected:
+        raise ValueError("Implementation plan must integrate the model into every experiment")
+
+
+def validate_codegen_audit(
+    contracts: ExperimentContracts,
+    audit: CodegenAudit,
+) -> None:
+    aspects = ["input", "target", "output", "training", "evaluation"]
+    expected = [
+        (experiment.experiment_id, aspect)
+        for experiment in contracts.experiments
+        for aspect in aspects
+    ]
+    actual = [(check.experiment_id, check.aspect) for check in audit.checks]
+    if actual != expected:
+        raise ValueError(
+            "Codegen audit must check every experiment contract aspect in order"
+        )
+
+
+def validate_autoresearch_experiment_plan(
+    contracts: ExperimentContracts,
+    implementation: IdeaImplementationPlan,
+    plan: AutoResearchExperimentPlan,
+) -> None:
+    expected = [experiment.experiment_id for experiment in contracts.experiments]
+    actual = [experiment.experiment_id for experiment in plan.experiments]
+    if actual != expected:
+        raise ValueError(
+            "Auto Research experiment plan must cover every experiment in order"
+        )
+    integrations = {
+        integration.experiment_id: integration
+        for integration in implementation.experiment_integrations
+    }
+    for experiment in plan.experiments:
+        commands = {step.command_hint.strip() for step in experiment.steps}
+        integration = integrations[experiment.experiment_id]
+        baseline_commands = {
+            command.strip() for command in integration.baseline_entry_points
+        }
+        if commands & baseline_commands:
+            raise ValueError(
+                f"Auto Research plan reruns a baseline: {experiment.experiment_id}"
+            )
+        refinement_commands = {
+            command.strip() for command in integration.refinement_entry_points
+        }
+        if not commands & refinement_commands:
+            raise ValueError(
+                f"Auto Research plan is missing a refinement entry point: "
+                f"{experiment.experiment_id}"
+            )
+
+
+def validate_autoresearch_experiment_log(
+    plan: AutoResearchExperimentPlan,
+    log: AutoResearchExperimentLog,
+) -> None:
+    expected = [experiment.experiment_id for experiment in plan.experiments]
+    actual = [experiment.experiment_id for experiment in log.experiments]
+    if actual != expected:
+        raise ValueError("Auto Research experiment log must cover every experiment in order")
+    for planned_experiment, logged_experiment in zip(
+        plan.experiments,
+        log.experiments,
+        strict=True,
+    ):
+        planned_ids = [step.id for step in planned_experiment.steps]
+        outcome_ids = [outcome.step_id for outcome in logged_experiment.step_outcomes]
+        if outcome_ids != planned_ids:
+            raise ValueError(
+                f"Experiment log must cover steps in order: {planned_experiment.experiment_id}"
+            )
+        outcomes_by_id = {
+            outcome.step_id: outcome for outcome in logged_experiment.step_outcomes
+        }
+        missing_outputs = [
+            step.id
+            for step in planned_experiment.steps
+            if step.verifies and not outcomes_by_id[step.id].output_files
+        ]
+        if missing_outputs:
+            raise ValueError(
+                "Result-producing Auto Research steps have no output files for "
+                f"{planned_experiment.experiment_id}: {missing_outputs}"
+            )
 
 
 def validate_smart_replicate_log(

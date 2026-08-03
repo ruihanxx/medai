@@ -4,15 +4,17 @@ Audit refinement `{{ idea_id }}` without modifying its code.
 
 ## Inputs
 
-- Eligibility and fixed anchors: `{{ eligibility_path }}`
+- Frozen experiment contracts: `{{ contracts_path }}`
 - Read-only base codebase: `{{ base_codebase_dir }}`
 - Refined idea codebase: `{{ codebase_dir }}`
 - Implementation plan: `{{ implementation_plan_path }}`
 
 ## Task
 
-Compare the base and refined code. Check exactly the four anchor categories
-below and nothing beyond this audit scope.
+Compare the base and refined code. Confirm that all changes are limited to a new
+standalone model and the minimum wiring needed to embed it. For every experiment
+in the frozen contracts, check `input`, `target`, `output`, `training`, and
+`evaluation` exactly once and in that order.
 
 ## Output
 
@@ -21,21 +23,30 @@ Write `{{ audit_path }}`:
 ```json
 {
   "idea_id": "{{ idea_id }}",
-  "verdict": "pass or fail",
+  "verdict": "pass",
+  "model_only": true,
+  "scope_evidence": ["exact changed-file evidence"],
+  "scope_issue": null,
   "checks": [
-    {"anchor": "task_and_prediction_target", "verdict": "pass or fail", "evidence": ["path/detail"], "issue": null},
-    {"anchor": "dataset_cohort_and_io", "verdict": "pass or fail", "evidence": ["path/detail"], "issue": null},
-    {"anchor": "metrics_and_protocol", "verdict": "pass or fail", "evidence": ["path/detail"], "issue": null},
-    {"anchor": "baseline_method", "verdict": "pass or fail", "evidence": ["path/detail"], "issue": null}
+    {
+      "experiment_id": "E1",
+      "aspect": "input",
+      "verdict": "pass",
+      "evidence": ["path and exact comparison"],
+      "issue": null
+    }
   ],
   "required_fixes": []
 }
 ```
 
-For each failed check, replace `issue` with the concrete violation and include
-at least one exact fix. A passing audit has no required fixes.
+For a scope violation, set `model_only` to false and explain `scope_issue`.
+For each failed contract check, explain `issue` and include an exact required
+fix. A passing audit has no issues or required fixes.
 
 ## Constraints
 
+- Include all five checks for every experiment, in contract order.
+- Trust the frozen replicate contracts; do not reinterpret them from the paper.
 - Do not edit either codebase.
 - Write only the requested audit JSON.

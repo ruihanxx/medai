@@ -302,3 +302,4 @@ def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
     assert f"src={base_run},dst=/workspace/base-run,readonly" in calls
     assert f"src={base_run / 'autoresearch'},dst=/workspace/autoresearch" in calls
     assert "--autoresearch --base-run /workspace/base-run" in calls
+    assert "--assessment-threshold 0.0" in calls

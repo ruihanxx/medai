@@ -8,7 +8,7 @@ This is round {{ round_index }}. Learn from the experience of previous rounds.
 ## Inputs
 
 - Paper Markdown: `{{ paper_markdown }}`
-- Eligibility and fixed anchors: `{{ eligibility_path }}`
+- Eligibility and research brief: `{{ eligibility_path }}`
 - Base reproduction report: `{{ reproduction_report_path }}`
 - Completed base codebase: `{{ codebase_dir }}`
 - Required idea-generation skill: `{{ idea_generation_skill }}`
@@ -16,10 +16,11 @@ This is round {{ round_index }}. Learn from the experience of previous rounds.
 
 ## Task
 
-Read and follow the required idea-generation skill. Establish the target problem
-and relevant research line, then propose ideas that preserve every fixed anchor
-and retain the original method as the baseline. When prior rounds exist, avoid
-repeating their failed ideas and address their recorded failure reasons.
+Read and follow the required idea-generation skill. Use the research brief to
+establish the target problem and relevant research line, then propose standalone
+model upgrades that can be embedded into the already replicated experiments.
+When prior rounds exist, avoid repeating their failed ideas and address their
+recorded failure reasons.
 
 ## Output
 
@@ -45,5 +46,8 @@ Supporting papers and the point each supports.
 ## Constraints
 
 - Produce exactly the three requested ideas in order.
-- Keep task/target, dataset/cohort/I-O, metrics/protocol, and baseline fixed.
+- Propose model upgrades only. Do not propose changes to data, preprocessing,
+  targets, loss, optimizer, training loops, inference strategy, augmentation,
+  or evaluation.
+- Retain the paper's proposed method as the baseline.
 - Write only the requested Markdown artifact.

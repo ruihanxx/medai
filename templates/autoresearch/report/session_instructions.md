@@ -4,7 +4,9 @@ Create the evidence-bound final report for the completed Auto Research campaign.
 
 ## Inputs
 
-- Eligibility and fixed anchors: `{{ eligibility_path }}`
+- Eligibility and research brief: `{{ eligibility_path }}`
+- Frozen result-blind experiment weights: `{{ weights_path }}`
+- Frozen executable experiment contracts: `{{ contracts_path }}`
 - Base reproduction report: `{{ base_reproduction_report }}`
 - Round idea documents, implementation/audit/experiment artifacts, assessments,
   and deterministic summaries:
@@ -23,7 +25,7 @@ Write `{{ report_path }}` with exactly these sections in order:
 ```markdown
 # Auto Research Report
 
-## 1. Base problem and anchors
+## 1. Base problem and research context
 
 ## 2. Idea ledger
 
@@ -34,8 +36,9 @@ Write `{{ report_path }}` with exactly these sections in order:
 ## 5. Visualizations
 ```
 
-Include every attempted idea ID, its motivation/provenance, implementation and
-experiment evidence when present, verdict, and failure or inconclusive reason.
+Include every attempted idea ID, its motivation/provenance, per-experiment
+implementation and results when present, weighted score, threshold, verdict,
+and failure or inconclusive reason.
 Embed both supplied PNG files using Markdown image links.
 
 ## Constraints

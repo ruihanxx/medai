@@ -23,28 +23,31 @@ def generate_autoresearch_visualizations(
     figure, axes = plt.subplots(rows, columns, figsize=(4.4 * columns, 3.5 * rows))
     flat_axes = list(getattr(axes, "flat", [axes]))
     for axis, assessment in zip(flat_axes, assessments, strict=False):
-        metric = assessment.primary_metric
-        if metric is None or metric.baseline_value is None or metric.refined_value is None:
+        if assessment.weighted_score is None:
             axis.text(0.5, 0.5, "N/A", ha="center", va="center", fontsize=18)
             axis.set_xticks([])
             axis.set_yticks([])
-            axis.set_title(f"{assessment.idea_id}\nno comparable metric")
+            axis.set_title(f"{assessment.idea_id}\nincomplete weighted comparison")
             continue
-        values = [metric.baseline_value, metric.refined_value]
+        labels = [experiment.experiment_id for experiment in assessment.experiments]
+        values = [
+            experiment.weighted_score for experiment in assessment.experiments
+        ]
         bars = axis.bar(
-            ["Baseline", "Refined"],
+            labels,
             values,
-            color=["#6c757d", "#2878b5"],
+            color=["#2ca02c" if value >= 0 else "#d62728" for value in values],
         )
         axis.bar_label(bars, fmt="%.4g", padding=3)
         axis.set_title(
-            f"{assessment.idea_id} · {metric.name}\n"
-            f"Δ(refined-baseline)={metric.absolute_delta:.4g} · {assessment.verdict}"
+            f"{assessment.idea_id} · weighted score={assessment.weighted_score:.4g}\n"
+            f"threshold>{assessment.threshold:.4g} · {assessment.verdict}"
         )
+        axis.axhline(0, color="#333333", linewidth=0.8)
         axis.grid(axis="y", alpha=0.25)
     for axis in flat_axes[len(assessments) :]:
         axis.axis("off")
-    figure.suptitle("Auto Research: baseline vs refined primary metrics", fontsize=15)
+    figure.suptitle("Auto Research: per-experiment weighted contributions", fontsize=15)
     figure.tight_layout()
     figure.savefig(metric_path, dpi=160, bbox_inches="tight")
     plt.close(figure)

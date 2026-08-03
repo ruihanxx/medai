@@ -1,10 +1,10 @@
 # Auto Research experiment agent
 
-Execute the planned refinement experiment for `{{ idea_id }}` and debug it when
-necessary.
+Execute the planned new-model experiments for `{{ idea_id }}`.
 
 ## Inputs
 
+- Frozen experiment contracts: `{{ contracts_path }}`
 - Experiment plan: `{{ experiment_plan_path }}`
 - Implementation plan: `{{ implementation_plan_path }}`
 - Passing audit: `{{ audit_path }}`
@@ -16,8 +16,10 @@ necessary.
 
 ## Task
 
-Execute every plan step in order. Run only the refinement; do not rerun or alter
-the baseline. Debug execution failures as needed and preserve actual outputs.
+Execute every experiment and its steps in order. Run only the new model through
+the existing experiment code. Never rerun or alter the replicated baseline.
+Preserve actual outputs. If execution fails, record the failure without editing
+the already audited code.
 
 ## Output
 
@@ -25,41 +27,36 @@ After every completed step, rewrite `{{ experiment_log_path }}`:
 
 ```json
 {
-  "step_outcomes": [
+  "experiments": [
     {
-      "step_id": 1,
-      "description": "step description",
-      "command_executed": "actual command",
-      "exit_code": 0,
-      "stdout": "captured output",
-      "stderr": "captured error output",
-      "output_files": ["actual output paths"],
-      "duration_seconds": 1.0,
-      "fixes_applied": [
-        {"file_path": "path", "description": "fix", "original_error": "error", "diff_snippet": "before/after"}
-      ],
-      "code_modified": false,
-      "notes": "observations"
+      "experiment_id": "E1",
+      "step_outcomes": [
+        {
+          "step_id": 1,
+          "description": "step description",
+          "command_executed": "actual refinement-only command",
+          "exit_code": 0,
+          "stdout": "captured output",
+          "stderr": "captured error output",
+          "output_files": ["actual output paths"],
+          "duration_seconds": 1.0,
+          "fixes_applied": [],
+          "code_modified": false,
+          "notes": "observations"
+        }
+      ]
     }
   ]
 }
 ```
 
-Write `{{ evidence_summary_path }}`:
-
-```json
-{
-  "environment": {
-    "python_version": "version",
-    "gpu_available": false,
-    "gpu_model": null,
-    "key_packages": {"package": "version"}
-  }
-}
-```
+Write `{{ evidence_summary_path }}` using the existing evidence-summary schema.
 
 ## Constraints
 
 - Store experiment artifacts inside `{{ codebase_dir }}` or `{{ experiment_dir }}`.
-- Never fabricate, hard-code, or overwrite computed results.
+- Never execute a baseline entry point or overwrite base results.
+- Never fabricate, hard-code, or overwrite computed refinement results.
+- Do not modify any code; every `code_modified` value must be false and every
+  `fixes_applied` list must be empty.
 - Do not modify the base run or source data.

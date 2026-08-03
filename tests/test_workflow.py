@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from medai.config import RunConfig
 from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt

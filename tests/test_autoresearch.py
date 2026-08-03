@@ -208,17 +208,12 @@ def _configure_fake_agents(
                 "eligible": eligible,
                 "reason": "Supervised prediction task" if eligible else "Statistical analysis",
                 "evidence_paths": [str(config.base_run / "preprocessing" / "paper.md")],
-                "anchors": (
+                "research_brief": (
                     {
-                        "task": "classification",
-                        "prediction_target": "outcome",
-                        "dataset": "local cohort",
-                        "cohort": "fixed cohort",
-                        "inputs": ["features"],
-                        "outputs": ["risk score"],
-                        "metrics": ["accuracy"],
-                        "experiment_protocol": ["fixed split"],
-                        "baseline_method": "base classifier",
+                        "problem": "predict an outcome",
+                        "context": "clinical prediction",
+                        "proposed_method": "base classifier",
+                        "datasets": ["local cohort"],
                     }
                     if eligible
                     else None
@@ -226,6 +221,45 @@ def _configure_fake_agents(
             }
             Path(context["eligibility_path"]).write_text(
                 json.dumps(payload), encoding="utf-8"
+            )
+        elif template_name.endswith("experiment_weighting/session_instructions.md"):
+            Path(context["weights_path"]).write_text(
+                json.dumps(
+                    {
+                        "experiments": [
+                            {
+                                "experiment_id": "E1",
+                                "weight": 1.0,
+                                "rationale": "Primary experiment.",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+        elif template_name.endswith("experiment_contracts/session_instructions.md"):
+            Path(context["contracts_path"]).write_text(
+                json.dumps(
+                    {
+                        "experiments": [
+                            {
+                                "experiment_id": "E1",
+                                "baseline_entry_points": ["python baseline.py"],
+                                "model_implementation_paths": ["baseline.py"],
+                                "integration_paths": ["baseline.py"],
+                                "input_contract": "feature vector",
+                                "target_contract": "outcome label",
+                                "output_contract": "risk score",
+                                "training_contract": "existing training loop",
+                                "evaluation_contract": "existing evaluation",
+                                "metrics": ["accuracy"],
+                                "primary_metric": "accuracy",
+                                "metric_direction": "higher",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
             )
         elif template_name.endswith("idea_generation/session_instructions.md"):
             text = f"# Idea Generation Round {context['round_index']}\n\n"
@@ -238,28 +272,39 @@ def _configure_fake_agents(
                 )
             Path(context["ideas_path"]).write_text(text, encoding="utf-8")
         elif template_name.endswith("codegen/session_instructions.md"):
-            Path(working_dir, "refinement.txt").write_text(str(idea_id), encoding="utf-8")
+            Path(working_dir, "refined_model.py").write_text(
+                f"IDEA_ID = {idea_id!r}\n",
+                encoding="utf-8",
+            )
+            baseline_path = Path(working_dir, "baseline.py")
+            baseline_text = baseline_path.read_text(encoding="utf-8")
             if context["repair_audit_path"]:
-                Path(working_dir, "audit_repair.txt").write_text("repaired", encoding="utf-8")
+                baseline_text += "# repaired model selection\n"
+            else:
+                baseline_text += f"# integrate {idea_id}\n"
+            baseline_path.write_text(baseline_text, encoding="utf-8")
             Path(context["implementation_plan_path"]).write_text(
                 json.dumps(
                     {
                         "idea_id": idea_id,
                         "summary": "Add refinement.",
-                        "change_points": [
+                        "model_description": "Standalone refined classifier.",
+                        "new_model_files": ["refined_model.py"],
+                        "experiment_integrations": [
                             {
-                                "path": "refinement.txt",
-                                "change": "Add refinement marker.",
-                                "rationale": "Keep baseline available.",
+                                "experiment_id": "E1",
+                                "integration_changes": [
+                                    {
+                                        "path": "baseline.py",
+                                        "change": "Select refined model.",
+                                        "rationale": "Keep experiment code unchanged.",
+                                    }
+                                ],
+                                "baseline_entry_points": ["python baseline.py"],
+                                "refinement_entry_points": [
+                                    "python baseline.py --model refined"
+                                ],
                             }
-                        ],
-                        "baseline_entry_points": ["python baseline.py"],
-                        "refinement_entry_points": ["python refined.py"],
-                        "preserved_anchors": [
-                            "task_and_prediction_target",
-                            "dataset_cohort_and_io",
-                            "metrics_and_protocol",
-                            "baseline_method",
                         ],
                     }
                 ),
@@ -268,27 +313,26 @@ def _configure_fake_agents(
         elif template_name.endswith("audit/session_instructions.md"):
             attempt = int(Path(context["audit_path"]).stem.rsplit("_", 1)[1])
             fail = idea_id.endswith("I01") and (attempt == 1 or audit_fails_twice)
-            anchors = [
-                "task_and_prediction_target",
-                "dataset_cohort_and_io",
-                "metrics_and_protocol",
-                "baseline_method",
-            ]
+            aspects = ["input", "target", "output", "training", "evaluation"]
             Path(context["audit_path"]).write_text(
                 json.dumps(
                     {
                         "idea_id": idea_id,
                         "verdict": "fail" if fail else "pass",
+                        "model_only": not fail,
+                        "scope_evidence": ["base/refinement diff"],
+                        "scope_issue": "changed training" if fail else None,
                         "checks": [
                             {
-                                "anchor": anchor,
+                                "experiment_id": "E1",
+                                "aspect": aspect,
                                 "verdict": "fail" if fail and index == 0 else "pass",
                                 "evidence": ["base/refinement diff"],
-                                "issue": "target changed" if fail and index == 0 else None,
+                                "issue": "input changed" if fail and index == 0 else None,
                             }
-                            for index, anchor in enumerate(anchors)
+                            for index, aspect in enumerate(aspects)
                         ],
-                        "required_fixes": ["restore target"] if fail else [],
+                        "required_fixes": ["restore model-only scope"] if fail else [],
                     }
                 ),
                 encoding="utf-8",
@@ -302,28 +346,33 @@ def _configure_fake_agents(
                             "key_dependencies": [],
                             "setup_hints": "Use CPU.",
                         },
-                        "steps": [
+                        "experiments": [
                             {
-                                "id": 1,
-                                "description": "Prepare.",
-                                "command_hint": "python --version",
-                                "expected_outcome": "Print version.",
-                                "verifies": [],
-                            },
-                            {
-                                "id": 2,
-                                "description": "Run refinement.",
-                                "command_hint": "python refined.py",
-                                "expected_outcome": "Write metrics.",
-                                "verifies": ["refinement"],
-                            },
-                            {
-                                "id": 3,
-                                "description": "Verify metric.",
-                                "command_hint": "python verify.py",
-                                "expected_outcome": "Write evidence.",
-                                "verifies": ["accuracy"],
-                            },
+                                "experiment_id": "E1",
+                                "steps": [
+                                    {
+                                        "id": 1,
+                                        "description": "Prepare.",
+                                        "command_hint": "python --version",
+                                        "expected_outcome": "Print version.",
+                                        "verifies": [],
+                                    },
+                                    {
+                                        "id": 2,
+                                        "description": "Run refinement.",
+                                        "command_hint": "python baseline.py --model refined",
+                                        "expected_outcome": "Write metrics.",
+                                        "verifies": ["refinement"],
+                                    },
+                                    {
+                                        "id": 3,
+                                        "description": "Verify metric.",
+                                        "command_hint": "python verify.py",
+                                        "expected_outcome": "Write evidence.",
+                                        "verifies": ["accuracy"],
+                                    },
+                                ],
+                            }
                         ],
                     }
                 ),
@@ -336,21 +385,28 @@ def _configure_fake_agents(
             Path(context["experiment_log_path"]).write_text(
                 json.dumps(
                     {
-                        "step_outcomes": [
+                        "experiments": [
                             {
-                                "step_id": step_id,
-                                "description": "step",
-                                "command_executed": "python command.py",
-                                "exit_code": 0,
-                                "stdout": "done",
-                                "stderr": "",
-                                "output_files": [] if step_id == 1 else [str(result_path)],
-                                "duration_seconds": 1.0,
-                                "fixes_applied": [],
-                                "code_modified": False,
-                                "notes": "",
+                                "experiment_id": "E1",
+                                "step_outcomes": [
+                                    {
+                                        "step_id": step_id,
+                                        "description": "step",
+                                        "command_executed": "python command.py",
+                                        "exit_code": 0,
+                                        "stdout": "done",
+                                        "stderr": "",
+                                        "output_files": (
+                                            [] if step_id == 1 else [str(result_path)]
+                                        ),
+                                        "duration_seconds": 1.0,
+                                        "fixes_applied": [],
+                                        "code_modified": False,
+                                        "notes": "",
+                                    }
+                                    for step_id in (1, 2, 3)
+                                ],
                             }
-                            for step_id in (1, 2, 3)
                         ]
                     }
                 ),
@@ -373,6 +429,7 @@ def _configure_fake_agents(
             is_valid = valid_first_idea and idea_id.endswith("I01")
             refined = 0.81 if is_valid else 0.79
             delta = refined - 0.8
+            score = delta / 0.8
             Path(context["assessment_path"]).write_text(
                 json.dumps(
                     {
@@ -381,20 +438,26 @@ def _configure_fake_agents(
                         "summary": "metric comparison complete",
                         "audit_passed": True,
                         "protocol_consistent": True,
-                        "primary_metric": {
-                            "name": "accuracy",
-                            "direction": "higher",
-                            "baseline_value": 0.8,
-                            "refined_value": refined,
-                            "absolute_delta": delta,
-                            "relative_delta": delta / 0.8,
-                            "uncertainty_available": False,
-                            "noise_threshold": None,
-                            "uncertainty_method": None,
-                            "improvement_supported": is_valid,
-                        },
-                        "secondary_metrics": [],
-                        "evidence_paths": [str(context["experiment_log_path"])],
+                        "experiments": [
+                            {
+                                "experiment_id": "E1",
+                                "metric_name": "accuracy",
+                                "direction": "higher",
+                                "weight": 1.0,
+                                "baseline_value": 0.8,
+                                "refined_value": refined,
+                                "absolute_delta": delta,
+                                "relative_delta": score,
+                                "score": score,
+                                "weighted_score": score,
+                                "evidence_paths": [
+                                    str(config.base_run / "codegen" / "codebase" / "metrics.json"),
+                                    str(Path(context["experiment_dir"]) / "metrics.json"),
+                                ],
+                            }
+                        ],
+                        "weighted_score": score,
+                        "threshold": config.assessment_threshold,
                         "failure_reasons": [] if is_valid else ["No improvement"],
                     }
                 ),
@@ -408,7 +471,7 @@ def _configure_fake_agents(
                 idea_ids.extend(idea["idea_id"] for idea in summary["ideas"])
             Path(context["report_path"]).write_text(
                 "# Auto Research Report\n\n"
-                "## 1. Base problem and anchors\nclassification\n\n"
+                "## 1. Base problem and research context\nclassification\n\n"
                 "## 2. Idea ledger\n"
                 + " ".join(idea_ids)
                 + "\n\n## 3. Experiment comparisons\nevidence\n\n"
@@ -464,11 +527,11 @@ def test_autoresearch_completes_all_three_ideas_and_resumes(tmp_path: Path, monk
     for idea_index in range(1, 4):
         idea_dir = config.output / "rounds" / "round_001" / "ideas" / f"idea_{idea_index:02d}"
         assert (idea_dir / "assessment" / "assessment.json").is_file()
-        assert (idea_dir / "codegen" / "codebase" / "refinement.txt").read_text() == (
-            f"R01-I{idea_index:02d}"
-        )
+        assert f"R01-I{idea_index:02d}" in (
+            idea_dir / "codegen" / "codebase" / "refined_model.py"
+        ).read_text()
         assert not (idea_dir / "codegen" / "codebase" / ".cache").exists()
-    assert not (config.base_run / "codegen" / "codebase" / "refinement.txt").exists()
+    assert not (config.base_run / "codegen" / "codebase" / "refined_model.py").exists()
     assert (config.output / "report" / "idea_metric_comparison.png").read_bytes().startswith(
         b"\x89PNG"
     )
@@ -569,17 +632,20 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
     path = tmp_path / "artifact"
     template_contexts = {
         "eligibility": {
-            "base_manifest": path,
             "paper_markdown": path,
-            "claims_path": path,
+            "eligibility_path": path,
+        },
+        "experiment_weighting": {
+            "paper_markdown": path,
+            "experiments_path": path,
+            "weights_path": path,
+        },
+        "experiment_contracts": {
             "experiments_path": path,
             "codegen_plan_path": path,
-            "codebase_dir": path,
             "replicate_plan_path": path,
-            "replication_log_path": path,
-            "evidence_summary_path": path,
-            "reproduction_report_path": path,
-            "eligibility_path": path,
+            "base_codebase_dir": path,
+            "contracts_path": path,
         },
         "idea_generation": {
             "paper_markdown": path,
@@ -594,17 +660,21 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
         },
         "codegen": {
             "idea_id": "R01-I01",
+            "paper_markdown": path,
             "ideas_path": path,
             "eligibility_path": path,
+            "contracts_path": path,
+            "experiments_path": path,
+            "base_codegen_plan_path": path,
+            "base_replicate_plan_path": path,
             "base_codebase_dir": path,
             "codebase_dir": path,
-            "data_dir": None,
             "implementation_plan_path": path,
             "repair_audit_path": None,
         },
         "audit": {
             "idea_id": "R01-I01",
-            "eligibility_path": path,
+            "contracts_path": path,
             "base_codebase_dir": path,
             "codebase_dir": path,
             "implementation_plan_path": path,
@@ -612,17 +682,17 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
         },
         "plan": {
             "idea_id": "R01-I01",
-            "ideas_path": path,
-            "eligibility_path": path,
+            "contracts_path": path,
+            "weights_path": path,
             "implementation_plan_path": path,
             "audit_path": path,
             "codebase_dir": path,
-            "base_replication_log": path,
             "experiment_plan_path": path,
             "computation_provider_state_path": path,
         },
         "experiment": {
             "idea_id": "R01-I01",
+            "contracts_path": path,
             "experiment_plan_path": path,
             "implementation_plan_path": path,
             "audit_path": path,
@@ -637,8 +707,8 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
         },
         "assessment": {
             "idea_id": "R01-I01",
-            "ideas_path": path,
-            "eligibility_path": path,
+            "contracts_path": path,
+            "weights_path": path,
             "implementation_plan_path": path,
             "audit_path": path,
             "experiment_plan_path": path,
@@ -646,13 +716,17 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             "evidence_summary_path": path,
             "base_replication_log": path,
             "base_evidence_summary": path,
-            "base_reproduction_report": path,
             "base_codebase_dir": path,
             "base_replication_dir": path,
+            "codebase_dir": path,
+            "experiment_dir": path,
+            "assessment_threshold": 0.0,
             "assessment_path": path,
         },
         "report": {
             "eligibility_path": path,
+            "weights_path": path,
+            "contracts_path": path,
             "base_reproduction_report": path,
             "rounds_json": "[]",
             "metric_visualization_path": path,

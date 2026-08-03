@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import re
@@ -384,6 +385,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--codex-reasoning-effort")
     parser.add_argument("--smart-replicate", action="store_true")
     parser.add_argument("--max-iter", type=int)
+    parser.add_argument("--assessment-threshold", type=float)
     return parser
 
 
@@ -479,6 +481,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             raise LauncherError("--replicate requires --paper")
         if args.max_iter is not None:
             raise LauncherError("--max-iter requires --autoresearch")
+        if args.assessment_threshold is not None:
+            raise LauncherError("--assessment-threshold requires --autoresearch")
         paper = _required_file(args.paper, "--paper")
         if paper.suffix.casefold() != ".pdf":
             raise LauncherError(f"--paper must be a PDF: {paper}")
@@ -488,6 +492,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         codex_model = args.codex_model
         codex_reasoning_effort = args.codex_reasoning_effort
         max_iter = None
+        assessment_threshold = None
     else:
         if args.paper is not None or args.repo is not None or args.data is not None:
             raise LauncherError("--autoresearch does not accept --paper, --repo, or --data")
@@ -496,6 +501,13 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         max_iter = args.max_iter if args.max_iter is not None else 1
         if not 1 <= max_iter <= 10:
             raise LauncherError("--max-iter must be between 1 and 10")
+        assessment_threshold = (
+            args.assessment_threshold if args.assessment_threshold is not None else 0.0
+        )
+        if not math.isfinite(assessment_threshold) or assessment_threshold < 0:
+            raise LauncherError(
+                "--assessment-threshold must be a finite non-negative number"
+            )
 
         runs_root = (project_root / "runs").resolve()
         runs_root.mkdir(parents=True, exist_ok=True)
@@ -685,6 +697,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
                 "/workspace/autoresearch",
                 "--max-iter",
                 str(max_iter),
+                "--assessment-threshold",
+                str(assessment_threshold),
             ]
         if data:
             docker_args.extend(

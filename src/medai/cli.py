@@ -67,6 +67,11 @@ def run(
         "--max-iter",
         help="Auto Research idea-generation rounds (default: 1, maximum: 10)",
     ),
+    assessment_threshold: Optional[float] = typer.Option(
+        None,
+        "--assessment-threshold",
+        help="Minimum weighted relative-improvement score (default: 0.0)",
+    ),
     base_run: Optional[Path] = typer.Option(None, "--base-run", hidden=True),
 ) -> None:
     try:
@@ -76,8 +81,15 @@ def run(
         if replicate:
             if paper is None:
                 raise ValueError("--replicate requires --paper")
-            if max_iter is not None or base_run is not None:
-                raise ValueError("--max-iter and --base-run require --autoresearch")
+            if (
+                max_iter is not None
+                or assessment_threshold is not None
+                or base_run is not None
+            ):
+                raise ValueError(
+                    "--max-iter, --assessment-threshold, and --base-run require "
+                    "--autoresearch"
+                )
             config: RunConfig | AutoResearchConfig = RunConfig.create(
                 paper=paper,
                 output=output,
@@ -105,6 +117,9 @@ def run(
                 output=resolved_output,
                 provider=provider,
                 max_iter=1 if max_iter is None else max_iter,
+                assessment_threshold=(
+                    0.0 if assessment_threshold is None else assessment_threshold
+                ),
                 siliconflow_config=siliconflow_config,
                 codex_model=codex_model,
                 codex_reasoning_effort=codex_reasoning_effort,

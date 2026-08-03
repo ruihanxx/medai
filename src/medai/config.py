@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -101,6 +102,7 @@ class AutoResearchConfig:
     output: Path
     provider: str
     max_iter: int = 1
+    assessment_threshold: float = 0.0
     data: Path | None = None
     siliconflow_config: Path | None = None
     codex_model: str | None = None
@@ -113,6 +115,8 @@ class AutoResearchConfig:
             raise ValueError("Auto Research output must be separate from the read-only base run")
         if not 1 <= self.max_iter <= 10:
             raise ValueError("--max-iter must be between 1 and 10")
+        if not math.isfinite(self.assessment_threshold) or self.assessment_threshold < 0:
+            raise ValueError("--assessment-threshold must be a finite non-negative number")
         if self.data is not None and not self.data.is_dir():
             raise ValueError(f"Base run data directory does not exist: {self.data}")
         if self.provider not in VALID_PROVIDERS:
@@ -141,6 +145,7 @@ class AutoResearchConfig:
         output: Path,
         provider: str | None,
         max_iter: int = 1,
+        assessment_threshold: float = 0.0,
         siliconflow_config: Path | None,
         codex_model: str | None = None,
         codex_reasoning_effort: str | None = None,
@@ -175,6 +180,7 @@ class AutoResearchConfig:
             output=output.expanduser().resolve(),
             provider=normalized_provider,
             max_iter=max_iter,
+            assessment_threshold=assessment_threshold,
             data=data,
             siliconflow_config=(
                 siliconflow_config.expanduser().resolve() if siliconflow_config else None

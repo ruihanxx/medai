@@ -8,13 +8,17 @@ from medai.models import (
     CodegenPlan,
     EligibilityResult,
     EvidenceSummary,
+    ExperimentContracts,
     ExperimentTodo,
+    ExperimentWeights,
     IdeaAssessment,
     IdeaImplementationPlan,
     ReplicationLog,
     ReplicationPlan,
     RoundSummary,
+    validate_codegen_audit,
     validate_experiment_coverage,
+    validate_idea_implementation_plan,
     validate_replication_log,
     validate_replication_plan,
     validate_reproduction_report,
@@ -213,46 +217,106 @@ def test_reproduction_report_requires_all_audit_content():
         )
 
 
-def test_autoresearch_artifacts_enforce_anchor_and_improvement_contracts():
-    with pytest.raises(ValueError, match="research anchors"):
+def test_autoresearch_artifacts_enforce_model_and_weighted_score_contracts():
+    with pytest.raises(ValueError, match="research brief"):
         EligibilityResult.model_validate(
             {"eligible": True, "reason": "Predictive task", "evidence_paths": []}
         )
+
+    eligibility = EligibilityResult.model_validate(
+        {
+            "eligible": True,
+            "reason": "Predictive task",
+            "evidence_paths": ["paper.md"],
+            "research_brief": {
+                "problem": "Predict an outcome.",
+                "context": "Clinical prediction.",
+                "proposed_method": "Base classifier.",
+                "datasets": ["Cohort dataset"],
+            },
+        }
+    )
+    assert eligibility.research_brief is not None
+
+    weights = ExperimentWeights.model_validate(
+        {
+            "experiments": [
+                {
+                    "experiment_id": "E1",
+                    "weight": 1.0,
+                    "rationale": "Primary experiment.",
+                }
+            ]
+        }
+    )
+    contracts = ExperimentContracts.model_validate(
+        {
+            "experiments": [
+                {
+                    "experiment_id": "E1",
+                    "baseline_entry_points": ["python run.py"],
+                    "model_implementation_paths": ["src/model.py"],
+                    "integration_paths": ["run.py"],
+                    "input_contract": "feature vector",
+                    "target_contract": "binary label",
+                    "output_contract": "risk score",
+                    "training_contract": "fixed training loop",
+                    "evaluation_contract": "fixed evaluation",
+                    "metrics": ["accuracy"],
+                    "primary_metric": "accuracy",
+                    "metric_direction": "higher",
+                }
+            ]
+        }
+    )
+    assert weights.experiments[0].weight == 1.0
 
     implementation = IdeaImplementationPlan.model_validate(
         {
             "idea_id": "R01-I01",
             "summary": "Add a calibrated refinement head.",
-            "change_points": [
+            "model_description": "Standalone calibrated model.",
+            "new_model_files": ["src/refinement.py"],
+            "experiment_integrations": [
                 {
-                    "path": "src/refinement.py",
-                    "change": "Add the refinement.",
-                    "rationale": "Test the idea without replacing the baseline.",
+                    "experiment_id": "E1",
+                    "integration_changes": [
+                        {
+                            "path": "run.py",
+                            "change": "Add model selection.",
+                            "rationale": "Embed the new model.",
+                        }
+                    ],
+                    "baseline_entry_points": ["python run.py --model baseline"],
+                    "refinement_entry_points": ["python run.py --model refinement"],
                 }
-            ],
-            "baseline_entry_points": ["python run.py --model baseline"],
-            "refinement_entry_points": ["python run.py --model refinement"],
-            "preserved_anchors": [
-                "task_and_prediction_target",
-                "dataset_cohort_and_io",
-                "metrics_and_protocol",
-                "baseline_method",
             ],
         }
     )
+    validate_idea_implementation_plan(contracts, implementation)
     assert implementation.idea_id == "R01-I01"
 
     audit = CodegenAudit.model_validate(
         {
             "idea_id": "R01-I01",
             "verdict": "pass",
+            "model_only": True,
+            "scope_evidence": ["changed-file list"],
+            "scope_issue": None,
             "checks": [
-                {"anchor": anchor, "verdict": "pass", "evidence": ["diff"]}
-                for anchor in implementation.preserved_anchors
+                {
+                    "experiment_id": "E1",
+                    "aspect": aspect,
+                    "verdict": "pass",
+                    "evidence": ["diff"],
+                    "issue": None,
+                }
+                for aspect in ("input", "target", "output", "training", "evaluation")
             ],
             "required_fixes": [],
         }
     )
+    validate_codegen_audit(contracts, audit)
     assert audit.verdict == "pass"
 
     assessment = IdeaAssessment.model_validate(
@@ -262,20 +326,23 @@ def test_autoresearch_artifacts_enforce_anchor_and_improvement_contracts():
             "summary": "Accuracy improved.",
             "audit_passed": True,
             "protocol_consistent": True,
-            "primary_metric": {
-                "name": "accuracy",
-                "direction": "higher",
-                "baseline_value": 0.8,
-                "refined_value": 0.82,
-                "absolute_delta": 0.02,
-                "relative_delta": 0.025,
-                "uncertainty_available": False,
-                "noise_threshold": None,
-                "uncertainty_method": None,
-                "improvement_supported": True,
-            },
-            "secondary_metrics": [],
-            "evidence_paths": ["metrics.json"],
+            "experiments": [
+                {
+                    "experiment_id": "E1",
+                    "metric_name": "accuracy",
+                    "direction": "higher",
+                    "weight": 1.0,
+                    "baseline_value": 0.8,
+                    "refined_value": 0.82,
+                    "absolute_delta": 0.02,
+                    "relative_delta": 0.025,
+                    "score": 0.025,
+                    "weighted_score": 0.025,
+                    "evidence_paths": ["metrics.json"],
+                }
+            ],
+            "weighted_score": 0.025,
+            "threshold": 0.0,
             "failure_reasons": [],
         }
     )
@@ -294,17 +361,14 @@ def test_autoresearch_artifacts_enforce_anchor_and_improvement_contracts():
             "has_valid_refinement": True,
         }
     )
-    assert assessment.primary_metric is not None
+    assert assessment.weighted_score == 0.025
     assert summary.has_valid_refinement is True
 
-    with pytest.raises(ValueError, match="declared criterion"):
+    with pytest.raises(ValueError, match="weighted score"):
         IdeaAssessment.model_validate(
             {
                 **assessment.model_dump(mode="json"),
-                "primary_metric": {
-                    **assessment.primary_metric.model_dump(mode="json"),
-                    "improvement_supported": False,
-                },
+                "weighted_score": 0.5,
             }
         )
 
@@ -322,6 +386,52 @@ def test_autoresearch_artifacts_enforce_anchor_and_improvement_contracts():
             {
                 **assessment.model_dump(mode="json"),
                 "verdict": "invalid",
+                "threshold": 0.1,
                 "failure_reasons": [],
             }
         )
+
+
+def test_autoresearch_assessment_aggregates_direction_adjusted_experiment_scores():
+    assessment = IdeaAssessment.model_validate(
+        {
+            "idea_id": "R01-I01",
+            "verdict": "valid",
+            "summary": "Weighted improvement exceeds the threshold.",
+            "audit_passed": True,
+            "protocol_consistent": True,
+            "experiments": [
+                {
+                    "experiment_id": "E1",
+                    "metric_name": "accuracy",
+                    "direction": "higher",
+                    "weight": 0.7,
+                    "baseline_value": 0.8,
+                    "refined_value": 0.88,
+                    "absolute_delta": 0.08,
+                    "relative_delta": 0.1,
+                    "score": 0.1,
+                    "weighted_score": 0.07,
+                    "evidence_paths": ["e1.json"],
+                },
+                {
+                    "experiment_id": "E2",
+                    "metric_name": "error",
+                    "direction": "lower",
+                    "weight": 0.3,
+                    "baseline_value": 2.0,
+                    "refined_value": 1.8,
+                    "absolute_delta": -0.2,
+                    "relative_delta": -0.1,
+                    "score": 0.1,
+                    "weighted_score": 0.03,
+                    "evidence_paths": ["e2.json"],
+                },
+            ],
+            "weighted_score": 0.1,
+            "threshold": 0.05,
+            "failure_reasons": [],
+        }
+    )
+
+    assert assessment.verdict == "valid"

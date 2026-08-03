@@ -35,7 +35,9 @@ sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend
 `MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper` and
 `--provider`; `--repo` and `--data` are optional. Auto Research requires
 `--output runs/<run_id>`, accepts `--max-iter` from 1 through 10 (default 1),
-and rejects `--paper`, `--repo`, `--data`, and `--smart-replicate`.
+accepts a non-negative `--assessment-threshold` for the weighted relative
+improvement score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
+and `--smart-replicate`.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. A new invocation creates a unique run directory under the
@@ -134,33 +136,48 @@ Auto Research has its own manifest, checkpoints, and dynamic stages below the
 base run. Preflight records hardware resources and fingerprints the canonical
 base artifacts and codebase. It also requires
 `templates/skills/idea-generation/SKILL.md`; this repository contract does not
-provide that skill, so absence fails before agent execution. A separate
-eligibility agent admits only supervised machine-learning tasks with a defined
-prediction target. An ineligible campaign writes its decision, records status
-`ineligible`, and stops.
+provide that skill, so absence fails before agent execution. A paper-only
+eligibility agent admits supervised machine-learning tasks with a defined
+prediction target and records a concise research brief: problem, scientific
+context, proposed method, and datasets. It does not infer experiment contracts.
+An ineligible campaign writes its decision, records status `ineligible`, and
+stops.
 
-Each round generates exactly three ideas. Every idea has Description,
-Motivation, and Provenance and receives an independent copy of the completed
-replicate codebase. The copies exclude Git metadata, virtual environments, and
-caches; changes never accumulate across ideas or flow back to the base run.
-Each idea then proceeds sequentially through codegen, audit, plan, experiment,
-and assessment. Codegen preserves the original baseline and writes a structured
-implementation plan. An independent audit checks exactly four anchors: task and
-prediction target, dataset/cohort/input-output definitions, metrics and
-protocol, and baseline preservation. One failed audit permits one repair and
-re-audit; a second failure deterministically creates an invalid assessment and
-skips plan and experiment.
+Before idea generation, a result-blind agent reads only the paper and experiment
+definitions, assigns every experiment a positive importance weight summing to
+one. A separate contract agent treats the completed replicate code and plans as
+authoritative and records every experiment's entry points, model and integration paths,
+input/target/output contracts, training and evaluation procedures, and metrics.
+It also freezes the actual primary metric and direction used by each evaluator.
+Auto Research does not reassess whether the replicate code agrees with the
+paper; that would duplicate the completed replication workflow.
 
-The Auto Research plan reuses `ReplicationPlan` without replicate claim-coverage
-validation. Experiment reuses `ReplicationLog` and `EvidenceSummary`, executes
-only the refinement, and compares against baseline evidence from the base run.
-Assessment is `valid`, `invalid`, or `inconclusive`. When uncertainty is
-available, improvement must exceed the recorded noise threshold; without base
-uncertainty, any numeric improvement in the declared metric direction can be
-valid. The program derives each round summary from the three assessments. All
-three ideas finish before routing: any valid idea ends iteration, otherwise a
-new round begins until `max_iter` is reached. Later rounds receive the prior
-ideas, audit/assessment verdicts, and failure-reason paths.
+Each round generates exactly three standalone model-upgrade ideas. Ideas may not
+change data, preprocessing, targets, loss, optimizer, training loops, inference
+strategy, augmentation, or evaluation. Every idea receives an independent copy
+of the completed replicate codebase. The copies exclude Git metadata, virtual
+environments, and caches; changes never accumulate across ideas or flow back to
+the base run. Codegen first adds the new model in new files, then makes only the
+minimal declared wiring changes needed to embed it into every frozen experiment.
+A deterministic changed-file check rejects edits outside the new model and
+contract-declared integration files. An independent audit then checks the
+model-only scope plus each experiment's input, target, output, training, and
+evaluation contracts. One failed audit permits one repair and re-audit; a second
+failure creates an invalid assessment and skips planning and execution.
+
+The Auto Research plan and log group refinement-only steps by experiment. The
+experiment stage never reruns the replicated baseline and cannot modify the
+audited source code; execution failures remain explicit. Assessment compares
+each frozen primary metric with existing baseline evidence. It computes
+`relative_delta = (refined - baseline) / abs(baseline)`, reverses the sign for a
+lower-is-better metric, multiplies by the frozen experiment weight, and sums the
+contributions. A complete weighted score strictly above
+`--assessment-threshold` is `valid`; a complete score at or below it is
+`invalid`. Missing or unmappable values and zero baselines are `inconclusive`.
+The program derives each round summary from the three assessments. All three
+ideas finish before routing: any valid idea ends iteration, otherwise a new
+round begins until `max_iter` is reached. Later rounds receive prior ideas,
+audit/assessment verdicts, and failure-reason paths.
 
 Dynamic stages are named `round_001.idea_01.<stage>`. Completed stages are
 skipped only after their artifacts reload and validate; retries retain provider
@@ -205,6 +222,10 @@ runs/<run_id>/autoresearch/
 ├── manifest.json
 ├── preflight/resources.json
 ├── eligibility/eligibility.json
+├── experiment_setup/experiment_weights.json
+├── experiment_setup/experiment_weighting_transcript.jsonl
+├── experiment_setup/experiment_contracts.json
+├── experiment_setup/experiment_contracts_transcript.jsonl
 ├── rounds/round_001/
 │   ├── ideas.md
 │   ├── idea_generation_transcript.jsonl
@@ -262,6 +283,12 @@ automatically.
   Replicate exposes only claim-level audited anchors and requires the baseline,
   comparisons, hypotheses, changes, commands, and actual round results in
   `smart_replicate_log.json`; it does not expose the paper itself.
+- Auto Research experiment weights are generated before code inspection and do
+  not receive result artifacts. Experiment contracts trust the completed
+  replicate code as the executable source of truth. Auto Research codegen may
+  add model files and touch declared integration files only; the experiment
+  stage executes the audited new model without modifying source code or
+  rerunning the baseline.
 - Plan agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.
 - Remote compute access is exposed through the `computation-provider` skill;

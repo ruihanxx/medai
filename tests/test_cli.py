@@ -23,6 +23,7 @@ def test_help_lists_required_inputs():
     assert "--codex-reasoning-effort" in result.stdout
     assert "--smart-replicate" in result.stdout
     assert "--max-iter" in result.stdout
+    assert "--assessment-threshold" in result.stdout
 
 
 def test_cli_requires_exactly_one_mode(tmp_path: Path):
@@ -249,6 +250,7 @@ def test_autoresearch_cli_uses_base_output_and_inherited_provider(
     assert invoked[0].output == base_run / "autoresearch"
     assert invoked[0].provider == "codex"
     assert invoked[0].max_iter == 1
+    assert invoked[0].assessment_threshold == 0.0
 
 
 def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
@@ -282,6 +284,7 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
     assert config.codex_model == "gpt-test"
     assert config.codex_reasoning_effort == "high"
     assert config.data == data
+    assert config.assessment_threshold == 0.0
 
     override = AutoResearchConfig.create(
         base_run=base_run,
@@ -300,6 +303,15 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
             output=base_run / "autoresearch",
             provider=None,
             max_iter=11,
+            siliconflow_config=None,
+        )
+
+    with pytest.raises(ValueError, match="finite non-negative"):
+        AutoResearchConfig.create(
+            base_run=base_run,
+            output=base_run / "autoresearch",
+            provider=None,
+            assessment_threshold=-0.1,
             siliconflow_config=None,
         )
 
