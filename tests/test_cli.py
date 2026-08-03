@@ -1,10 +1,11 @@
 from pathlib import Path
 
 import pytest
+from typer.testing import CliRunner
+
 from medai.cli import app
 from medai.config import RunConfig
 from medai.pipeline_state import PipelineState, build_run_inputs
-from typer.testing import CliRunner
 
 runner = CliRunner()
 
@@ -140,3 +141,44 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
     assert f"Resuming MedAI run: {output}" in result.stdout
     assert invoked == [output]
     assert PipelineState(output).state["resume_count"] == 1
+
+
+def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+    PipelineState.create(output, build_run_inputs(config))
+
+    class FakeWorkflow:
+        def invoke(self, state):
+            pipeline_state = PipelineState(state["config"].output)
+            pipeline_state.start_stage("plan_agent")
+            raise RuntimeError("plan failed")
+
+    monkeypatch.setattr("medai.cli.create_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr("medai.cli.release_run_computation_instance", lambda config: None)
+
+    result = runner.invoke(
+        app,
+        [
+            "--paper",
+            str(paper),
+            "--output",
+            str(output),
+            "--provider",
+            "codex",
+        ],
+    )
+
+    assert result.exit_code == 1
+    manifest = PipelineState(output).state
+    assert manifest["stages"]["plan_agent"]["status"] == "failed"
+    assert manifest["stages"]["plan_agent"]["error"] == "plan failed"

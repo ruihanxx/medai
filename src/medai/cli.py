@@ -84,7 +84,7 @@ def run(
             message = str(exc)
             if cleanup_error:
                 message = f"{message}; cleanup error: {cleanup_error}"
-            pipeline_state.fail(message)
+            PipelineState(config.output).fail(message)
         typer.echo(f"ERROR: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 

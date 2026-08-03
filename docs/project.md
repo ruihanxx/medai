@@ -52,8 +52,9 @@ Desktop Veritas launcher; `MEDAI_DOCKER_PLATFORM` may override the host Docker
 selection when a compatible base image is available.
 Dependency installation uses PyPI by default; `MEDAI_PYPI_INDEX` may select a
 compatible package index at build time without changing the resulting runtime
-configuration. MinerU is a host dependency and is not installed into the MedAI
-overlay environment.
+configuration. Each overlay build explicitly refreshes the local MedAI package
+so source changes cannot reuse a stale cached wheel. MinerU is a host dependency
+and is not installed into the MedAI overlay environment.
 
 The `codex` provider accepts `--codex-model` and
 `--codex-reasoning-effort`. When omitted, these values come from
@@ -104,10 +105,12 @@ migrated, the paper hash and output-affecting configuration must match, and
 only stages marked `completed` are skipped. Every skipped stage reloads and
 validates its canonical artifacts before downstream work proceeds. A
 `running` or `failed` stage starts another attempt while retaining its writable
-artifacts. Code generation records source preparation before invoking its
-agent; replication continues from the valid ordered prefix in its step log;
-report generation checkpoints every completed experiment. A completed run is
-therefore safe to invoke again and becomes a validation-only no-op.
+artifacts. Failure handling reloads the current manifest before recording the
+error so stage updates are not overwritten by stale state. Code generation
+records source preparation before invoking its agent; replication continues
+from the valid ordered prefix in its step log; report generation checkpoints
+every completed experiment. A completed run is therefore safe to invoke again
+and becomes a validation-only no-op.
 
 ## Persistent artifacts
 
