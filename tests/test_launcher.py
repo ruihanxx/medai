@@ -22,14 +22,43 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$MEDAI_TEST_DOCKER_LOG"
 if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
     printf 'sha256:test-image\\n'
-elif [[ "${1:-}" == "run" ]]; then
-    mkdir -p "$MEDAI_TEST_MODEL_CACHE"
-    printf '%s\\n' '{"models-dir":{"pipeline":"/opt/medai-models/pipeline","vlm":"/opt/medai-models/vlm"}}' > "$MEDAI_TEST_MODEL_CACHE/mineru.json"
 fi
 """,
         encoding="utf-8",
     )
     fake_docker.chmod(0o755)
+
+    fake_models_download = fake_bin / "mineru-models-download"
+    fake_models_download.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'models-download %s\\n' "$*" >> "$MEDAI_TEST_DOCKER_LOG"
+mkdir -p "$MEDAI_TEST_MODEL_CACHE"
+printf '%s\\n' '{"models-dir":{"pipeline":"/host/pipeline","vlm":"/host/vlm"}}' > "$MINERU_TOOLS_CONFIG_JSON"
+""",
+        encoding="utf-8",
+    )
+    fake_models_download.chmod(0o755)
+
+    fake_mineru = fake_bin / "mineru"
+    fake_mineru.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+printf 'mineru %s\\n' "$*" >> "$MEDAI_TEST_DOCKER_LOG"
+output=""
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+        output="$2"
+        break
+    fi
+    shift
+done
+mkdir -p "$output/paper/auto/images"
+printf '# Paper\\n' > "$output/paper/auto/paper.md"
+""",
+        encoding="utf-8",
+    )
+    fake_mineru.chmod(0o755)
 
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
@@ -54,12 +83,11 @@ def test_init_builds_image_and_initializes_reusable_models(tmp_path: Path):
     assert initialized.returncode == 0, initialized.stderr
     assert (model_cache / "mineru.json").is_file()
     assert (model_cache / ".medai-image-id").read_text(encoding="utf-8").strip() == (
-        "sha256:test-image"
+        "host-mineru:sha256:test-image"
     )
     init_calls = docker_log.read_text(encoding="utf-8")
     assert "build --platform linux/amd64" in init_calls
-    assert "--entrypoint mineru-models-download" in init_calls
-    assert "--model_type all" in init_calls
+    assert "models-download --source auto --model_type all" in init_calls
 
     docker_log.write_text("", encoding="utf-8")
     paper = tmp_path / "paper.pdf"
@@ -76,8 +104,10 @@ def test_init_builds_image_and_initializes_reusable_models(tmp_path: Path):
     assert run.returncode == 0, run.stderr
     run_calls = docker_log.read_text(encoding="utf-8")
     assert "build " not in run_calls
-    assert "MINERU_MODEL_SOURCE=local" in run_calls
-    assert f"src={model_cache},dst=/opt/medai-models,readonly" in run_calls
+    assert "mineru -p" in run_calls
+    assert "MEDAI_MINERU_OUTPUT=/workspace/mineru-output" in run_calls
+    assert "dst=/workspace/mineru-output,readonly" in run_calls
+    assert f"src={model_cache},dst=/opt/medai-models,readonly" not in run_calls
 
 
 def test_run_requires_successful_init(tmp_path: Path):

@@ -20,8 +20,12 @@ if [[ "${1:-}" == "init" ]]; then
         echo "ERROR: MEDAI_MINERU_MODEL_SOURCE must be auto, huggingface, or modelscope" >&2
         exit 2
     fi
+    if ! command -v mineru >/dev/null 2>&1 || ! command -v mineru-models-download >/dev/null 2>&1; then
+        echo "ERROR: Host MinerU is not installed; install mineru[pipeline]>=3,<4 first" >&2
+        exit 2
+    fi
 
-    mkdir -p "$MODEL_CACHE"
+    mkdir -p "$MODEL_CACHE/home"
     MODEL_CACHE="$(cd "$MODEL_CACHE" && pwd -P)"
     MODEL_CONFIG="$MODEL_CACHE/mineru.json"
     MODEL_MARKER="$MODEL_CACHE/.medai-image-id"
@@ -33,15 +37,11 @@ if [[ "${1:-}" == "init" ]]; then
         "$PROJECT_ROOT"
 
     printf 'Initializing MinerU models in: %s\n' "$MODEL_CACHE"
-    docker run --rm --platform "$DOCKER_PLATFORM" \
-        --user "$(id -u):$(id -g)" \
-        --env "HOME=/opt/medai-models/home" \
-        --env "HF_HOME=/opt/medai-models/huggingface" \
-        --env "MODELSCOPE_CACHE=/opt/medai-models/modelscope" \
-        --env "MINERU_TOOLS_CONFIG_JSON=/opt/medai-models/mineru.json" \
-        --mount "type=bind,src=$MODEL_CACHE,dst=/opt/medai-models" \
-        --entrypoint mineru-models-download \
-        "$IMAGE_NAME" \
+    HOME="$MODEL_CACHE/home" \
+        HF_HOME="$MODEL_CACHE/huggingface" \
+        MODELSCOPE_CACHE="$MODEL_CACHE/modelscope" \
+        MINERU_TOOLS_CONFIG_JSON="$MODEL_CONFIG" \
+        mineru-models-download \
         --source "$model_source" \
         --model_type all
 
@@ -50,7 +50,7 @@ if [[ "${1:-}" == "init" ]]; then
         exit 1
     fi
     image_id="$(docker image inspect "$IMAGE_NAME" --format '{{.Id}}')"
-    printf '%s\n' "$image_id" > "$MODEL_MARKER"
+    printf 'host-mineru:%s\n' "$image_id" > "$MODEL_MARKER"
     printf 'MedAI initialization completed.\n'
     exit 0
 fi
@@ -150,6 +150,10 @@ if [[ "$provider" == "codex-siliconflow" && ( -z "$siliconflow_config" || ! -f "
     echo "ERROR: codex-siliconflow requires --siliconflow-config" >&2
     exit 2
 fi
+if ! command -v mineru >/dev/null 2>&1; then
+    echo "ERROR: Host MinerU is not installed; install mineru[pipeline]>=3,<4 first" >&2
+    exit 2
+fi
 if ! image_id="$(docker image inspect "$IMAGE_NAME" --format '{{.Id}}' 2>/dev/null)"; then
     echo "ERROR: MedAI is not initialized; run ./medai init first" >&2
     exit 2
@@ -159,8 +163,8 @@ if [[ ! -s "$MODEL_CONFIG" || ! -s "$MODEL_MARKER" ]]; then
     exit 2
 fi
 initialized_image_id="$(<"$MODEL_MARKER")"
-if [[ "$initialized_image_id" != "$image_id" ]]; then
-    echo "ERROR: MedAI image changed after initialization; run ./medai init again" >&2
+if [[ "$initialized_image_id" != "host-mineru:$image_id" ]]; then
+    echo "ERROR: MedAI image or host MinerU initialization changed; run ./medai init again" >&2
     exit 2
 fi
 MODEL_CACHE="$(cd "$MODEL_CACHE" && pwd -P)"
@@ -196,16 +200,30 @@ else
     printf 'Run output: %s\n' "$output"
 fi
 
+host_mineru_output=""
+cleanup_host_mineru_output() {
+    if [[ -n "$host_mineru_output" && -d "$host_mineru_output" ]]; then
+        rm -rf -- "$host_mineru_output"
+    fi
+}
+trap cleanup_host_mineru_output EXIT
+
+if [[ ! -s "$output/preprocessing/paper.md" || ! -d "$output/preprocessing/artifacts" ]]; then
+    host_mineru_output="$(mktemp -d "${TMPDIR:-/tmp}/medai-mineru.XXXXXX")"
+    printf 'Running MinerU natively on the host.\n'
+    HOME="$MODEL_CACHE/home" \
+        HF_HOME="$MODEL_CACHE/huggingface" \
+        MODELSCOPE_CACHE="$MODEL_CACHE/modelscope" \
+        MINERU_MODEL_SOURCE=local \
+        MINERU_TOOLS_CONFIG_JSON="$MODEL_CONFIG" \
+        mineru -p "$paper" -o "$host_mineru_output"
+fi
+
 docker_args=(
     --rm
     --platform "$DOCKER_PLATFORM"
     --env "MEDAI_HOST_PAPER=$paper"
-    --env "HF_HOME=/opt/medai-models/huggingface"
-    --env "MODELSCOPE_CACHE=/opt/medai-models/modelscope"
-    --env "MINERU_MODEL_SOURCE=local"
-    --env "MINERU_TOOLS_CONFIG_JSON=/opt/medai-models/mineru.json"
     --mount "type=bind,src=$paper,dst=/workspace/inputs/paper.pdf,readonly"
-    --mount "type=bind,src=$MODEL_CACHE,dst=/opt/medai-models,readonly"
     --mount "type=bind,src=$output,dst=/workspace/output"
 )
 cli_args=(
@@ -213,6 +231,11 @@ cli_args=(
     --provider "$provider"
     --output /workspace/output
 )
+
+if [[ -n "$host_mineru_output" ]]; then
+    docker_args+=(--env "MEDAI_MINERU_OUTPUT=/workspace/mineru-output")
+    docker_args+=(--mount "type=bind,src=$host_mineru_output,dst=/workspace/mineru-output,readonly")
+fi
 
 if [[ -n "$repo" ]]; then
     docker_args+=(--env "MEDAI_HOST_REPO=$repo")

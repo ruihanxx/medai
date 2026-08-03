@@ -3,18 +3,22 @@
 ## CLI and isolation
 
 `./medai init` performs all shared initialization: it builds `medai:local`,
-downloads all MinerU pipeline and VLM models, and records the initialized image
-ID. Models are stored under `.medai/mineru/` by default; `MEDAI_MODEL_CACHE`
+uses the host `mineru-models-download` command to download all MinerU pipeline
+and VLM models, and records the host-runtime marker and initialized image ID.
+Models are stored under `.medai/mineru/` by default; `MEDAI_MODEL_CACHE`
 may select another host directory and `MEDAI_MINERU_MODEL_SOURCE` may select
 `auto`, `huggingface`, or `modelscope`. Initialization is idempotent because
 the model clients reuse completed downloads.
 
 Normal `./medai` runs never build an image or download models. They require the
-current image ID and model cache to match the last successful initialization,
-mount the model directory read-only, and fail with an instruction to run
-`./medai init` when initialization is missing or stale. A normal run requires
-`--paper` and `--provider`; `--repo` and `--data` are optional. Supported
-providers are `claude`, `codex`, and `codex-siliconflow`.
+current image ID and host model cache to match the last successful
+initialization and fail with an instruction to run `./medai init` when either
+is missing or stale. Before starting a run whose PDF stage is incomplete, the
+launcher invokes the host `mineru` command and mounts its temporary output
+read-only into the container. MinerU therefore inherits the host runtime's
+automatic NVIDIA CUDA, Apple MPS, or CPU device selection. A normal run
+requires `--paper` and `--provider`; `--repo` and `--data` are optional.
+Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. A new invocation creates a unique run directory under the
 repository-root `runs/` directory, named from its UTC start time and paper
@@ -32,10 +36,8 @@ The `VERITAS_PLATFORM` build argument and wrapper both default to
 Desktop Veritas launcher.
 Dependency installation uses PyPI by default; `MEDAI_PYPI_INDEX` may select a
 compatible package index at build time without changing the resulting runtime
-configuration. The PDF extra explicitly installs Accelerate for MinerU's hybrid
-VLM backend. The image build imports Accelerate and MinerU's hybrid analysis
-entrypoint after installation so undeclared transitive dependencies fail during
-the build rather than during PDF preprocessing.
+configuration. MinerU is a host dependency and is not installed into the MedAI
+overlay environment.
 
 The `codex` provider accepts `--codex-model` and
 `--codex-reasoning-effort`. When omitted, these values come from
@@ -58,8 +60,9 @@ modify only that copy.
 The LangGraph stages are:
 
 1. `preflight`: validate inputs and record CPU, RAM, disk, and GPU resources.
-2. `preprocess_pdf`: convert the PDF to Markdown and copy images. MinerU has a
-   300-second default timeout, configurable with `MINERU_TIMEOUT_SECONDS`.
+2. `preprocess_pdf`: import the host MinerU result, convert it to canonical
+   Markdown, and copy images. Host MinerU output remains temporary; only the
+   canonical Markdown and artifacts persist in the run directory.
 3. `preprocessing_agent`: write text/numeric claims and experiment definitions.
 4. `codegen_agent`: inspect supplied data directly through bounded, read-only,
    non-executing reads and write a validated data inventory, compare local GPU
