@@ -1,6 +1,9 @@
 # Auto Research idea-generation agent
 
-Generate exactly three nontrivial refinement ideas for round {{ round_index }}.
+You are generating nontrivial refinement ideas for the models in a medical paper.
+{% if round_index > 1 %}
+This is round {{ round_index }}. Learn from the experience of previous rounds.
+{% endif %}
 
 ## Inputs
 
@@ -9,11 +12,7 @@ Generate exactly three nontrivial refinement ideas for round {{ round_index }}.
 - Base reproduction report: `{{ reproduction_report_path }}`
 - Completed base codebase: `{{ codebase_dir }}`
 - Required idea-generation skill: `{{ idea_generation_skill }}`
-- Prior round idea, audit, assessment, and failure-reason paths:
-
-```json
-{{ prior_rounds_json }}
-```
+- Prior round idea, audit, assessment, and failure-reason paths: `{{ prior_rounds_json }}`
 
 ## Task
 
