@@ -15,7 +15,7 @@ RUN MAKEFLAGS=-j1 R --vanilla --slave -e '\
         remotes::install_version( \
             package, version = version, upgrade = "never", dependencies = NA \
         ); \
-        if (as.character(utils::packageVersion(package)) != version) { \
+        if (utils::packageDescription(package, fields = "Version") != version) { \
             stop("Unexpected version for ", package); \
         } \
     }; \
