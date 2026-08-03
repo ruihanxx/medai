@@ -14,12 +14,33 @@ runner = CliRunner()
 def test_help_lists_required_inputs():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
+    assert "--replicate" in result.stdout
+    assert "--autoresearch" in result.stdout
     assert "--paper" in result.stdout
     assert "--output" in result.stdout
     assert "--provider" in result.stdout
     assert "--codex-model" in result.stdout
     assert "--codex-reasoning-effort" in result.stdout
     assert "--smart-replicate" in result.stdout
+    assert "--max-iter" in result.stdout
+
+
+def test_cli_requires_exactly_one_mode(tmp_path: Path):
+    result = runner.invoke(app, ["--output", str(tmp_path / "output")])
+    assert result.exit_code == 1
+    assert "Exactly one" in result.stderr
+
+    result = runner.invoke(
+        app,
+        [
+            "--replicate",
+            "--autoresearch",
+            "--output",
+            str(tmp_path / "output"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Exactly one" in result.stderr
 
 
 def test_codex_settings_are_loaded_from_environment(tmp_path: Path, monkeypatch):
@@ -122,6 +143,7 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
     class FakeWorkflow:
         def invoke(self, state):
             invoked.append(state["config"].output)
+            return {"report_path": str(output / "report.md")}
 
     monkeypatch.setattr("medai.cli.create_workflow", lambda: FakeWorkflow())
     monkeypatch.setattr("medai.cli.release_run_computation_instance", lambda config: None)
@@ -129,6 +151,7 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
     result = runner.invoke(
         app,
         [
+            "--replicate",
             "--paper",
             str(paper),
             "--output",
@@ -139,7 +162,7 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert f"Resuming MedAI run: {output}" in result.stdout
+    assert f"Resuming Replication run: {output}" in result.stdout
     assert invoked == [output]
     assert PipelineState(output).state["resume_count"] == 1
 
@@ -170,6 +193,7 @@ def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, mon
     result = runner.invoke(
         app,
         [
+            "--replicate",
             "--paper",
             str(paper),
             "--output",
@@ -183,6 +207,48 @@ def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, mon
     manifest = PipelineState(output).state
     assert manifest["stages"]["plan_agent"]["status"] == "failed"
     assert manifest["stages"]["plan_agent"]["error"] == "plan failed"
+
+
+def test_autoresearch_cli_uses_base_output_and_inherited_provider(
+    tmp_path: Path,
+    monkeypatch,
+):
+    base_run = tmp_path / "base"
+    base_run.mkdir()
+    (base_run / "manifest.json").write_text(
+        json.dumps({"inputs": {"provider": "codex"}}),
+        encoding="utf-8",
+    )
+    invoked = []
+
+    class FakeWorkflow:
+        def invoke(self, state):
+            invoked.append(state["config"])
+            PipelineState(state["config"].output).mark_completed()
+            report_path = state["config"].output / "report" / "auto_research_report.md"
+            return {"report_path": str(report_path)}
+
+    monkeypatch.setattr(
+        "medai.cli.build_autoresearch_inputs",
+        lambda config: {"workflow": "autoresearch", "provider": config.provider},
+    )
+    monkeypatch.setattr(
+        "medai.cli.create_autoresearch_workflow",
+        lambda: FakeWorkflow(),
+    )
+    monkeypatch.setattr("medai.cli.release_run_computation_instance", lambda config: None)
+
+    result = runner.invoke(
+        app,
+        ["--autoresearch", "--output", str(base_run)],
+    )
+
+    assert result.exit_code == 0, result.stdout
+    assert len(invoked) == 1
+    assert invoked[0].base_run == base_run
+    assert invoked[0].output == base_run / "autoresearch"
+    assert invoked[0].provider == "codex"
+    assert invoked[0].max_iter == 1
 
 
 def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):

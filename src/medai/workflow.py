@@ -11,7 +11,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from medai.artifacts import load_model, write_json
-from medai.config import RunConfig
+from medai.config import AutoResearchConfig, RunConfig
 from medai.models import (
     ClaimsFile,
     CodegenPlan,
@@ -647,7 +647,7 @@ def create_workflow():
     return builder.compile()
 
 
-def release_run_computation_instance(config: RunConfig) -> None:
+def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> None:
     state_path = config.output / "remote_compute" / "instance.json"
     if not state_path.is_file():
         return

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import re
@@ -367,18 +368,22 @@ def _init(project_root: Path) -> int:
 def _run_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="medai",
-        description="Run an evidence-bound medical paper replication workflow.",
+        description="Run MedAI replication or Auto Research workflows.",
         epilog="Initialize the host runtime once with: medai init",
     )
-    parser.add_argument("--paper", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--replicate", action="store_true")
+    mode.add_argument("--autoresearch", action="store_true")
+    parser.add_argument("--paper", type=Path)
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--data", type=Path)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--provider", default="codex")
+    parser.add_argument("--provider")
     parser.add_argument("--siliconflow-config", type=Path)
     parser.add_argument("--codex-model")
     parser.add_argument("--codex-reasoning-effort")
     parser.add_argument("--smart-replicate", action="store_true")
+    parser.add_argument("--max-iter", type=int)
     return parser
 
 
@@ -426,6 +431,18 @@ def _resolve_output(requested: Optional[Path], runs_root: Path, paper: Path) -> 
     return output
 
 
+def _resolve_base_run(requested: Optional[Path], runs_root: Path) -> Path:
+    if requested is None:
+        raise LauncherError("--autoresearch requires --output pointing to a base run")
+    base_run = requested.expanduser().resolve()
+    if not base_run.is_dir() or not base_run.is_relative_to(runs_root):
+        raise LauncherError(f"--output must be an existing directory under {runs_root}")
+    if not (base_run / "manifest.json").is_file():
+        raise LauncherError(f"--output does not contain manifest.json: {base_run}")
+    print(f"Auto Research base run: {base_run}", flush=True)
+    return base_run
+
+
 def _detect_mineru_device(python: Path) -> str:
     device = _command_output(
         [
@@ -451,12 +468,68 @@ def _mount(source: Path, destination: str, readonly: bool = False) -> str:
 
 def _run(project_root: Path, argv: Sequence[str]) -> int:
     args, forwarded = _run_parser().parse_known_args(argv)
-    paper = _required_file(args.paper, "--paper")
-    if paper.suffix.casefold() != ".pdf":
-        raise LauncherError(f"--paper must be a PDF: {paper}")
-    repo = _optional_directory(args.repo, "--repo")
-    data = _optional_directory(args.data, "--data")
-    provider = args.provider.strip().casefold()
+    paper = None
+    repo = None
+    data = None
+    base_run = None
+    autoresearch_output = None
+    inherited_inputs: dict[str, object] = {}
+    if args.replicate:
+        if args.paper is None:
+            raise LauncherError("--replicate requires --paper")
+        if args.max_iter is not None:
+            raise LauncherError("--max-iter requires --autoresearch")
+        paper = _required_file(args.paper, "--paper")
+        if paper.suffix.casefold() != ".pdf":
+            raise LauncherError(f"--paper must be a PDF: {paper}")
+        repo = _optional_directory(args.repo, "--repo")
+        data = _optional_directory(args.data, "--data")
+        provider = (args.provider or "codex").strip().casefold()
+        codex_model = args.codex_model
+        codex_reasoning_effort = args.codex_reasoning_effort
+        max_iter = None
+    else:
+        if args.paper is not None or args.repo is not None or args.data is not None:
+            raise LauncherError("--autoresearch does not accept --paper, --repo, or --data")
+        if args.smart_replicate:
+            raise LauncherError("--smart-replicate requires --replicate")
+        max_iter = args.max_iter if args.max_iter is not None else 1
+        if not 1 <= max_iter <= 10:
+            raise LauncherError("--max-iter must be between 1 and 10")
+
+        runs_root = (project_root / "runs").resolve()
+        runs_root.mkdir(parents=True, exist_ok=True)
+        base_run = _resolve_base_run(args.output, runs_root)
+        manifest_path = base_run / "manifest.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise LauncherError(f"Base run manifest is not valid JSON: {manifest_path}") from exc
+        inherited = manifest.get("inputs")
+        if not isinstance(inherited, dict):
+            raise LauncherError(f"Base run manifest has invalid inputs: {manifest_path}")
+        inherited_inputs = inherited
+        provider = (args.provider or str(inherited_inputs.get("provider", ""))).strip().casefold()
+        if not provider:
+            raise LauncherError("Base run does not record a provider; pass --provider")
+        if provider == "codex":
+            codex_model = args.codex_model or inherited_inputs.get("codex_model")
+            codex_reasoning_effort = (
+                args.codex_reasoning_effort
+                or inherited_inputs.get("codex_reasoning_effort")
+            )
+        else:
+            codex_model = args.codex_model
+            codex_reasoning_effort = args.codex_reasoning_effort
+
+        data_source = inherited_inputs.get("data_source")
+        if data_source:
+            data = _optional_directory(Path(str(data_source)), "base run data")
+        elif inherited_inputs.get("data"):
+            raise LauncherError(
+                "Base run uses local data but does not record its host source path"
+            )
+
     if provider not in {"claude", "codex", "codex-siliconflow"}:
         raise LauncherError(f"Unsupported provider: {provider}")
     siliconflow_config = None
@@ -466,7 +539,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         raise LauncherError("codex-siliconflow requires --siliconflow-config")
     if provider != "codex-siliconflow" and siliconflow_config is not None:
         raise LauncherError("--siliconflow-config requires --provider codex-siliconflow")
-    if provider != "codex" and (args.codex_model or args.codex_reasoning_effort):
+    if provider != "codex" and (codex_model or codex_reasoning_effort):
         raise LauncherError("Codex model settings require --provider codex")
 
     image_name = os.environ.get("MEDAI_IMAGE", "medai:local")
@@ -492,13 +565,29 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
 
     runs_root = (project_root / "runs").resolve()
     runs_root.mkdir(parents=True, exist_ok=True)
-    output = _resolve_output(args.output, runs_root, paper)
+    if args.replicate:
+        assert paper is not None
+        output = _resolve_output(args.output, runs_root, paper)
+    else:
+        assert base_run is not None
+        autoresearch_output = base_run / "autoresearch"
+        autoresearch_output.mkdir(exist_ok=True)
+        if any(autoresearch_output.iterdir()) and not (
+            autoresearch_output / "manifest.json"
+        ).is_file():
+            raise LauncherError(
+                "Auto Research output is not empty and has no manifest.json: "
+                f"{autoresearch_output}"
+            )
+        output = autoresearch_output
 
     with ExitStack() as stack:
         mineru_output = None
-        if not (output / "preprocessing" / "paper.md").is_file() or not (
-            output / "preprocessing" / "artifacts"
-        ).is_dir():
+        if args.replicate and (
+            not (output / "preprocessing" / "paper.md").is_file()
+            or not (output / "preprocessing" / "artifacts").is_dir()
+        ):
+            assert paper is not None
             mineru_output = Path(
                 stack.enter_context(tempfile.TemporaryDirectory(prefix="medai-mineru-"))
             )
@@ -532,40 +621,71 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             "--rm",
             "--platform",
             docker_platform,
-            "--env",
-            f"MEDAI_HOST_PAPER={paper}",
-            "--mount",
-            _mount(paper, "/workspace/inputs/paper.pdf", readonly=True),
-            "--mount",
-            _mount(output, "/workspace/output"),
         ]
-        cli_args = [
-            "--paper",
-            "/workspace/inputs/paper.pdf",
-            "--provider",
-            provider,
-            "--output",
-            "/workspace/output",
-        ]
-        if mineru_output:
+        if args.replicate:
+            assert paper is not None
             docker_args.extend(
                 [
                     "--env",
-                    "MEDAI_MINERU_OUTPUT=/workspace/mineru-output",
+                    f"MEDAI_HOST_PAPER={paper}",
                     "--mount",
-                    _mount(mineru_output, "/workspace/mineru-output", readonly=True),
+                    _mount(paper, "/workspace/inputs/paper.pdf", readonly=True),
+                    "--mount",
+                    _mount(output, "/workspace/output"),
                 ]
             )
-        if repo:
+            cli_args = [
+                "--replicate",
+                "--paper",
+                "/workspace/inputs/paper.pdf",
+                "--provider",
+                provider,
+                "--output",
+                "/workspace/output",
+            ]
+            if mineru_output:
+                docker_args.extend(
+                    [
+                        "--env",
+                        "MEDAI_MINERU_OUTPUT=/workspace/mineru-output",
+                        "--mount",
+                        _mount(mineru_output, "/workspace/mineru-output", readonly=True),
+                    ]
+                )
+            if repo:
+                docker_args.extend(
+                    [
+                        "--env",
+                        f"MEDAI_HOST_REPO={repo}",
+                        "--mount",
+                        _mount(repo, "/workspace/repo", readonly=True),
+                    ]
+                )
+                cli_args.extend(["--repo", "/workspace/repo"])
+        else:
+            assert base_run is not None
+            assert autoresearch_output is not None
             docker_args.extend(
                 [
                     "--env",
-                    f"MEDAI_HOST_REPO={repo}",
+                    f"MEDAI_HOST_BASE_RUN={base_run}",
                     "--mount",
-                    _mount(repo, "/workspace/repo", readonly=True),
+                    _mount(base_run, "/workspace/base-run", readonly=True),
+                    "--mount",
+                    _mount(autoresearch_output, "/workspace/autoresearch"),
                 ]
             )
-            cli_args.extend(["--repo", "/workspace/repo"])
+            cli_args = [
+                "--autoresearch",
+                "--base-run",
+                "/workspace/base-run",
+                "--provider",
+                provider,
+                "--output",
+                "/workspace/autoresearch",
+                "--max-iter",
+                str(max_iter),
+            ]
         if data:
             docker_args.extend(
                 [
@@ -575,7 +695,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
                     _mount(data, "/workspace/data", readonly=True),
                 ]
             )
-            cli_args.extend(["--data", "/workspace/data"])
+            if args.replicate:
+                cli_args.extend(["--data", "/workspace/data"])
         if siliconflow_config:
             docker_args.extend(
                 [
@@ -588,11 +709,11 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
                 ]
             )
             cli_args.extend(["--siliconflow-config", "/run/secrets/siliconflow.env"])
-        if args.codex_model:
-            cli_args.extend(["--codex-model", args.codex_model])
-        if args.codex_reasoning_effort:
-            cli_args.extend(["--codex-reasoning-effort", args.codex_reasoning_effort])
-        if args.smart_replicate:
+        if codex_model:
+            cli_args.extend(["--codex-model", str(codex_model)])
+        if codex_reasoning_effort:
+            cli_args.extend(["--codex-reasoning-effort", str(codex_reasoning_effort)])
+        if args.replicate and args.smart_replicate:
             cli_args.append("--smart-replicate")
 
         home = Path.home()

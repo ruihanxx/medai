@@ -145,7 +145,14 @@ def test_init_builds_image_and_runs_cpu_mineru(tmp_path: Path):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
     run = subprocess.run(
-        [str(launcher), "--paper", str(paper), "--provider", "codex"],
+        [
+            str(launcher),
+            "--replicate",
+            "--paper",
+            str(paper),
+            "--provider",
+            "codex",
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -239,7 +246,14 @@ def test_run_requires_successful_init(tmp_path: Path):
     paper.write_bytes(b"%PDF")
 
     run = subprocess.run(
-        [str(launcher), "--paper", str(paper), "--provider", "codex"],
+        [
+            str(launcher),
+            "--replicate",
+            "--paper",
+            str(paper),
+            "--provider",
+            "codex",
+        ],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -250,3 +264,41 @@ def test_run_requires_successful_init(tmp_path: Path):
     assert run.returncode == 2
     assert "run medai init first" in run.stderr
     assert command_log.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")
+def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
+    launcher, env, command_log, _ = prepare_launcher(tmp_path)
+    initialized = subprocess.run(
+        [str(launcher), "init"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+
+    base_run = tmp_path / "runs" / "base"
+    base_run.mkdir(parents=True)
+    (base_run / "manifest.json").write_text(
+        '{"status":"completed","inputs":{"provider":"codex","data":null}}\n',
+        encoding="utf-8",
+    )
+    command_log.write_text("", encoding="utf-8")
+
+    run = subprocess.run(
+        [str(launcher), "--autoresearch", "--output", str(base_run)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert run.returncode == 0, run.stderr
+    calls = command_log.read_text(encoding="utf-8")
+    assert "mineru -p" not in calls
+    assert f"src={base_run},dst=/workspace/base-run,readonly" in calls
+    assert f"src={base_run / 'autoresearch'},dst=/workspace/autoresearch" in calls
+    assert "--autoresearch --base-run /workspace/base-run" in calls
