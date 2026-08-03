@@ -2,32 +2,37 @@
 
 ## CLI and isolation
 
-`./medai init` performs all shared initialization: it creates a dedicated host
-Python environment, validates that the selected Python is version 3.10 or newer
-and native arm64 on Apple Silicon, installs the MinerU pipeline runtime, builds
-`medai:local`, uses that environment's `mineru-models-download` command to
-download all MinerU pipeline and VLM models, and records the host-runtime marker
-and initialized image ID. The environment and models are stored under
+The cross-platform host launcher is implemented in `medai.launcher`; `./medai`
+is its thin Linux/macOS wrapper and `medai.cmd` is its Windows wrapper. It runs
+from a source checkout because initialization builds the local Docker overlay
+from that checkout. `medai init` performs all shared initialization: it creates
+a dedicated host Python environment, validates Python 3.10+ (3.10-3.12 on
+Windows), requires macOS 14+ on arm64 Apple Silicon and x86_64 on Windows,
+installs the pinned MinerU runtime from
+`src/medai/data/mineru-requirements.txt`, builds `medai:local`, downloads all
+MinerU pipeline and VLM models, and records the initialized image ID. The
+environment and models are stored under
 `.medai/mineru/` by default; `MEDAI_MODEL_CACHE`
 may select another host directory and `MEDAI_MINERU_MODEL_SOURCE` may select
 `auto`, `huggingface`, or `modelscope`. `MEDAI_MINERU_PYTHON` may select the
-native host Python used to create the environment, and `MEDAI_PYPI_INDEX` is
-also used for its package installation. When no Python is explicitly selected
-on Apple Silicon, initialization uses an existing native Homebrew Python 3.12 or
-installs `python@3.12` using `/opt/homebrew/bin/brew`; native Homebrew must be
-installed beforehand. If an existing environment differs from the selected
-interpreter's version or architecture, initialization archives it beside the
-replacement environment. Initialization is otherwise idempotent because the
-environment and model clients reuse completed installations and downloads.
+host Python used to create the environment, `MEDAI_PYPI_INDEX` selects its
+general package index, and `MEDAI_TORCH_INDEX_URL` optionally selects a
+device-specific PyTorch index. When no Python is explicitly selected on Apple
+Silicon, initialization uses or installs native Homebrew Python 3.12. If an
+existing environment differs from the selected interpreter's version or
+architecture, initialization archives it beside the replacement environment.
+Initialization is otherwise idempotent because completed environments and
+model downloads are reused.
 
 Normal `./medai` runs never build an image or download models. They require the
 current image ID and host model cache to match the last successful
 initialization and fail with an instruction to run `./medai init` when either
 is missing or stale. Before starting a run whose PDF stage is incomplete, the
 launcher invokes the host `mineru` command and mounts its temporary output
-read-only into the container. MinerU therefore inherits the host runtime's
-automatic NVIDIA CUDA, Apple MPS, or CPU device selection. A normal run
-requires `--paper` and `--provider`; `--repo` and `--data` are optional.
+read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
+sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
+`MEDAI_MINERU_BACKEND` may override it. A normal run requires
+`--paper` and `--provider`; `--repo` and `--data` are optional.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. A new invocation creates a unique run directory under the
@@ -41,9 +46,10 @@ The local `medai:local` image is a thin overlay on the canonical Veritas image
 `VERITAS_IMAGE`). It reuses the Veritas CUDA and scientific runtime while
 installing MedAI into an isolated `/opt/medai/.venv` and replacing only the
 container entrypoint. The Veritas image and its `/app/.venv` remain unchanged.
-The `VERITAS_PLATFORM` build argument and wrapper both default to
+The `VERITAS_PLATFORM` build argument and host launcher both default to
 `linux/amd64`, matching the platform published by Veritas and used by the
-Desktop Veritas launcher.
+Desktop Veritas launcher; `MEDAI_DOCKER_PLATFORM` may override the host Docker
+selection when a compatible base image is available.
 Dependency installation uses PyPI by default; `MEDAI_PYPI_INDEX` may select a
 compatible package index at build time without changing the resulting runtime
 configuration. MinerU is a host dependency and is not installed into the MedAI
@@ -180,5 +186,6 @@ automatically.
 
 ## Acceptance
 
-Run `pytest`, `ruff check .`, and `python -m medai.cli --help`. Tests mock
-provider, MinerU, AutoDL, and SSH boundaries; tests never rent hardware.
+Run `pytest`, `ruff check .`, `python -m medai --help`, and
+`python -m medai.cli --help`. Tests mock provider, MinerU, AutoDL, and SSH
+boundaries; tests never rent hardware.

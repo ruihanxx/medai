@@ -1,4 +1,4 @@
-from medai.cli import app
+from medai.launcher import main
 
 if __name__ == "__main__":
-    app()
+    raise SystemExit(main())
