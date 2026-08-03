@@ -15,7 +15,6 @@ from medai.config import RunConfig
 from medai.models import (
     ClaimsFile,
     CodegenPlan,
-    DataInventory,
     DatasetPatchFile,
     EvidenceSummary,
     Experiment,
@@ -23,7 +22,6 @@ from medai.models import (
     ReplicationLog,
     ReplicationPlan,
     SmartReplicateLog,
-    validate_data_inventory,
     validate_experiment_coverage,
     validate_replication_log,
     validate_replication_plan,
@@ -284,7 +282,6 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         and any(codebase_dir.iterdir())
     )
     codegen_plan_path = codebase_dir / "codegen_plan.json"
-    data_inventory_path = codebase_dir / "data_inventory.json"
     transcript_path = config.output / "codegen" / "codegen_transcript.jsonl"
     computation_provider_state_path = config.output / "remote_compute" / "instance.json"
     dataset_patch_path = (
@@ -293,8 +290,6 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     if pipeline_state.is_stage_completed("codegen_agent"):
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
-        inventory = load_model(data_inventory_path, DataInventory)
-        validate_data_inventory(config.data, inventory)
         load_model(codegen_plan_path, CodegenPlan)
         load_model(dataset_patch_path, DatasetPatchFile)
         if not transcript_path.is_file():
@@ -348,7 +343,6 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         experiments_path=state["experiments_path"],
         data_dir=config.data,
         skills_dir=skills_dir(),
-        data_inventory_path=data_inventory_path,
         codegen_plan_path=codegen_plan_path,
         dataset_patch_path=dataset_patch_path,
         computation_provider_state_path=computation_provider_state_path,
@@ -365,15 +359,12 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    inventory = load_model(data_inventory_path, DataInventory)
-    validate_data_inventory(config.data, inventory)
     load_model(codegen_plan_path, CodegenPlan)
     load_model(dataset_patch_path, DatasetPatchFile)
     pipeline_state.complete_stage(
         "codegen_agent",
         [
             str(codebase_dir),
-            str(data_inventory_path),
             str(codegen_plan_path),
             str(dataset_patch_path),
             str(transcript_path),

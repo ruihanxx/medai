@@ -81,8 +81,8 @@ The LangGraph stages are:
    canonical Markdown and artifacts persist in the run directory.
 3. `preprocessing_agent`: write text/numeric claims and experiment definitions.
 4. `codegen_agent`: inspect supplied data directly through bounded, read-only,
-   non-executing reads and write a validated data inventory, compare local GPU
-   capacity with the paper's full-scale requirements, use the
+   non-executing reads, compare local GPU capacity with the paper's full-scale
+   requirements, use the
    `computation-provider` skill to rent matching configured remote compute when
    needed, plan files, and write code.
 5. `plan_agent`: check coverage, install dependencies, smoke-test, and write the replication plan.
@@ -120,7 +120,6 @@ runs/<run_id>/
 ├── preprocessing/claims.json
 ├── preprocessing/experiment_todo.json
 ├── preprocessing/preprocessing_transcript.jsonl
-├── codegen/codebase/data_inventory.json
 ├── codegen/codebase/codegen_plan.json
 ├── codegen/codegen_transcript.jsonl
 ├── plan/replicate_plan.json
@@ -147,10 +146,7 @@ directory. The evidence summary records the execution environment. The
 reproduction report contains exactly three top-level audit
 sections: per-experiment claim/artifact comparisons, a verdict for every
 validation anchor, and one replication risk for every `codegen_plan.json`
-ambiguity. The data inventory records the configured raw root, adapter,
-bounded scan limits, catalog, explored file samples, warnings, and whether a
-scan was truncated. With no `--data` input it must explicitly report
-`not_supplied` and contain no catalog or samples.
+ambiguity.
 
 Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset

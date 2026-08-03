@@ -2,11 +2,11 @@ import json
 from pathlib import Path
 
 import pytest
+
 from medai.config import RunConfig
 from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.workflow import (
-    codegen_agent_node,
     create_workflow,
     release_run_computation_instance,
     replicate_agent_node,
@@ -83,29 +83,6 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 encoding="utf-8",
             )
         elif name == "codegen.md":
-            (output / "codegen" / "codebase" / "data_inventory.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "dataset": {
-                            "id": None,
-                            "root": None,
-                            "adapter": None,
-                            "status": "not_supplied",
-                        },
-                        "scan": {
-                            "files_scanned": 0,
-                            "bytes_scanned": 0,
-                            "truncated": False,
-                            "limits": {},
-                        },
-                        "catalog": [],
-                        "explored_files": [],
-                        "warnings": [],
-                    }
-                ),
-                encoding="utf-8",
-            )
             (output / "codegen" / "codebase" / "codegen_plan.json").write_text(
                 json.dumps(
                     {
@@ -271,14 +248,11 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "report/E1_transcript.jsonl",
     ]
     assert (output / "codegen" / "codebase" / "README.md").is_file()
-    assert (output / "codegen" / "codebase" / "data_inventory.json").is_file()
     dataset_patch_path = output / "system_maintenance" / "dataset" / "patch.json"
     assert json.loads(dataset_patch_path.read_text(encoding="utf-8")) == []
     codegen_prompt = (output / "prompts" / "codegen.md").read_text(encoding="utf-8")
     assert str(dataset_patch_path) in codegen_prompt
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
-    assert str(output / "codegen" / "codebase" / "data_inventory.json") in codegen_prompt
-    assert '"status": "not_supplied"' in codegen_prompt
     assert "/explore-data/" not in codegen_prompt
     plan_prompt = (output / "prompts" / "plan.md").read_text(encoding="utf-8")
     assert '"environment"' in plan_prompt
@@ -556,7 +530,6 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
         data_dir=None,
         skills_dir=Path("/skills"),
         resources_path=tmp_path / "resources.json",
-        data_inventory_path=tmp_path / "data_inventory.json",
         codegen_plan_path=tmp_path / "codegen_plan.json",
         dataset_patch_path=tmp_path / "patch.json",
         computation_provider_state_path=tmp_path / "instance.json",
@@ -629,125 +602,3 @@ def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     assert command[1].endswith("/computation_provider/scripts/autodl.py")
     assert command[2:] == ["release", "--state", str(state_path)]
     assert kwargs["timeout"] == 120
-
-
-def test_codegen_requires_data_inventory(tmp_path: Path, monkeypatch):
-    paper = tmp_path / "paper.pdf"
-    paper.write_bytes(b"%PDF")
-    output = tmp_path / "output"
-    output.mkdir()
-    config = RunConfig.create(
-        paper=paper,
-        output=output,
-        provider="codex",
-        repo=None,
-        data=None,
-        siliconflow_config=None,
-    )
-    PipelineState.create(output, {"paper": str(paper), "provider": "codex"})
-    resources_path = tmp_path / "resources.json"
-    resources_path.write_text(
-        json.dumps({"cpu": {}, "memory": {}, "disk": {}, "gpus": []}),
-        encoding="utf-8",
-    )
-
-    def fake_agent(*, working_dir, **kwargs):
-        (working_dir / "codegen_plan.json").write_text(
-            json.dumps(
-                {
-                    "files": [{"path": "run.py", "responsibility": "Run"}],
-                    "dependency_order": ["run.py"],
-                    "entry_points": ["run.py"],
-                    "shared_state": "Files",
-                    "ambiguities": [],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
-    with pytest.raises(RuntimeError, match="Required artifact is missing"):
-        codegen_agent_node(
-            {
-                "config": config,
-                "paper_markdown": str(tmp_path / "paper.md"),
-                "claims_path": str(tmp_path / "claims.json"),
-                "experiments_path": str(tmp_path / "experiments.json"),
-                "resources_path": str(resources_path),
-            }
-        )
-
-
-def test_codegen_rejects_inventory_that_disagrees_with_data_input(
-    tmp_path: Path,
-    monkeypatch,
-):
-    paper = tmp_path / "paper.pdf"
-    paper.write_bytes(b"%PDF")
-    data = tmp_path / "raw"
-    data.mkdir()
-    output = tmp_path / "output"
-    output.mkdir()
-    config = RunConfig.create(
-        paper=paper,
-        output=output,
-        provider="codex",
-        repo=None,
-        data=data,
-        siliconflow_config=None,
-    )
-    PipelineState.create(output, {"paper": str(paper), "provider": "codex"})
-    resources_path = tmp_path / "resources.json"
-    resources_path.write_text(
-        json.dumps({"cpu": {}, "memory": {}, "disk": {}, "gpus": []}),
-        encoding="utf-8",
-    )
-
-    def fake_agent(*, working_dir, **kwargs):
-        (working_dir / "data_inventory.json").write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "dataset": {
-                        "id": None,
-                        "root": None,
-                        "adapter": None,
-                        "status": "not_supplied",
-                    },
-                    "scan": {
-                        "files_scanned": 0,
-                        "bytes_scanned": 0,
-                        "truncated": False,
-                        "limits": {},
-                    },
-                    "catalog": [],
-                    "explored_files": [],
-                    "warnings": [],
-                }
-            ),
-            encoding="utf-8",
-        )
-        (working_dir / "codegen_plan.json").write_text(
-            json.dumps(
-                {
-                    "files": [{"path": "run.py", "responsibility": "Run"}],
-                    "dependency_order": ["run.py"],
-                    "entry_points": ["run.py"],
-                    "shared_state": "Files",
-                    "ambiguities": [],
-                }
-            ),
-            encoding="utf-8",
-        )
-
-    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
-    with pytest.raises(ValueError, match="must report explored"):
-        codegen_agent_node(
-            {
-                "config": config,
-                "paper_markdown": str(tmp_path / "paper.md"),
-                "claims_path": str(tmp_path / "claims.json"),
-                "experiments_path": str(tmp_path / "experiments.json"),
-                "resources_path": str(resources_path),
-            }
-        )
