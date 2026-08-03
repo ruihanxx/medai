@@ -6,6 +6,7 @@ trap 'rm -rf "$runtime_home"' EXIT
 
 if [[ -d /credentials/codex ]]; then
     cp -a /credentials/codex "$runtime_home/.codex"
+    rm -f "$runtime_home/.codex/models_cache.json"
 fi
 if [[ -d /credentials/claude ]]; then
     cp -a /credentials/claude "$runtime_home/.claude"
