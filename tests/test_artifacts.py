@@ -1,10 +1,10 @@
 import json
 
 import pytest
-
 from medai.models import (
     ClaimsFile,
     CodegenPlan,
+    EvidenceSummary,
     ExperimentTodo,
     ReplicationLog,
     ReplicationPlan,
@@ -139,6 +139,24 @@ def test_unknown_contract_fields_are_rejected():
     payload["fallback"] = {"claims": []}
     with pytest.raises(ValueError, match="Extra inputs"):
         ClaimsFile.model_validate(payload)
+
+
+def test_evidence_environment_accepts_additional_audit_metadata():
+    evidence = EvidenceSummary.model_validate(
+        {
+            "environment": {
+                "python_version": "3.12",
+                "gpu_available": False,
+                "gpu_model": None,
+                "key_packages": {"numpy": "2.0"},
+                "r_version": "4.6.1",
+                "resources": {"logical_cpu_cores": 8, "memory_total_gb": 7.75},
+            }
+        }
+    )
+
+    assert evidence.environment.r_version == "4.6.1"
+    assert evidence.environment.resources["logical_cpu_cores"] == 8
 
 
 def test_reproduction_report_requires_all_audit_content():

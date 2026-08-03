@@ -156,6 +156,8 @@ class ReplicationLog(StrictModel):
 
 
 class EvidenceEnvironment(StrictModel):
+    model_config = ConfigDict(extra="allow")
+
     python_version: str
     gpu_available: bool
     gpu_model: str | None

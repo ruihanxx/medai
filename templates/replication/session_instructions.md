@@ -266,4 +266,8 @@ Routine setup (installing declared dependencies, activating a venv) does not nee
 }
 ```
 
+The example shows the required core fields. Add any other environment metadata
+needed to make the run auditable, such as an R version, operating-system
+details, CPU/RAM capacity, CUDA details, or other relevant package versions.
+
 Begin execution now.

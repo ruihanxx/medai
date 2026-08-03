@@ -148,7 +148,9 @@ paper artifact labels. The replication plan uses ordered steps whose
 `verifies` lists collectively cover those claim IDs and artifact labels. The
 replication log covers the plan steps in order, and every result-producing
 step names real output files inside the copied codebase or replication
-directory. The evidence summary records the execution environment. The
+directory. The evidence summary records the execution environment. Its core
+environment fields record Python, GPU availability/model, and key package
+versions; additional environment metadata is accepted for auditability. The
 reproduction report contains exactly three top-level audit
 sections: per-experiment claim/artifact comparisons, a verdict for every
 validation anchor, and one replication risk for every `codegen_plan.json`
