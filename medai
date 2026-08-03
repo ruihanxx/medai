@@ -7,6 +7,7 @@ DOCKER_PLATFORM="linux/amd64"
 MODEL_CACHE="${MEDAI_MODEL_CACHE:-$PROJECT_ROOT/.medai/mineru}"
 MODEL_CONFIG="$MODEL_CACHE/mineru.json"
 MODEL_MARKER="$MODEL_CACHE/.medai-image-id"
+MINERU_VENV="$MODEL_CACHE/.venv"
 
 if [[ "${1:-}" == "init" ]]; then
     shift
@@ -20,8 +21,9 @@ if [[ "${1:-}" == "init" ]]; then
         echo "ERROR: MEDAI_MINERU_MODEL_SOURCE must be auto, huggingface, or modelscope" >&2
         exit 2
     fi
-    if ! command -v mineru >/dev/null 2>&1 || ! command -v mineru-models-download >/dev/null 2>&1; then
-        echo "ERROR: Host MinerU is not installed; install mineru[pipeline]>=3,<4 first" >&2
+    host_python="${MEDAI_MINERU_PYTHON:-python3}"
+    if ! command -v "$host_python" >/dev/null 2>&1; then
+        echo "ERROR: Host Python is not available: $host_python" >&2
         exit 2
     fi
 
@@ -29,6 +31,25 @@ if [[ "${1:-}" == "init" ]]; then
     MODEL_CACHE="$(cd "$MODEL_CACHE" && pwd -P)"
     MODEL_CONFIG="$MODEL_CACHE/mineru.json"
     MODEL_MARKER="$MODEL_CACHE/.medai-image-id"
+    MINERU_VENV="$MODEL_CACHE/.venv"
+
+    if [[ ! -x "$MINERU_VENV/bin/python" ]]; then
+        printf 'Creating host MinerU environment: %s\n' "$MINERU_VENV"
+        "$host_python" -m venv "$MINERU_VENV"
+        if [[ -n "${MEDAI_PYPI_INDEX:-}" ]]; then
+            "$MINERU_VENV/bin/python" -m pip install \
+                --index-url "$MEDAI_PYPI_INDEX" --upgrade pip
+        else
+            "$MINERU_VENV/bin/python" -m pip install --upgrade pip
+        fi
+    fi
+    printf 'Installing host MinerU runtime.\n'
+    if [[ -n "${MEDAI_PYPI_INDEX:-}" ]]; then
+        "$MINERU_VENV/bin/python" -m pip install \
+            --index-url "$MEDAI_PYPI_INDEX" "$PROJECT_ROOT[pdf]"
+    else
+        "$MINERU_VENV/bin/python" -m pip install "$PROJECT_ROOT[pdf]"
+    fi
 
     printf 'Building MedAI image: %s\n' "$IMAGE_NAME"
     docker build --platform "$DOCKER_PLATFORM" \
@@ -41,7 +62,7 @@ if [[ "${1:-}" == "init" ]]; then
         HF_HOME="$MODEL_CACHE/huggingface" \
         MODELSCOPE_CACHE="$MODEL_CACHE/modelscope" \
         MINERU_TOOLS_CONFIG_JSON="$MODEL_CONFIG" \
-        mineru-models-download \
+        "$MINERU_VENV/bin/mineru-models-download" \
         --source "$model_source" \
         --model_type all
 
@@ -150,8 +171,8 @@ if [[ "$provider" == "codex-siliconflow" && ( -z "$siliconflow_config" || ! -f "
     echo "ERROR: codex-siliconflow requires --siliconflow-config" >&2
     exit 2
 fi
-if ! command -v mineru >/dev/null 2>&1; then
-    echo "ERROR: Host MinerU is not installed; install mineru[pipeline]>=3,<4 first" >&2
+if [[ ! -x "$MINERU_VENV/bin/mineru" ]]; then
+    echo "ERROR: Host MinerU environment is not initialized; run ./medai init first" >&2
     exit 2
 fi
 if ! image_id="$(docker image inspect "$IMAGE_NAME" --format '{{.Id}}' 2>/dev/null)"; then
@@ -168,6 +189,7 @@ if [[ "$initialized_image_id" != "host-mineru:$image_id" ]]; then
     exit 2
 fi
 MODEL_CACHE="$(cd "$MODEL_CACHE" && pwd -P)"
+MINERU_VENV="$MODEL_CACHE/.venv"
 paper_name="$(basename "$paper")"
 paper_name="${paper_name%.*}"
 paper_name="$(printf '%s' "$paper_name" | tr -cs '[:alnum:]_.-' '_' | sed 's/^_*//; s/_*$//')"
@@ -216,7 +238,7 @@ if [[ ! -s "$output/preprocessing/paper.md" || ! -d "$output/preprocessing/artif
         MODELSCOPE_CACHE="$MODEL_CACHE/modelscope" \
         MINERU_MODEL_SOURCE=local \
         MINERU_TOOLS_CONFIG_JSON="$MODEL_CONFIG" \
-        mineru -p "$paper" -o "$host_mineru_output"
+        "$MINERU_VENV/bin/mineru" -p "$paper" -o "$host_mineru_output"
 fi
 
 docker_args=(

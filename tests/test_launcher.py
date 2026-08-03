@@ -14,6 +14,7 @@ def prepare_launcher(tmp_path: Path) -> tuple[Path, dict[str, str], Path, Path]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     docker_log = tmp_path / "docker.log"
+    docker_log.write_text("", encoding="utf-8")
     model_cache = tmp_path / "model-cache"
     fake_docker = fake_bin / "docker"
     fake_docker.write_text(
@@ -60,11 +61,33 @@ printf '# Paper\\n' > "$output/paper/auto/paper.md"
     )
     fake_mineru.chmod(0o755)
 
+    fake_python = fake_bin / "python3"
+    fake_python.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "-m" && "${2:-}" == "venv" ]]; then
+    venv="$3"
+    mkdir -p "$venv/bin"
+    cp "$0" "$venv/bin/python"
+    cp "$MEDAI_TEST_FAKE_MINERU" "$venv/bin/mineru"
+    cp "$MEDAI_TEST_FAKE_MODELS_DOWNLOAD" "$venv/bin/mineru-models-download"
+elif [[ "${1:-}" == "-m" && "${2:-}" == "pip" ]]; then
+    printf 'pip %s\\n' "$*" >> "$MEDAI_TEST_DOCKER_LOG"
+else
+    exit 2
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
     env = os.environ.copy()
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["MEDAI_MODEL_CACHE"] = str(model_cache)
     env["MEDAI_TEST_DOCKER_LOG"] = str(docker_log)
     env["MEDAI_TEST_MODEL_CACHE"] = str(model_cache)
+    env["MEDAI_TEST_FAKE_MINERU"] = str(fake_mineru)
+    env["MEDAI_TEST_FAKE_MODELS_DOWNLOAD"] = str(fake_models_download)
     return launcher, env, docker_log, model_cache
 
 
@@ -82,10 +105,13 @@ def test_init_builds_image_and_initializes_reusable_models(tmp_path: Path):
 
     assert initialized.returncode == 0, initialized.stderr
     assert (model_cache / "mineru.json").is_file()
+    assert (model_cache / ".venv" / "bin" / "mineru").is_file()
     assert (model_cache / ".medai-image-id").read_text(encoding="utf-8").strip() == (
         "host-mineru:sha256:test-image"
     )
     init_calls = docker_log.read_text(encoding="utf-8")
+    assert "pip -m pip install" in init_calls
+    assert f"{tmp_path}[pdf]" in init_calls
     assert "build --platform linux/amd64" in init_calls
     assert "models-download --source auto --model_type all" in init_calls
 

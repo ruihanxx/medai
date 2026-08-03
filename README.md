@@ -5,22 +5,20 @@ The paper, optional repository, and optional local data are mounted read-only.
 Each run writes to a unique directory under the repository-root `runs/`
 directory; only that run directory is writable in the container.
 
-Install MinerU in the host Python environment with the PyTorch build appropriate
-for the machine, then initialize the Docker image and host model cache once:
-
-```bash
-python3 -m pip install "mineru[pipeline]>=3,<4"
-```
+Initialize the Docker image and host MinerU environment once:
 
 ```bash
 ./medai init
 ```
 
-`mineru` and `mineru-models-download` must be available on `PATH`. PDF parsing
-runs natively on the host and inherits MinerU's automatic CUDA, MPS, or CPU
-device selection. Models are persisted outside disposable run containers and
-reused for every paper. To resume an interrupted run, repeat the same inputs
-and configuration and pass its existing run directory with `--output`:
+Initialization creates a dedicated Python environment under the model cache,
+installs the `pdf` extra, and downloads the models. It uses `python3` by default;
+`MEDAI_MINERU_PYTHON` may select another native host Python interpreter. PDF
+parsing runs natively on the host and inherits MinerU's automatic CUDA, MPS, or
+CPU device selection. Models and the Python environment are persisted outside
+disposable run containers and reused for every paper. To resume an interrupted
+run, repeat the same inputs and configuration and pass its existing run
+directory with `--output`:
 
 ```bash
 ./medai \
