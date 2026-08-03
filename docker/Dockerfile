@@ -6,6 +6,24 @@ USER root
 WORKDIR /opt/medai
 ARG MEDAI_PYPI_INDEX=https://pypi.org/simple
 
+# Keep the common full-scale R analysis stack out of individual run directories.
+# The exact versions match the first R/DuckDB replication environment; serial
+# compilation prevents the amd64 Docker VM from exhausting memory on macOS.
+RUN MAKEFLAGS=-j1 R --vanilla --slave -e '\
+    options(repos = c(CRAN = "https://cloud.r-project.org")); \
+    install <- function(package, version) { \
+        remotes::install_version( \
+            package, version = version, upgrade = "never", dependencies = NA \
+        ); \
+        if (as.character(utils::packageVersion(package)) != version) { \
+            stop("Unexpected version for ", package); \
+        } \
+    }; \
+    install("duckdb", "1.5.5"); \
+    install("mice", "3.19.0"); \
+    install("rms", "8.1-1"); \
+    install("comorbidity", "1.1.0")'
+
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY templates ./templates

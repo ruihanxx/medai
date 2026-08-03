@@ -46,6 +46,9 @@ The local `medai:local` image is a thin overlay on the canonical Veritas image
 `VERITAS_IMAGE`). It reuses the Veritas CUDA and scientific runtime while
 installing MedAI into an isolated `/opt/medai/.venv` and replacing only the
 container entrypoint. The Veritas image and its `/app/.venv` remain unchanged.
+The overlay also installs a shared, version-pinned R analysis layer:
+`duckdb 1.5.5`, `mice 3.19.0`, `rms 8.1-1`, and `comorbidity 1.1.0`.
+This layer is built once during `medai init` rather than compiled in each run.
 The `VERITAS_PLATFORM` build argument and host launcher both default to
 `linux/amd64`, matching the platform published by Veritas and used by the
 Desktop Veritas launcher; `MEDAI_DOCKER_PLATFORM` may override the host Docker
