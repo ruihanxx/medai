@@ -1,9 +1,10 @@
 # medai
 
-`medai` runs an evidence-bound medical-paper replication workflow in Docker.
-The paper, optional repository, and optional local data are mounted read-only.
-Each run writes to a unique directory under the repository-root `runs/`
-directory; only that run directory is writable in the container.
+`medai` runs evidence-bound medical-paper replication and Auto Research
+workflows in Docker. Every invocation explicitly selects `--replicate` or
+`--autoresearch`. Replication mounts the paper, optional repository, and
+optional local data read-only; Auto Research operates on a completed local run
+without modifying its replication artifacts.
 
 Run MedAI from a source checkout because initialization builds its local Docker
 overlay from that checkout. Initialize the image, host MinerU environment, and
@@ -48,6 +49,7 @@ same inputs and configuration and pass its existing run directory with
 
 ```bash
 ./medai \
+  --replicate \
   --paper /absolute/path/paper.pdf \
   --repo /absolute/path/repository \
   --data /absolute/path/data \
@@ -58,6 +60,7 @@ On Windows, use the same arguments with `.\medai.cmd` instead of `./medai`.
 
 ```bash
 ./medai \
+  --replicate \
   --paper /absolute/path/paper.pdf \
   --repo /absolute/path/repository \
   --data /absolute/path/data \
@@ -70,6 +73,30 @@ a new attempt against its persisted artifacts; report generation also resumes
 after its last completed experiment. MedAI rejects resume when the paper,
 input paths, provider/model, reasoning effort, or smart-replication setting no
 longer matches the recorded run.
+
+To start or resume Auto Research from a completed replication run:
+
+```bash
+./medai \
+  --autoresearch \
+  --output runs/<run_id> \
+  --max-iter 1
+```
+
+Auto Research restores the base inputs and provider configuration, skips
+MinerU, and writes only below `runs/<run_id>/autoresearch/`. It creates three
+isolated refinement candidates per round and runs code generation, audit,
+planning, experimentation, and assessment for each candidate. A valid
+refinement ends the loop after the current round; otherwise it continues up to
+`--max-iter` (1-10). The base run must be completed and must describe a
+supervised prediction task. The runtime also requires
+`templates/skills/idea-generation/SKILL.md`; its absence is reported as an
+explicit preflight failure.
+
+Auto Research inherits the base provider, model, and reasoning effort unless
+explicitly overridden. A `codex-siliconflow` campaign must receive
+`--siliconflow-config` again because secrets are never restored from the base
+manifest.
 
 Supported providers are `claude`, `codex`, and `codex-siliconflow`. The latter
 also requires `--siliconflow-config /path/to/provider.env`.

@@ -369,6 +369,10 @@ class IdeaAssessment(StrictModel):
     @model_validator(mode="after")
     def valid_verdict_has_supported_improvement(self) -> "IdeaAssessment":
         supported = self.primary_metric is not None and self.primary_metric.improvement_supported
+        if (not self.audit_passed or not self.protocol_consistent) and self.verdict != "invalid":
+            raise ValueError(
+                "A failed audit or inconsistent protocol requires an invalid verdict"
+            )
         if self.verdict == "valid" and not (
             self.audit_passed and self.protocol_consistent and supported
         ):
@@ -378,6 +382,10 @@ class IdeaAssessment(StrictModel):
             )
         if self.verdict == "valid" and self.failure_reasons:
             raise ValueError("A valid refinement cannot list failure reasons")
+        if self.verdict != "valid" and not self.failure_reasons:
+            raise ValueError("A non-valid refinement must list failure reasons")
+        if self.verdict == "inconclusive" and supported:
+            raise ValueError("An inconclusive refinement cannot claim supported improvement")
         return self
 
 

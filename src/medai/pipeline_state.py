@@ -278,6 +278,7 @@ def _sha256(path: Path | None) -> str | None:
 def _base_artifact_fingerprint(base_run: Path) -> str:
     required_files = [
         "manifest.json",
+        "preflight/resources.json",
         "preprocessing/paper.md",
         "preprocessing/claims.json",
         "preprocessing/experiment_todo.json",
@@ -296,24 +297,61 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         digest.update(b"\0")
         _update_digest_from_file(digest, path)
 
-    codebase = base_run / "codegen" / "codebase"
-    if not codebase.is_dir():
-        raise ValueError(f"Base run codebase is missing: {codebase}")
     ignored_names = {
         ".git",
         ".venv",
+        ".cache",
+        ".hypothesis",
+        ".ipynb_checkpoints",
+        ".mypy_cache",
         "__pycache__",
         ".pytest_cache",
         ".ruff_cache",
     }
-    for path in sorted(codebase.rglob("*")):
-        relative = path.relative_to(codebase)
-        if any(part in ignored_names for part in relative.parts) or not path.is_file():
+    _update_digest_from_directory(
+        digest,
+        base_run,
+        Path("preprocessing/artifacts"),
+        set(),
+    )
+    _update_digest_from_directory(
+        digest,
+        base_run,
+        Path("codegen/codebase"),
+        ignored_names,
+    )
+    _update_digest_from_directory(
+        digest,
+        base_run,
+        Path("replication"),
+        ignored_names,
+    )
+    return digest.hexdigest()
+
+
+def _update_digest_from_directory(
+    digest: Any,
+    base_run: Path,
+    relative_directory: Path,
+    ignored_names: set[str],
+) -> None:
+    directory = base_run / relative_directory
+    if not directory.is_dir():
+        raise ValueError(f"Base run artifact directory is missing: {directory}")
+    digest.update(f"{relative_directory.as_posix()}/".encode("utf-8"))
+    digest.update(b"\0")
+    for path in sorted(directory.rglob("*")):
+        relative = path.relative_to(directory)
+        if (
+            any(part in ignored_names for part in relative.parts)
+            or path.suffix in {".pyc", ".pyo"}
+            or not path.is_file()
+        ):
             continue
-        digest.update(f"codegen/codebase/{relative.as_posix()}".encode("utf-8"))
+        artifact_path = relative_directory / relative
+        digest.update(artifact_path.as_posix().encode("utf-8"))
         digest.update(b"\0")
         _update_digest_from_file(digest, path)
-    return digest.hexdigest()
 
 
 def _update_digest_from_file(digest: Any, path: Path) -> None:

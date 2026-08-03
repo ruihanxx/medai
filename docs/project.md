@@ -27,19 +27,32 @@ model downloads are reused.
 Normal `./medai` runs never build an image or download models. They require the
 current image ID and host model cache to match the last successful
 initialization and fail with an instruction to run `./medai init` when either
-is missing or stale. Before starting a run whose PDF stage is incomplete, the
-launcher invokes the host `mineru` command and mounts its temporary output
+is missing or stale. Every run selects exactly one of `--replicate` and
+`--autoresearch`. Before starting a replicate run whose PDF stage is incomplete,
+the launcher invokes the host `mineru` command and mounts its temporary output
 read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
 sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
-`MEDAI_MINERU_BACKEND` may override it. A normal run requires
-`--paper` and `--provider`; `--repo` and `--data` are optional.
+`MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper` and
+`--provider`; `--repo` and `--data` are optional. Auto Research requires
+`--output runs/<run_id>`, accepts `--max-iter` from 1 through 10 (default 1),
+and rejects `--paper`, `--repo`, `--data`, and `--smart-replicate`.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. A new invocation creates a unique run directory under the
 repository-root `runs/` directory, named from its UTC start time and paper
 filename. Passing `--output runs/<run_id>` mounts that existing directory and
-resumes it. The selected run directory is the only writable host path mounted
-into the container.
+resumes it.
+
+Auto Research restores paper, repository, and data locations from the base
+manifest, skips MinerU, and requires the base run to be completed with all seven
+canonical replicate stages reloadable. The launcher mounts the base run
+read-only at `/workspace/base-run`, mounts only its `autoresearch/` child
+writable at `/workspace/autoresearch`, and remounts the recorded source data
+read-only. A missing source data path is an explicit error. The campaign
+inherits the base provider, model, and reasoning effort unless a CLI value
+overrides that field. `codex-siliconflow` still requires a newly supplied secret
+configuration. Initial implementation permits one campaign per base run;
+reusing it requires the same base fingerprint and resolved configuration.
 
 The local `medai:local` image is a thin overlay on the canonical Veritas image
 `ghcr.io/chicagohai/veritas:latest` (configurable with the Docker build argument
@@ -115,6 +128,50 @@ from the valid ordered prefix in its step log; report generation checkpoints
 every completed experiment. A completed run is therefore safe to invoke again
 and becomes a validation-only no-op.
 
+### Auto Research workflow
+
+Auto Research has its own manifest, checkpoints, and dynamic stages below the
+base run. Preflight records hardware resources and fingerprints the canonical
+base artifacts and codebase. It also requires
+`templates/skills/idea-generation/SKILL.md`; this repository contract does not
+provide that skill, so absence fails before agent execution. A separate
+eligibility agent admits only supervised machine-learning tasks with a defined
+prediction target. An ineligible campaign writes its decision, records status
+`ineligible`, and stops.
+
+Each round generates exactly three ideas. Every idea has Description,
+Motivation, and Provenance and receives an independent copy of the completed
+replicate codebase. The copies exclude Git metadata, virtual environments, and
+caches; changes never accumulate across ideas or flow back to the base run.
+Each idea then proceeds sequentially through codegen, audit, plan, experiment,
+and assessment. Codegen preserves the original baseline and writes a structured
+implementation plan. An independent audit checks exactly four anchors: task and
+prediction target, dataset/cohort/input-output definitions, metrics and
+protocol, and baseline preservation. One failed audit permits one repair and
+re-audit; a second failure deterministically creates an invalid assessment and
+skips plan and experiment.
+
+The Auto Research plan reuses `ReplicationPlan` without replicate claim-coverage
+validation. Experiment reuses `ReplicationLog` and `EvidenceSummary`, executes
+only the refinement, and compares against baseline evidence from the base run.
+Assessment is `valid`, `invalid`, or `inconclusive`. When uncertainty is
+available, improvement must exceed the recorded noise threshold; without base
+uncertainty, any numeric improvement in the declared metric direction can be
+valid. The program derives each round summary from the three assessments. All
+three ideas finish before routing: any valid idea ends iteration, otherwise a
+new round begins until `max_iter` is reached. Later rounds receive the prior
+ideas, audit/assessment verdicts, and failure-reason paths.
+
+Dynamic stages are named `round_001.idea_01.<stage>`. Completed stages are
+skipped only after their artifacts reload and validate; retries retain provider
+transcripts. The campaign manifest records the base fingerprint, resolved
+provider configuration, maximum iterations, attempts, checkpoints, and one of
+`running`, `completed`, `failed`, or `ineligible`. Final reporting includes
+every candidate, including skipped, failed, and inconclusive ideas. Multiple
+valid ideas are shown side by side without ranking, merging, or modifying the
+base codebase. Two deterministic PNGs show baseline/refinement metrics and the
+round-by-idea verdict grid, with missing results displayed as N/A.
+
 ## Persistent artifacts
 
 ```text
@@ -138,6 +195,32 @@ runs/<run_id>/
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
 ├── system_maintenance/dataset/patch.json
+└── remote_compute/instance.json
+```
+
+Auto Research adds this isolated subtree to a completed base run:
+
+```text
+runs/<run_id>/autoresearch/
+├── manifest.json
+├── preflight/resources.json
+├── eligibility/eligibility.json
+├── rounds/round_001/
+│   ├── ideas.md
+│   ├── idea_generation_transcript.jsonl
+│   ├── ideas/idea_01/
+│   │   ├── codegen/codebase/
+│   │   ├── codegen/implementation_plan.json
+│   │   ├── audit/audit.json
+│   │   ├── plan/experiment_plan.json
+│   │   ├── experiment/experiment_log.json
+│   │   ├── experiment/evidence_summary.json
+│   │   └── assessment/assessment.json
+│   └── round_summary.json
+├── report/auto_research_report.md
+├── report/idea_metric_comparison.png
+├── report/idea_status_overview.png
+├── prompts/
 └── remote_compute/instance.json
 ```
 
@@ -166,8 +249,9 @@ automatically.
 
 ## Agent boundaries
 
-- Source prompts live under `templates/<stage>/`; runtime skills live under
-  `templates/skills/`. Neither is stored under `src/`.
+- Replicate prompts live under `templates/<stage>/`; Auto Research prompts live
+  under `templates/autoresearch/<stage>/`; runtime skills live under
+  `templates/skills/`. None is stored under `src/`.
 - Prompts are rendered with Jinja2 and saved before invocation.
 - Each agent invocation's provider event stream is preserved as a JSONL
   transcript beside that stage's artifacts. Before a retried invocation, an

@@ -37,10 +37,9 @@ def generate_autoresearch_visualizations(
             color=["#6c757d", "#2878b5"],
         )
         axis.bar_label(bars, fmt="%.4g", padding=3)
-        direction = "+" if metric.improvement_supported else ""
         axis.set_title(
             f"{assessment.idea_id} · {metric.name}\n"
-            f"{direction}{metric.absolute_delta:.4g} · {assessment.verdict}"
+            f"Δ(refined-baseline)={metric.absolute_delta:.4g} · {assessment.verdict}"
         )
         axis.grid(axis="y", alpha=0.25)
     for axis in flat_axes[len(assessments) :]:

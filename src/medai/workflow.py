@@ -64,6 +64,16 @@ def resolve_replication_output(
     raw_path = Path(value).expanduser()
     if raw_path.is_absolute():
         candidates = [raw_path]
+        for marker, destination in (
+            (("codegen", "codebase"), codebase_dir),
+            (("replication",), replication_dir),
+        ):
+            for index in range(len(raw_path.parts) - len(marker) + 1):
+                if tuple(raw_path.parts[index : index + len(marker)]) == marker:
+                    candidates.append(
+                        destination.joinpath(*raw_path.parts[index + len(marker) :])
+                    )
+                    break
     else:
         candidates = [codebase_dir / raw_path, replication_dir / raw_path]
         if raw_path.parts and raw_path.parts[0] == "replication":

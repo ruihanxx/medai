@@ -302,6 +302,8 @@ def test_replication_outputs_stay_inside_run_roots(tmp_path: Path):
     evidence.write_text("{}\n", encoding="utf-8")
 
     assert resolve_replication_output("E1/metrics.json", codebase, replication) == evidence
+    previous_mount = tmp_path / "old-mount" / "replication" / "E1" / "metrics.json"
+    assert resolve_replication_output(str(previous_mount), codebase, replication) == evidence
     outside = tmp_path / "outside.json"
     outside.write_text("{}\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="inside the copied codebase"):

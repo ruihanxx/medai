@@ -307,3 +307,21 @@ def test_autoresearch_artifacts_enforce_anchor_and_improvement_contracts():
                 },
             }
         )
+
+    with pytest.raises(ValueError, match="failed audit"):
+        IdeaAssessment.model_validate(
+            {
+                **assessment.model_dump(mode="json"),
+                "verdict": "inconclusive",
+                "audit_passed": False,
+                "failure_reasons": ["Audit failed."],
+            }
+        )
+    with pytest.raises(ValueError, match="must list failure reasons"):
+        IdeaAssessment.model_validate(
+            {
+                **assessment.model_dump(mode="json"),
+                "verdict": "invalid",
+                "failure_reasons": [],
+            }
+        )

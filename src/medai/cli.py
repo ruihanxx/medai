@@ -104,7 +104,7 @@ def run(
                 base_run=resolved_base_run,
                 output=resolved_output,
                 provider=provider,
-                max_iter=max_iter or 1,
+                max_iter=1 if max_iter is None else max_iter,
                 siliconflow_config=siliconflow_config,
                 codex_model=codex_model,
                 codex_reasoning_effort=codex_reasoning_effort,

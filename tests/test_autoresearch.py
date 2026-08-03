@@ -7,24 +7,31 @@ from medai.autoresearch import (
     REQUIRED_BASE_STAGES,
     autoresearch_preflight_node,
     create_autoresearch_workflow,
+    validate_ideas_document,
 )
 from medai.config import AutoResearchConfig
 from medai.pipeline_state import (
     PipelineState,
     build_autoresearch_inputs,
 )
+from medai.prompts import render_prompt
 
 
 def _prepare_base_run(tmp_path: Path) -> Path:
     base_run = tmp_path / "base"
     codebase = base_run / "codegen" / "codebase"
     codebase.mkdir(parents=True)
+    (base_run / "preflight").mkdir()
     (base_run / "preprocessing" / "artifacts").mkdir(parents=True)
     (base_run / "plan").mkdir()
     (base_run / "replication" / "E1").mkdir(parents=True)
     (base_run / "report").mkdir()
     (base_run / "preprocessing" / "paper.md").write_text(
         "# Predictive paper\n",
+        encoding="utf-8",
+    )
+    (base_run / "preflight" / "resources.json").write_text(
+        '{"cpu": {}, "memory": {}, "disk": {}, "gpus": []}\n',
         encoding="utf-8",
     )
     (base_run / "preprocessing" / "claims.json").write_text(
@@ -64,6 +71,8 @@ def _prepare_base_run(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (codebase / "baseline.py").write_text("print('baseline')\n", encoding="utf-8")
+    (codebase / ".cache").mkdir()
+    (codebase / ".cache" / "stale.bin").write_bytes(b"cache")
     (codebase / "metrics.json").write_text('{"accuracy": 0.8}\n', encoding="utf-8")
     (codebase / "figure.png").write_bytes(b"png")
     (codebase / "codegen_plan.json").write_text(
@@ -219,7 +228,7 @@ def _configure_fake_agents(
                 json.dumps(payload), encoding="utf-8"
             )
         elif template_name.endswith("idea_generation/session_instructions.md"):
-            text = f"# Round {context['round_index']}\n\n"
+            text = f"# Idea Generation Round {context['round_index']}\n\n"
             for current_id in context["idea_ids"]:
                 text += (
                     f"## {current_id}\n\n"
@@ -458,6 +467,7 @@ def test_autoresearch_completes_all_three_ideas_and_resumes(tmp_path: Path, monk
         assert (idea_dir / "codegen" / "codebase" / "refinement.txt").read_text() == (
             f"R01-I{idea_index:02d}"
         )
+        assert not (idea_dir / "codegen" / "codebase" / ".cache").exists()
     assert not (config.base_run / "codegen" / "codebase" / "refinement.txt").exists()
     assert (config.output / "report" / "idea_metric_comparison.png").read_bytes().startswith(
         b"\x89PNG"
@@ -471,6 +481,14 @@ def test_autoresearch_completes_all_three_ideas_and_resumes(tmp_path: Path, monk
     PipelineState(config.output).resume(build_autoresearch_inputs(config))
     create_autoresearch_workflow().invoke({"config": config})
     assert len(calls) == call_count
+
+    summary_path = config.output / "rounds" / "round_001" / "round_summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["ideas"][0]["reason"] = "tampered"
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    PipelineState(config.output).resume(build_autoresearch_inputs(config))
+    with pytest.raises(RuntimeError, match="does not match its canonical assessments"):
+        create_autoresearch_workflow().invoke({"config": config})
 
 
 def test_autoresearch_retries_rounds_and_skips_audit_failed_experiments(
@@ -506,6 +524,12 @@ def test_autoresearch_retries_rounds_and_skips_audit_failed_experiments(
     _, round_two_context = contexts[round_two_prompt]
     assert "round_001/ideas.md" in round_two_context["prior_rounds_json"]
     assert "round_001/round_summary.json" in round_two_context["prior_rounds_json"]
+    assert "round_001/ideas/idea_01/audit/audit.json" in (
+        round_two_context["prior_rounds_json"]
+    )
+    assert "round_001/ideas/idea_01/assessment/assessment.json" in (
+        round_two_context["prior_rounds_json"]
+    )
     assert PipelineState(config.output).state["status"] == "completed"
 
 
@@ -539,3 +563,145 @@ def test_autoresearch_ineligible_and_missing_skill_stop_before_ideas(
     monkeypatch.setattr("medai.autoresearch.skills_dir", lambda: second_root / "skills")
     with pytest.raises(RuntimeError, match="idea-generation skill is missing"):
         autoresearch_preflight_node({"config": second_config})
+
+
+def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
+    path = tmp_path / "artifact"
+    template_contexts = {
+        "eligibility": {
+            "base_manifest": path,
+            "paper_markdown": path,
+            "claims_path": path,
+            "experiments_path": path,
+            "codegen_plan_path": path,
+            "codebase_dir": path,
+            "replicate_plan_path": path,
+            "replication_log_path": path,
+            "evidence_summary_path": path,
+            "reproduction_report_path": path,
+            "eligibility_path": path,
+        },
+        "idea_generation": {
+            "paper_markdown": path,
+            "eligibility_path": path,
+            "reproduction_report_path": path,
+            "codebase_dir": path,
+            "idea_generation_skill": path,
+            "prior_rounds_json": "[]",
+            "round_index": 1,
+            "idea_ids": ["R01-I01", "R01-I02", "R01-I03"],
+            "ideas_path": path,
+        },
+        "codegen": {
+            "idea_id": "R01-I01",
+            "ideas_path": path,
+            "eligibility_path": path,
+            "base_codebase_dir": path,
+            "codebase_dir": path,
+            "data_dir": None,
+            "implementation_plan_path": path,
+            "repair_audit_path": None,
+        },
+        "audit": {
+            "idea_id": "R01-I01",
+            "eligibility_path": path,
+            "base_codebase_dir": path,
+            "codebase_dir": path,
+            "implementation_plan_path": path,
+            "audit_path": path,
+        },
+        "plan": {
+            "idea_id": "R01-I01",
+            "ideas_path": path,
+            "eligibility_path": path,
+            "implementation_plan_path": path,
+            "audit_path": path,
+            "codebase_dir": path,
+            "base_replication_log": path,
+            "experiment_plan_path": path,
+            "computation_provider_state_path": path,
+        },
+        "experiment": {
+            "idea_id": "R01-I01",
+            "experiment_plan_path": path,
+            "implementation_plan_path": path,
+            "audit_path": path,
+            "codebase_dir": path,
+            "data_dir": None,
+            "base_replication_log": path,
+            "base_evidence_summary": path,
+            "computation_provider_state_path": path,
+            "experiment_log_path": path,
+            "evidence_summary_path": path,
+            "experiment_dir": path,
+        },
+        "assessment": {
+            "idea_id": "R01-I01",
+            "ideas_path": path,
+            "eligibility_path": path,
+            "implementation_plan_path": path,
+            "audit_path": path,
+            "experiment_plan_path": path,
+            "experiment_log_path": path,
+            "evidence_summary_path": path,
+            "base_replication_log": path,
+            "base_evidence_summary": path,
+            "base_reproduction_report": path,
+            "base_codebase_dir": path,
+            "base_replication_dir": path,
+            "assessment_path": path,
+        },
+        "report": {
+            "eligibility_path": path,
+            "base_reproduction_report": path,
+            "rounds_json": "[]",
+            "metric_visualization_path": path,
+            "status_visualization_path": path,
+            "report_path": path,
+        },
+    }
+
+    for name, context in template_contexts.items():
+        rendered = render_prompt(
+            f"autoresearch/{name}/session_instructions.md",
+            tmp_path / f"{name}.md",
+            **context,
+        )
+        assert rendered.is_file()
+
+
+def test_idea_document_rejects_additional_ideas_or_sections():
+    valid = "# Idea Generation Round 1\n\n"
+    for idea_id in ("R01-I01", "R01-I02", "R01-I03"):
+        valid += (
+            f"## {idea_id}\n\n"
+            "### Description\nrefinement\n\n"
+            "### Motivation\nobservation\n\n"
+            "### Provenance\npaper\n\n"
+        )
+    validate_ideas_document(valid, 1)
+
+    with pytest.raises(ValueError, match="exactly these ideas"):
+        validate_ideas_document(valid + "## Extra\n", 1)
+    with pytest.raises(ValueError, match="exactly Description"):
+        validate_ideas_document(
+            valid.replace("### Provenance\npaper", "### Extra\nextra\n\n### Provenance\npaper", 1),
+            1,
+        )
+
+
+def test_base_fingerprint_includes_paper_artifacts(tmp_path: Path):
+    base_run = _prepare_base_run(tmp_path)
+    config = AutoResearchConfig.create(
+        base_run=base_run,
+        output=base_run / "autoresearch",
+        provider=None,
+        siliconflow_config=None,
+    )
+    before = build_autoresearch_inputs(config)["base_artifact_fingerprint"]
+    (base_run / "preprocessing" / "artifacts" / "table.csv").write_text(
+        "metric,value\naccuracy,0.8\n",
+        encoding="utf-8",
+    )
+    after = build_autoresearch_inputs(config)["base_artifact_fingerprint"]
+    assert after != before

@@ -35,7 +35,7 @@ from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.providers import run_agent
 from medai.resources import detect_resources
-from medai.workflow import skills_dir
+from medai.workflow import resolve_replication_output, skills_dir
 
 REQUIRED_BASE_STAGES = (
     "preflight",
@@ -67,41 +67,51 @@ def expected_idea_ids(round_index: int) -> list[str]:
 
 
 def validate_ideas_document(text: str, round_index: int) -> None:
-    matches = list(re.finditer(r"(?m)^## (R\d{2}-I\d{2})\s*$", text))
-    actual_ids = [match.group(1) for match in matches]
     expected_ids = expected_idea_ids(round_index)
-    if actual_ids != expected_ids:
+    h1_headings = re.findall(r"(?m)^# ([^\r\n]+?)[ \t]*$", text)
+    expected_title = f"Idea Generation Round {round_index}"
+    if h1_headings != [expected_title]:
+        raise ValueError(f"Idea document must use title: # {expected_title}")
+    level_two_headings = re.findall(r"(?m)^## ([^\r\n]+?)[ \t]*$", text)
+    if level_two_headings != expected_ids:
         raise ValueError(
             f"Idea document must contain exactly these ideas in order: {expected_ids}"
         )
+    matches = list(re.finditer(r"(?m)^## (R\d{2}-I\d{2})[ \t]*$", text))
+    expected_sections = ["Description", "Motivation", "Provenance"]
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         section = text[match.end() : end]
-        for heading in ("Description", "Motivation", "Provenance"):
-            heading_matches = list(
-                re.finditer(rf"(?m)^### {re.escape(heading)}\s*$", section)
+        section_matches = list(re.finditer(r"(?m)^### ([^\r\n]+?)[ \t]*$", section))
+        actual_sections = [heading.group(1) for heading in section_matches]
+        if actual_sections != expected_sections:
+            raise ValueError(
+                f"{match.group(1)} must contain exactly Description, Motivation, "
+                "and Provenance in order"
             )
-            if len(heading_matches) != 1:
-                raise ValueError(f"{match.group(1)} must contain exactly one {heading} section")
-            body_start = heading_matches[0].end()
-            next_heading = re.search(r"(?m)^### ", section[body_start:])
-            body_end = body_start + next_heading.start() if next_heading else len(section)
+        for heading_index, heading_match in enumerate(section_matches):
+            body_start = heading_match.end()
+            body_end = (
+                section_matches[heading_index + 1].start()
+                if heading_index + 1 < len(section_matches)
+                else len(section)
+            )
             if not section[body_start:body_end].strip():
-                raise ValueError(f"{match.group(1)} has an empty {heading} section")
+                raise ValueError(
+                    f"{match.group(1)} has an empty {heading_match.group(1)} section"
+                )
 
 
 def validate_autoresearch_report(report_text: str, idea_ids: list[str]) -> None:
-    invalid_sections = [
-        section for section in AUTORESEARCH_REPORT_SECTIONS if report_text.count(section) != 1
-    ]
-    if invalid_sections:
+    h1_headings = re.findall(r"(?m)^# ([^\r\n]+?)[ \t]*$", report_text)
+    if h1_headings != ["Auto Research Report"]:
+        raise ValueError("Auto Research report must use title: # Auto Research Report")
+    actual_sections = re.findall(r"(?m)^## ([^\r\n]+?)[ \t]*$", report_text)
+    expected_sections = [section.removeprefix("## ") for section in AUTORESEARCH_REPORT_SECTIONS]
+    if actual_sections != expected_sections:
         raise ValueError(
-            "Auto Research report must contain exactly one of every required section: "
-            f"{invalid_sections}"
+            "Auto Research report must contain exactly the required sections in order"
         )
-    positions = [report_text.index(section) for section in AUTORESEARCH_REPORT_SECTIONS]
-    if positions != sorted(positions):
-        raise ValueError("Auto Research report sections are out of order")
     for idea_id in idea_ids:
         if not re.search(
             rf"(?<![A-Za-z0-9_.-]){re.escape(idea_id)}(?![A-Za-z0-9_.-])",
@@ -121,6 +131,43 @@ def _idea_dir(config: AutoResearchConfig, round_index: int, idea_index: int) -> 
     return _round_dir(config, round_index) / "ideas" / f"idea_{idea_index:02d}"
 
 
+def _round_artifact_context(
+    config: AutoResearchConfig,
+    round_index: int,
+) -> dict[str, Any]:
+    summary = _load_validated_round_summary(config, round_index)
+    idea_artifacts = []
+    for idea_index, summary_idea in enumerate(summary.ideas, start=1):
+        idea_dir = _idea_dir(config, round_index, idea_index)
+        assessment_path = idea_dir / "assessment" / "assessment.json"
+        assessment = load_model(assessment_path, IdeaAssessment)
+        candidate_paths = {
+            "implementation_plan": idea_dir / "codegen" / "implementation_plan.json",
+            "audit": idea_dir / "audit" / "audit.json",
+            "experiment_plan": idea_dir / "plan" / "experiment_plan.json",
+            "experiment_log": idea_dir / "experiment" / "experiment_log.json",
+            "evidence_summary": idea_dir / "experiment" / "evidence_summary.json",
+        }
+        idea_artifacts.append(
+            {
+                "idea_id": summary_idea.idea_id,
+                "verdict": summary_idea.verdict,
+                "failure_reasons": assessment.failure_reasons,
+                "assessment": str(assessment_path),
+                **{
+                    name: str(path) if path.is_file() else None
+                    for name, path in candidate_paths.items()
+                },
+            }
+        )
+    return {
+        "round": round_index,
+        "ideas": str(_round_dir(config, round_index) / "ideas.md"),
+        "summary": str(_round_dir(config, round_index) / "round_summary.json"),
+        "idea_artifacts": idea_artifacts,
+    }
+
+
 def _stage_name(round_index: int, idea_index: int | None, stage: str) -> str:
     prefix = f"round_{round_index:03d}"
     if idea_index is not None:
@@ -137,6 +184,17 @@ def _validate_base_run(config: AutoResearchConfig) -> None:
     ]
     if incomplete:
         raise RuntimeError(f"Base replicate run has incomplete stages: {incomplete}")
+
+    resources_path = config.base_run / "preflight" / "resources.json"
+    try:
+        resources = json.loads(resources_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Base resource artifact is invalid: {resources_path}") from exc
+    if not isinstance(resources, dict) or not isinstance(resources.get("gpus"), list):
+        raise RuntimeError(f"Base resource artifact is invalid: {resources_path}")
+    paper_artifacts = config.base_run / "preprocessing" / "artifacts"
+    if not paper_artifacts.is_dir():
+        raise RuntimeError(f"Base paper artifacts directory is missing: {paper_artifacts}")
 
     claims = load_model(config.base_run / "preprocessing" / "claims.json", ClaimsFile)
     experiments = load_model(
@@ -158,6 +216,11 @@ def _validate_base_run(config: AutoResearchConfig) -> None:
         ReplicationLog,
     )
     validate_replication_log(replicate_plan, replication_log)
+    codebase_dir = config.base_run / "codegen" / "codebase"
+    replication_dir = config.base_run / "replication"
+    for outcome in replication_log.step_outcomes:
+        for output_file in outcome.output_files:
+            resolve_replication_output(output_file, codebase_dir, replication_dir)
     load_model(
         config.base_run / "replication" / "evidence_summary.json",
         EvidenceSummary,
@@ -311,11 +374,7 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
     pipeline_state.start_stage(stage_name)
     round_dir.mkdir(parents=True, exist_ok=True)
     prior_rounds = [
-        {
-            "ideas": str(_round_dir(config, prior) / "ideas.md"),
-            "summary": str(_round_dir(config, prior) / "round_summary.json"),
-        }
-        for prior in range(1, round_index)
+        _round_artifact_context(config, prior) for prior in range(1, round_index)
     ]
     prompt_path = render_prompt(
         "autoresearch/idea_generation/session_instructions.md",
@@ -357,9 +416,15 @@ def _copy_base_codebase(base_codebase: Path, idea_codebase: Path) -> None:
         ignore=shutil.ignore_patterns(
             ".git",
             ".venv",
+            ".cache",
+            ".hypothesis",
+            ".ipynb_checkpoints",
+            ".mypy_cache",
             "__pycache__",
             ".pytest_cache",
             ".ruff_cache",
+            "*.pyc",
+            "*.pyo",
             "runs",
             "autoresearch",
         ),
@@ -449,10 +514,24 @@ def _run_codegen(
 
 def _codebase_fingerprint(codebase_dir: Path) -> str:
     digest = hashlib.sha256()
-    ignored = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+    ignored = {
+        ".git",
+        ".venv",
+        ".cache",
+        ".hypothesis",
+        ".ipynb_checkpoints",
+        ".mypy_cache",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
     for path in sorted(codebase_dir.rglob("*")):
         relative = path.relative_to(codebase_dir)
-        if any(part in ignored for part in relative.parts) or not path.is_file():
+        if (
+            any(part in ignored for part in relative.parts)
+            or path.suffix in {".pyc", ".pyo"}
+            or not path.is_file()
+        ):
             continue
         digest.update(relative.as_posix().encode("utf-8"))
         digest.update(b"\0")
@@ -692,6 +771,50 @@ def _run_experiment(
     return log_path, evidence_path
 
 
+def _validate_assessment_evidence(
+    assessment: IdeaAssessment,
+    config: AutoResearchConfig,
+    round_index: int,
+    idea_index: int,
+) -> None:
+    if not assessment.evidence_paths:
+        raise RuntimeError(
+            f"Assessment must cite actual evidence files: {assessment.idea_id}"
+        )
+    idea_dir = _idea_dir(config, round_index, idea_index)
+    roots = [config.base_run.resolve(), idea_dir.resolve()]
+    relative_roots = [
+        idea_dir,
+        idea_dir / "codegen" / "codebase",
+        idea_dir / "experiment",
+        config.base_run,
+        config.base_run / "codegen" / "codebase",
+        config.base_run / "replication",
+    ]
+    for value in assessment.evidence_paths:
+        raw = Path(value).expanduser()
+        candidates = [raw] if raw.is_absolute() else [root / raw for root in relative_roots]
+        if raw.is_absolute():
+            for marker, destination in (
+                (("codegen", "codebase"), config.base_run / "codegen" / "codebase"),
+                (("replication",), config.base_run / "replication"),
+            ):
+                parts = raw.parts
+                for index in range(len(parts) - len(marker) + 1):
+                    if tuple(parts[index : index + len(marker)]) == marker:
+                        candidates.append(destination.joinpath(*parts[index + len(marker) :]))
+                        break
+        if not any(
+            candidate.resolve().is_file()
+            and any(candidate.resolve().is_relative_to(root) for root in roots)
+            for candidate in candidates
+        ):
+            raise RuntimeError(
+                "Assessment evidence must be an existing file inside the base run or "
+                f"idea artifacts: {value}"
+            )
+
+
 def _run_assessment(
     config: AutoResearchConfig,
     round_index: int,
@@ -713,6 +836,12 @@ def _run_assessment(
         assessment = load_model(assessment_path, IdeaAssessment)
         if assessment.idea_id != idea_id or not transcript_path.is_file():
             raise RuntimeError(f"Completed assessment artifacts are invalid for {idea_id}")
+        _validate_assessment_evidence(
+            assessment,
+            config,
+            round_index,
+            idea_index,
+        )
         print(f"resume {stage_name} stage: skipped (already completed)")
         return assessment_path
 
@@ -737,6 +866,8 @@ def _run_assessment(
         base_replication_log=config.base_run / "replication" / "replication_log.json",
         base_evidence_summary=config.base_run / "replication" / "evidence_summary.json",
         base_reproduction_report=config.base_run / "report" / "reproduction_report.md",
+        base_codebase_dir=config.base_run / "codegen" / "codebase",
+        base_replication_dir=config.base_run / "replication",
         assessment_path=assessment_path,
     )
     run_agent(
@@ -754,6 +885,12 @@ def _run_assessment(
     audit = load_model(audit_path, CodegenAudit)
     if assessment.audit_passed != (audit.verdict == "pass"):
         raise RuntimeError(f"Assessment audit status does not match codegen audit: {idea_id}")
+    _validate_assessment_evidence(
+        assessment,
+        config,
+        round_index,
+        idea_index,
+    )
     pipeline_state.complete_stage(
         stage_name,
         [str(assessment_path), str(transcript_path)],
@@ -875,25 +1012,24 @@ def _run_idea(
     )
 
 
-def _write_round_summary(
+def _canonical_assessment_paths(
     config: AutoResearchConfig,
+    round_index: int,
+) -> list[Path]:
+    return [
+        _idea_dir(config, round_index, idea_index)
+        / "assessment"
+        / "assessment.json"
+        for idea_index in range(1, 4)
+    ]
+
+
+def _build_round_summary(
     round_index: int,
     assessment_paths: list[Path],
 ) -> RoundSummary:
-    pipeline_state = PipelineState(config.output)
-    stage_name = _stage_name(round_index, None, "summary")
-    summary_path = _round_dir(config, round_index) / "round_summary.json"
-    if pipeline_state.is_stage_completed(stage_name):
-        summary = load_model(summary_path, RoundSummary)
-        for idea in summary.ideas:
-            load_model(Path(idea.assessment_path), IdeaAssessment)
-        print(f"resume {stage_name} stage: skipped (already completed)")
-        return summary
-
-    print(f"enter {stage_name} stage")
-    pipeline_state.start_stage(stage_name)
     assessments = [load_model(path, IdeaAssessment) for path in assessment_paths]
-    summary = RoundSummary(
+    return RoundSummary(
         round=round_index,
         ideas=[
             {
@@ -908,6 +1044,44 @@ def _write_round_summary(
             assessment.verdict == "valid" for assessment in assessments
         ),
     )
+
+
+def _load_validated_round_summary(
+    config: AutoResearchConfig,
+    round_index: int,
+) -> RoundSummary:
+    summary_path = _round_dir(config, round_index) / "round_summary.json"
+    summary = load_model(summary_path, RoundSummary)
+    expected = _build_round_summary(
+        round_index,
+        _canonical_assessment_paths(config, round_index),
+    )
+    if summary.model_dump(mode="json") != expected.model_dump(mode="json"):
+        raise RuntimeError(
+            f"Round summary does not match its canonical assessments: {summary_path}"
+        )
+    return summary
+
+
+def _write_round_summary(
+    config: AutoResearchConfig,
+    round_index: int,
+    assessment_paths: list[Path],
+) -> RoundSummary:
+    pipeline_state = PipelineState(config.output)
+    stage_name = _stage_name(round_index, None, "summary")
+    summary_path = _round_dir(config, round_index) / "round_summary.json"
+    canonical_paths = _canonical_assessment_paths(config, round_index)
+    if assessment_paths != canonical_paths:
+        raise RuntimeError("Round summary received non-canonical assessment paths")
+    if pipeline_state.is_stage_completed(stage_name):
+        summary = _load_validated_round_summary(config, round_index)
+        print(f"resume {stage_name} stage: skipped (already completed)")
+        return summary
+
+    print(f"enter {stage_name} stage")
+    pipeline_state.start_stage(stage_name)
+    summary = _build_round_summary(round_index, canonical_paths)
     write_json(summary_path, summary.model_dump(mode="json"))
     pipeline_state.complete_stage(
         stage_name,
@@ -936,7 +1110,7 @@ def _completed_rounds(config: AutoResearchConfig) -> list[RoundSummary]:
         path = _round_dir(config, round_index) / "round_summary.json"
         if not path.is_file():
             break
-        summaries.append(load_model(path, RoundSummary))
+        summaries.append(_load_validated_round_summary(config, round_index))
         if summaries[-1].has_valid_refinement:
             break
     if not summaries:
@@ -989,15 +1163,7 @@ def autoresearch_report_node(state: AutoResearchState) -> dict[str, str]:
         eligibility_path=config.output / "eligibility" / "eligibility.json",
         base_reproduction_report=config.base_run / "report" / "reproduction_report.md",
         rounds_json=json.dumps(
-            [
-                {
-                    "ideas": str(_round_dir(config, summary.round) / "ideas.md"),
-                    "summary": str(
-                        _round_dir(config, summary.round) / "round_summary.json"
-                    ),
-                }
-                for summary in summaries
-            ],
+            [_round_artifact_context(config, summary.round) for summary in summaries],
             ensure_ascii=False,
             indent=2,
         ),

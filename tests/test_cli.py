@@ -283,6 +283,17 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
     assert config.codex_reasoning_effort == "high"
     assert config.data == data
 
+    override = AutoResearchConfig.create(
+        base_run=base_run,
+        output=base_run / "autoresearch",
+        provider="claude",
+        max_iter=1,
+        siliconflow_config=None,
+    )
+    assert override.provider == "claude"
+    assert override.codex_model is None
+    assert override.codex_reasoning_effort is None
+
     with pytest.raises(ValueError, match="between 1 and 10"):
         AutoResearchConfig.create(
             base_run=base_run,
@@ -291,3 +302,16 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
             max_iter=11,
             siliconflow_config=None,
         )
+
+    result = runner.invoke(
+        app,
+        [
+            "--autoresearch",
+            "--output",
+            str(base_run),
+            "--max-iter",
+            "0",
+        ],
+    )
+    assert result.exit_code == 1
+    assert "between 1 and 10" in result.stderr
