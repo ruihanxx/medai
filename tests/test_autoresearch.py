@@ -62,6 +62,7 @@ def _prepare_base_run(tmp_path: Path) -> Path:
                     {
                         "experiment_id": "E1",
                         "description": "Train and evaluate.",
+                        "computational_demand": "The experiment needs the paper's stated GPU and memory capacity.",
                         "claims": ["C1"],
                         "artifacts": ["Figure 1"],
                     }

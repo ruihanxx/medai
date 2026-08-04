@@ -51,6 +51,7 @@ def todo_payload():
             {
                 "experiment_id": "E1",
                 "description": "Train and evaluate the model.",
+                "computational_demand": "The experiment needs the paper's stated GPU and memory capacity.",
                 "claims": ["C1"],
                 "artifacts": ["Figure 1"],
             }
@@ -99,6 +100,14 @@ def test_claim_and_experiment_coverage_is_exact():
     todo.experiments[0].claims = ["C2"]
     with pytest.raises(ValueError, match="unknown claims"):
         validate_experiment_coverage(claims, todo)
+
+
+def test_experiment_requires_a_computational_demand():
+    payload = todo_payload()
+    del payload["experiments"][0]["computational_demand"]
+
+    with pytest.raises(ValueError, match="computational_demand"):
+        ExperimentTodo.model_validate(payload)
 
 
 def test_skill_correction_requires_reviewable_nonsecret_fields():

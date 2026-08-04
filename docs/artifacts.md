@@ -65,8 +65,9 @@ runs/<run_id>/autoresearch/
 
 Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
 record a `final` or `validation` role plus a verbatim provenance quote.
-Experiments have unique `experiment_id` values and list their claim IDs and
-paper artifact labels. The replication plan uses ordered steps whose
+Experiments have unique `experiment_id` values and list their claim IDs, paper
+artifact labels, and a one-sentence `computational_demand` inferred from the
+paper. The replication plan uses ordered steps whose
 `verifies` lists collectively cover those claim IDs and artifact labels. The
 replication log covers the plan steps in order, and every result-producing step
 names real output files or directories inside the copied codebase or replication

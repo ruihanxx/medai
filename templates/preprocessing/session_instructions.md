@@ -84,6 +84,8 @@ Read the paper (do not need to read images), identify all the experiments need t
 
 An 'experiment' refers to the entire end-to-end process from data preprocessing, model training to downstream task validation and comparative analysis. Training and downstream analysis should not be split into separate experiments. If the paper consists directly of statistical analysis on a dataset, divide it into 1–3 experiments based on the main claims in the abstract.
 
+For every experiment, infer its full-scale computational demand from the paper. Before writing it, search the paper Markdown case-insensitively for `nvidia`, `memory`, `gpu`, `cpu`, `GB`, and `rtx`. Record paper-stated processor, memory, GPU count/model/VRAM, and relevant workload scale when available; when a resource is not stated, make a conservative method- and scale-based inference and identify it as inferred. Do not leave this as `NA`.
+
 DO NOT extract:
 - Configuration values, hyperparameters, or method choices the authors *prescribe* for their own run (these are inputs to the replication, not results to verify). They will be encoded in the replication plan separately.
 - Background, motivation, or related-work claims.
@@ -101,6 +103,7 @@ Each experiment object has these fields:
 |---|---|---|
 | `experiment_id` | yes | Short identifier, e.g. `"E1"`, `"E2"`. Sequential. |
 | `description` | yes | One sentence: what the experiment is about. |
+| `computational_demand` | yes | One evidence-bound sentence describing the full-scale compute resources required for this experiment, including paper-stated hardware and clearly labelled inferences for omitted resources. |
 | `claims` | yes | the list of `claim_id` of all the claims extracted previously that is relevent to this experiment, including validation anchors. |
 | `artifacts` | yes | All the Figure/Table result of this experiment, including Figure/Table sources of validation anchors, e.g. `"Table 2"`, `"Figure 3"`. |
 

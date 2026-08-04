@@ -118,6 +118,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                             {
                                 "experiment_id": "E1",
                                 "description": "Train and evaluate.",
+                                "computational_demand": "The experiment needs the paper's stated GPU and memory capacity.",
                                 "claims": ["C1"],
                                 "artifacts": ["Figure 1"],
                             }
@@ -435,6 +436,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
                     {
                         "experiment_id": "E1",
                         "description": "Train and evaluate.",
+                        "computational_demand": "The experiment needs the paper's stated GPU and memory capacity.",
                         "claims": ["C1"],
                         "artifacts": ["Figure 1"],
                     }

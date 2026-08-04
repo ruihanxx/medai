@@ -40,6 +40,7 @@ class ClaimsFile(StrictModel):
 class Experiment(StrictModel):
     experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     description: str
+    computational_demand: str = Field(min_length=1)
     claims: list[str] = Field(min_length=1)
     artifacts: list[str]
 

@@ -4,6 +4,10 @@
   under `templates/autoresearch/<stage>/`; runtime skills live under
   `templates/skills/`. None is stored under `src/`.
 - Prompts are rendered with Jinja2 and saved before invocation.
+- The preprocessing agent records an evidence-bound, one-sentence
+  `computational_demand` for every extracted experiment. It searches the paper
+  for `nvidia`, `memory`, `gpu`, `cpu`, `GB`, and `rtx`, records paper-stated
+  resources, and labels method- and scale-based resource inferences.
 - The base preprocessing-audit prompt lives beside codegen at
   `templates/codegen/audit_session_instructions.md`; rendered prompts are saved
   per scientific attempt as `prompts/audit_attempt_<NNN>.md`.
