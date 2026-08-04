@@ -50,3 +50,8 @@
   closest compatible official image UUID; without stated versions, the
   configured default image UUID is used. The provider state records the
   selected non-secret GPU and image identifiers.
+- When a paper explicitly reports GPU hardware for its full experiment,
+  codegen treats its GPU count and per-GPU VRAM as a required capacity floor.
+  If local capacity is below that floor, codegen must use configured remote
+  compute; CPU feasibility or a smaller inferred workload does not permit a
+  CPU substitution.

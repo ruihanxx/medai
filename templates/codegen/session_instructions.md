@@ -70,7 +70,9 @@ do not memorize numerical results for hardcoding (see Self-Review).
 
 First choose the computational stack, then outline the file structure.
 
-**Match the paper's computational demands.** You can refer to the extracted experiment at `{{ experiments_path }}` for computational demands of each experiment. If it is recorded `"NA"`, you need to infer the computational demands from the paper. Implement in the language and framework the methodology genuinely needs, not whichever is fastest to write. If the method's scale depends on compiled or GPU performance — a large-N numerical simulation, an iterative sampling or optimization procedure with many steps, large-scale model training or inference — use tools that deliver it: GPU-enabled libraries (PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba), C/C++ extensions via the available gcc toolchain, or R for R-native methods — pure Python/NumPy on CPU is the easy default, but it is only correct when the paper's own scale doesn't need more. An implementation that is faithful on paper but cannot run at the paper's scale will fail the replication. 
+**Match the paper's computational demands.** You can refer to the extracted experiment at `{{ experiments_path }}` for computational demands of each experiment. If it is recorded `"NA"`, you need to infer the computational demands from the paper. Implement in the language and framework the methodology genuinely needs, not whichever is fastest to write. If the method's scale depends on compiled or GPU performance — a large-N numerical simulation, an iterative sampling or optimization procedure with many steps, large-scale model training or inference — use tools that deliver it: GPU-enabled libraries (PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba), C/C++ extensions via the available gcc toolchain, or R for R-native methods — pure Python/NumPy on CPU is the easy default, but it is only correct when the paper's own scale doesn't need more. An implementation that is faithful on paper but cannot run at the paper's scale will fail the replication.
+
+**Explicit paper GPU requirement.** When the paper explicitly reports GPU hardware used for its full experiment, treat its GPU count and per-GPU VRAM as a required capacity floor, even if the paper does not call GPU execution “mandatory.” If the paper gives a model but omits VRAM, obtain that model's VRAM from an authoritative manufacturer specification. A local GPU setup is sufficient only when it has at least the stated GPU count and per-GPU VRAM. If it does not, you must use the configured remote computation provider; CPU feasibility, a small final tabular cohort, or a smaller inferred workload are not substitutes for the paper-stated GPU capacity.
 {% if gpu_info %}
 
 **This environment has local GPU resources**: {{ gpu_info | tojson }}. Compare their
@@ -83,24 +85,25 @@ JAX) rather than implementing the GPU-dependent work on CPU.
 {% endif %}
 
 {% if computation_provider %}
-If the paper requires GPU resources that are unavailable or insufficient
-locally, use {{ computation_provider }} only through the GPU and image-selection
-procedure in `{{ skills_dir }}/computation_provider/SKILL.md`. It first verifies
-that the requested GPU is in the provider's supported pool; when the paper's
-exact GPU is absent, it selects the closest pool GPU whose VRAM is at least the
-paper requirement and records the divergence. For paper-stated software
-versions, select the closest official image UUID; otherwise use the configured
-default image UUID. After selecting the provider, read the provider reference
-required by that skill before performing any provider operation. Store the
-instance state at
+When the explicit paper GPU requirement above is not met locally, or other
+paper-required GPU resources are unavailable or insufficient locally, use
+{{ computation_provider }} only through the GPU and image-selection procedure
+in `{{ skills_dir }}/computation_provider/SKILL.md`. It first verifies that the
+requested GPU is in the provider's supported pool; when the paper's exact GPU
+is absent, it selects the closest pool GPU whose VRAM is at least the paper
+requirement and records the divergence. For paper-stated software versions,
+select the closest official image UUID; otherwise use the configured default
+image UUID. After selecting the provider, read the provider reference required
+by that skill before performing any provider operation. Store the instance state at
 `{{ computation_provider_state_path }}`
 and leave it running for the plan and replication stages. If no eligible
 resource or compatible image is available, stop explicitly. Do not rent weaker
 hardware or reduce the experiment scale.
 {% else %}
-If the paper requires GPU resources that are unavailable or insufficient
-locally, stop explicitly: no remote computation provider is configured. Do not
-reduce the experiment scale or silently substitute CPU execution.
+When the explicit paper GPU requirement above is not met locally, or other
+paper-required GPU resources are unavailable or insufficient locally, stop
+explicitly: no remote computation provider is configured. Do not reduce the
+experiment scale or silently substitute CPU execution.
 {% endif %}
 
 Before committing to a stack, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) to see actual CPU core count, RAM, and GPU VRAM — size your implementation to what is actually there instead of guessing capacity.
