@@ -116,6 +116,34 @@ When the paper uses specialized cohort, clinical, or methodological terms that c
 
 Do not skip, weaken, or obscure any requirement because of uncertainty. Record every non-direct mapping in the form of `"ambiguities"` in step 2.5.
 
+### 2.4. Resolve paper omissions before implementation
+
+Before writing `codegen_plan.json` or code, make a complete pass through the
+methodology to identify every implementation decision that the paper does not
+state directly. This includes, where applicable, clinical definitions and
+coding, eligibility and exclusion rules, index time and follow-up windows,
+outcome and censoring rules, missing-data handling, preprocessing, covariate
+selection, split/grouping units, model fitting, and statistical reporting.
+
+For each omission, resolve it before implementation; do not leave a TODO,
+silently apply a library default, or substitute an arbitrary generic default.
+Use this order of precedence:
+
+1. The paper's explicit methods and unambiguous context.
+2. The supplied dataset schema, metadata, and source-repository conventions,
+   when they are consistent with the paper.
+3. Widely accepted medical knowledge and standard medical-research methods
+   that fit the study design, population, outcome, and available data. For a
+   material or contested decision, consult an authoritative clinical guideline,
+   reporting guideline, or methodological reference rather than guessing.
+
+Implement the resulting choice exactly in code and configuration. Add one
+`ambiguities` record for each paper-underspecified decision: its `question`
+must state what the paper omitted, and its `assumption` must state the chosen
+medical or methodological convention, why it is the best fit, and where that
+choice is implemented. These records document the resolution; they are not
+permission to defer implementation or to invent paper-specific facts.
+
 Do not directly read large data files. First read the available document to get basic informations.
 
 If using a document during this run naturally reveals information that the document omitted, append an entry to `{{ dataset_patch_path }}`. This file is initialized as a JSON array, and every entry must have exactly this form:
@@ -154,8 +182,10 @@ your decisions so they are inspectable and machine-readable. Schema:
 
 The `ambiguities` field is the place to flag every point where the paper
 underspecifies methodology and you had to make a judgment call. List the
-question and the assumption you took. Downstream phases use this to
-distinguish "paper-underspecified" from "agent-misimplemented" outcomes.
+question and the resolved implementation assumption, including the applicable
+medical or medical-research convention and its code/configuration location.
+Downstream phases use this to distinguish "paper-underspecified" from
+"agent-misimplemented" outcomes.
 
 ### 3. Implement
 
@@ -255,9 +285,12 @@ If you find a paper-stated hyperparameter not in `config.yaml`, move it.
 
 Open `codegen_plan.json`. For each entry in `ambiguities`, confirm the
 chosen assumption is reflected in the code (typically a `config.yaml`
-value) and that the assumption was a reasonable best-guess given the
-paper. If, during implementation, you encountered an underspecification
-you didn't record, add it now. Future phases rely on this list.
+value), is fully executable rather than a TODO or library default, and is the
+most accurate fit under accepted medical knowledge and standard medical
+research methods for this study. Re-check that every methodology decision the
+paper omitted has an entry; if implementation revealed another
+underspecification, resolve it with the same hierarchy and add it now. Future
+phases rely on this list.
 
 #### g. Intermediate-anchor & selection-sanity audit
 

@@ -102,7 +102,10 @@ The LangGraph stages are:
    Figure/Table assets with captions and correcting image-verified LaTeX,
    then write text/numeric claims and experiment definitions.
 4. `codegen_agent`: inspect supplied data directly through bounded, read-only,
-   non-executing reads, compare local GPU capacity with the paper's full-scale
+   non-executing reads, identify every paper-underspecified implementation
+   decision before coding, resolve each using applicable medical knowledge and
+   standard medical-research methods, record the executable resolution as a
+   code-generation ambiguity, compare local GPU capacity with the paper's full-scale
    requirements, use the
    `computation-provider` skill to rent matching configured remote compute when
    needed, plan files, and write code.

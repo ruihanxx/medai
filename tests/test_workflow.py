@@ -550,6 +550,34 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert "autodl_instance.json" not in prompt
 
 
+def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path: Path):
+    prompt_path = render_prompt(
+        "codegen/session_instructions.md",
+        tmp_path / "codegen.md",
+        codebase_dir=tmp_path / "codebase",
+        paper_markdown=tmp_path / "paper.md",
+        claims_path=tmp_path / "claims.json",
+        experiments_path=tmp_path / "experiments.json",
+        data_dir=None,
+        skills_dir=Path("/skills"),
+        resources_path=tmp_path / "resources.json",
+        codegen_plan_path=tmp_path / "codegen_plan.json",
+        dataset_patch_path=tmp_path / "patch.json",
+        computation_provider_state_path=tmp_path / "instance.json",
+        gpu_info=[],
+        computation_provider=None,
+        resuming=False,
+    )
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+    resolution_heading = "### 2.4. Resolve paper omissions before implementation"
+    assert resolution_heading in prompt
+    assert prompt.index(resolution_heading) < prompt.index("### 2.5. Capture the plan to disk")
+    assert "Widely accepted medical knowledge and standard medical-research methods" in prompt
+    assert "do not leave a TODO,\nsilently apply a library default" in prompt
+    assert "where that\nchoice is implemented" in prompt
+
+
 def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     tmp_path: Path,
     monkeypatch,
