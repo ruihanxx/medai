@@ -105,4 +105,5 @@ For the `codex` provider, set `MEDAI_CODEX_MODEL` and
 `MEDAI_CODEX_REASONING_EFFORT` in `.env`, or override them with
 `--codex-model` and `--codex-reasoning-effort`.
 
-See [docs/project.md](docs/project.md) for the workflow and artifact contract.
+See the [documentation router](docs/README.md) for the relevant execution,
+workflow, artifact, agent-boundary, and acceptance contracts.
