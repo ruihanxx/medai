@@ -60,3 +60,5 @@
   creation operation must make the Codex agent exit nonzero. Before codegen
   completes, orchestration validates that the recorded instance is
   current-run-owned, unreleased, and has the required connection state.
+  The same nonzero-exit rule applies to every remote-server interaction that
+  remains unsuccessful after provider-reference-permitted bounded recovery.

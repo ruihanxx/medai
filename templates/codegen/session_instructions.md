@@ -112,6 +112,11 @@ CLI exit nonzero. Follow the selected provider reference for that operation's
 actual command. Do not catch or suppress that failure, choose another resource,
 fall back to CPU, or continue code generation, planning, or replication.
 
+More generally, if any remote-server interaction remains unsuccessful after the
+bounded retries or recovery explicitly allowed by the selected provider
+reference, immediately make the Codex agent CLI exit nonzero. Do not continue
+with local work or a later workflow phase.
+
 Before committing to a stack, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) to see actual CPU core count, RAM, and GPU VRAM — size your implementation to what is actually there instead of guessing capacity.
 
 Outline the file structure of your codebase before writing any code:
