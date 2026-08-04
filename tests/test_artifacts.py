@@ -178,6 +178,7 @@ def test_reproduction_report_requires_all_audit_content():
             "dependency_order": ["run.py"],
             "entry_points": ["run.py"],
             "shared_state": "Files",
+            "remote_compute": None,
             "ambiguities": [
                 {
                     "question": "The batch size is unspecified.",

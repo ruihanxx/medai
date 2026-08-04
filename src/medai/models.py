@@ -82,12 +82,20 @@ class DatasetPatchFile(RootModel[list[DatasetPatch]]):
     pass
 
 
+class RemoteComputePlan(StrictModel):
+    provider: Literal["autodl"]
+    state_path: str
+    remote_working_directory: str
+    setup_hints: list[str]
+
+
 class CodegenPlan(StrictModel):
     files: list[PlannedFile] = Field(min_length=1)
     dependency_order: list[str] = Field(min_length=1)
     entry_points: list[str] = Field(min_length=1)
     shared_state: str
     ambiguities: list[Ambiguity]
+    remote_compute: RemoteComputePlan | None
 
 
 class PlanEnvironment(StrictModel):
@@ -102,13 +110,6 @@ class ReplicationStep(StrictModel):
     command_hint: str
     expected_outcome: str
     verifies: list[str]
-
-
-class RemoteComputePlan(StrictModel):
-    provider: Literal["autodl"]
-    state_path: str
-    remote_working_directory: str
-    setup_hints: list[str]
 
 
 class ReplicationPlan(StrictModel):

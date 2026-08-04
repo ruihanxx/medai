@@ -180,22 +180,33 @@ def read_audit_verdict(report_path: Path) -> str:
     return lines[-1].removeprefix("Verdict: ")
 
 
-def raise_if_remote_creation_failed(state_path: Path) -> None:
-    failure_path = state_path.with_name("creation_failure.json")
-    if not failure_path.is_file():
+def validate_codegen_remote_compute(plan: CodegenPlan, state_path: Path) -> None:
+    remote_compute = plan.remote_compute
+    if remote_compute is None:
         return
+    if Path(remote_compute.state_path).resolve() != state_path.resolve():
+        raise RuntimeError(
+            "Codegen remote-compute state path does not match the current run: "
+            f"{remote_compute.state_path}"
+        )
     try:
-        failure = json.loads(failure_path.read_text(encoding="utf-8"))
+        instance = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(
-            f"Remote instance creation failure record is invalid: {failure_path}"
+            f"Codegen requires a valid remote instance state: {state_path}"
         ) from exc
-    if failure.get("provider") != "autodl" or failure.get("operation") != "create":
-        raise RuntimeError(f"Remote instance creation failure record is invalid: {failure_path}")
-    error = failure.get("error")
-    if not isinstance(error, str) or not error:
-        raise RuntimeError(f"Remote instance creation failure record is invalid: {failure_path}")
-    raise RuntimeError(f"Remote instance creation failed: {error}")
+    provider_state = instance.get("provider_state")
+    if (
+        instance.get("provider") != remote_compute.provider
+        or instance.get("created_by_run") is not True
+        or instance.get("released") is not False
+        or not isinstance(provider_state, dict)
+        or not all(
+            provider_state.get(name)
+            for name in ("instance_uuid", "gpu_spec_uuid", "gpu_count", "image_uuid")
+        )
+    ):
+        raise RuntimeError(f"Codegen remote instance state is invalid: {state_path}")
 
 
 def preflight_node(state: WorkflowState) -> dict[str, str]:
@@ -394,8 +405,6 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         print("resume codegen_agent stage: skipped (already completed)")
         return {"codebase_dir": str(codebase_dir)}
 
-    raise_if_remote_creation_failed(computation_provider_state_path)
-
     print("enter codegen stage")
     if audit_revision:
         pipeline_state.invalidate_stages(
@@ -469,8 +478,8 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    raise_if_remote_creation_failed(computation_provider_state_path)
-    load_model(codegen_plan_path, CodegenPlan)
+    codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+    validate_codegen_remote_compute(codegen_plan, computation_provider_state_path)
     load_model(dataset_patch_path, DatasetPatchFile)
     pipeline_state.complete_stage(
         "codegen_agent",

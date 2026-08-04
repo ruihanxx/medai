@@ -82,6 +82,7 @@ def _prepare_base_run(tmp_path: Path) -> Path:
                 "dependency_order": ["baseline.py"],
                 "entry_points": ["baseline.py"],
                 "shared_state": "metrics",
+                "remote_compute": None,
                 "ambiguities": [],
             }
         ),

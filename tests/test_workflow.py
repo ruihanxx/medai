@@ -4,33 +4,56 @@ from pathlib import Path
 import pytest
 
 from medai.config import RunConfig
+from medai.models import CodegenPlan
 from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.workflow import (
     create_workflow,
-    raise_if_remote_creation_failed,
     release_run_computation_instance,
     replicate_agent_node,
     resolve_replication_output,
+    validate_codegen_remote_compute,
 )
 
 
-def test_remote_creation_failure_stops_codegen(tmp_path: Path):
+def test_codegen_remote_compute_requires_current_instance_state(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
     state_path.parent.mkdir()
-    state_path.with_name("creation_failure.json").write_text(
+    plan = CodegenPlan.model_validate(
+        {
+            "files": [{"path": "run.py", "responsibility": "Run"}],
+            "dependency_order": ["run.py"],
+            "entry_points": ["run.py"],
+            "shared_state": "None",
+            "ambiguities": [],
+            "remote_compute": {
+                "provider": "autodl",
+                "state_path": str(state_path),
+                "remote_working_directory": "/root/autodl-tmp/run",
+                "setup_hints": ["Use AutoDL."],
+            },
+        }
+    )
+    with pytest.raises(RuntimeError, match="requires a valid remote instance state"):
+        validate_codegen_remote_compute(plan, state_path)
+
+    state_path.write_text(
         json.dumps(
             {
                 "provider": "autodl",
-                "operation": "create",
-                "error": "AutoDL HTTP 503: unavailable",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "pro-123",
+                    "gpu_spec_uuid": "v-48g",
+                    "gpu_count": 1,
+                    "image_uuid": "base-image-l2t43iu6uk",
+                },
             }
         ),
         encoding="utf-8",
     )
-
-    with pytest.raises(RuntimeError, match="Remote instance creation failed: AutoDL HTTP 503"):
-        raise_if_remote_creation_failed(state_path)
+    validate_codegen_remote_compute(plan, state_path)
 
 
 def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
@@ -111,6 +134,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                         "dependency_order": ["run.py"],
                         "entry_points": ["run.py"],
                         "shared_state": "Files",
+                        "remote_compute": None,
                         "ambiguities": [
                             {
                                 "question": "The batch size is unspecified.",

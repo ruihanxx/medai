@@ -21,6 +21,7 @@ def _write_codegen_plan(path: Path) -> None:
                 "dependency_order": ["run.py"],
                 "entry_points": ["run.py"],
                 "shared_state": "Files",
+                "remote_compute": None,
                 "ambiguities": [
                     {
                         "question": "Missing-value handling is unspecified.",

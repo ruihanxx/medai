@@ -390,9 +390,8 @@ durable backup.
 
 - **API or HTTP error:** Preserve the complete non-secret error, stop the current
   operation, and do not choose another resource or retry billable creation
-  blindly. A failed `create` writes `remote_compute/creation_failure.json`;
-  orchestration treats it as a terminal stage failure, so do not continue the
-  run locally or with another rental.
+  blindly. A failed `create` must make the invoking Codex agent exit nonzero;
+  do not continue the run locally or with another rental.
 - **Creation timeout:** The API may have created an instance before the script's
   ten-minute wait failed, but the current script writes state only after
   `running`. Inspect the AutoDL console immediately, identify the timestamped

@@ -1,4 +1,3 @@
-import json
 import os
 import subprocess
 import sys
@@ -76,9 +75,3 @@ def test_autodl_skill_rejects_gpu_outside_the_pro_pool_before_api_access(tmp_pat
     )
     assert completed.returncode != 0
     assert "Unsupported AutoDL Pro GPU specification" in completed.stderr
-    failure = json.loads(
-        (tmp_path / "creation_failure.json").read_text(encoding="utf-8")
-    )
-    assert failure["provider"] == "autodl"
-    assert failure["operation"] == "create"
-    assert "Unsupported AutoDL Pro GPU specification" in failure["error"]

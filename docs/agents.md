@@ -55,6 +55,8 @@
   If local capacity is below that floor, codegen must use configured remote
   compute; CPU feasibility or a smaller inferred workload does not permit a
   CPU substitution.
-- AutoDL creation errors write `remote_compute/creation_failure.json`. Codegen
-  checks this record before and after its agent invocation, raises the existing
-  stage failure path, and must not continue locally or with another rental.
+- When codegen requires remote compute, it records that decision and the exact
+  current-run state path in `codegen_plan.json`. A failed provider `create`
+  command must make the Codex agent exit nonzero; before codegen completes,
+  orchestration validates that the recorded instance is current-run-owned,
+  unreleased, and has the required connection state.

@@ -106,11 +106,10 @@ explicitly: no remote computation provider is configured. Do not reduce the
 experiment scale or silently substitute CPU execution.
 {% endif %}
 
-**Remote creation failures are terminal.** Run the provider's `create` command
-without suppressing its exit status. If it fails, do not choose another resource,
-fall back to CPU, or continue code generation, planning, or replication. The
-AutoDL script records the failure for orchestration; stop immediately so the
-existing stage-failure mechanism marks this run `failed` and performs cleanup.
+**Remote creation failures are terminal.** If remote compute is required, a
+failed provider `create` command must immediately make the Codex agent CLI exit
+nonzero. Do not catch or suppress that failure, choose another resource, fall
+back to CPU, or continue code generation, planning, or replication.
 
 Before committing to a stack, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) to see actual CPU core count, RAM, and GPU VRAM — size your implementation to what is actually there instead of guessing capacity.
 
@@ -198,6 +197,7 @@ your decisions so they are inspectable and machine-readable. Schema:
   "dependency_order": ["src/dataset.py", "src/model.py", "..."],
   "entry_points": ["main.py"],
   "shared_state": "What modules pass between them, e.g. 'Dataset returns (X, y) tuples consumed by trainer'.",
+  "remote_compute": null,
   "ambiguities": [
     {
       "question": "Paper says 'we use a small batch size' without naming a value.",
@@ -206,6 +206,12 @@ your decisions so they are inspectable and machine-readable. Schema:
   ]
 }
 ```
+
+If remote compute is required, `remote_compute` must instead contain its
+provider, the exact `{{ computation_provider_state_path }}`, remote working
+directory, and setup hints. Codegen validates that state before this stage can
+complete; a missing, released, foreign, or malformed instance state fails the
+run before the next agent starts.
 
 The `ambiguities` field is the place to flag every point where the paper
 underspecifies methodology and you had to make a judgment call. List the
