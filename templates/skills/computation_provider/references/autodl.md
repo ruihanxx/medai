@@ -42,7 +42,7 @@ settings and store configuration in the repository-root `.env`:
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `AUTODL_TOKEN` | Yes | Developer token sent in the API `Authorization` header. |
-| `AUTODL_IMAGE_UUID` | Yes | Existing private or public image UUID used to create the instance. |
+| `AUTODL_IMAGE_UUID` | Yes | Default private or public image UUID used when the paper has no explicit software versions. |
 | `AUTODL_API_BASE_URL` | No | API origin; the script defaults to `https://api.autodl.com`. |
 
 Do not print these values or copy them into prompts, transcripts, state files,
@@ -50,9 +50,11 @@ remote commands, logs, or result artifacts. The runtime must provide Python,
 OpenSSH client tools, and `sshpass` when the API returns a root password. The
 project Docker image already supplies these tools.
 
-The current script cannot list images. Select and validate the image UUID in the
-AutoDL console before the run, including framework, Python, CUDA, and disk
-requirements. Stop if a compatible image UUID cannot be confirmed.
+The current script cannot list images. `AUTODL_IMAGE_UUID` is the default image;
+pass `create --image-uuid <uuid>` only after the paper-version selection below.
+Select and validate an image UUID in the AutoDL console before the run, including
+framework, Python, CUDA, and disk requirements. Stop if a compatible image
+UUID cannot be confirmed.
 
 ## Choose a Machine Type
 
@@ -62,28 +64,91 @@ allocates CPU and RAM in proportion to GPU count, and the limits shown in its
 market are per GPU. Memory is a hard container limit; exceeding it can terminate
 the process rather than transparently spilling to disk.
 
-The Pro API documentation currently maps these GPU labels to `--gpu-spec` IDs:
+The Pro API documentation currently maps these GPU labels to `--gpu-spec` IDs.
+The listed capacity is per-GPU VRAM and is the capacity used for fallback
+selection:
 
-| AutoDL label | Pro API GPU specification ID |
-| --- | --- |
-| H800-80G | `h800` |
-| 4090-48G | `v-48g` |
-| PRO6000-96G | `pro6000-p` |
-| 4080(S)-32G | `v-32g-p` |
-| 3090-48G | `v-48g-350w` |
-| 5090-32G | `5090-p` |
-| 4090D | `4090D` |
+| AutoDL label | VRAM | Pro API GPU specification ID |
+| --- | --- | --- |
+| H800-80G | 80 GB | `h800` |
+| 4090-48G | 48 GB | `v-48g` |
+| PRO6000-96G | 96 GB | `pro6000-p` |
+| 4080(S)-32G | 32 GB | `v-32g-p` |
+| 3090-48G | 48 GB | `v-48g-350w` |
+| 5090-32G | 32 GB | `5090-p` |
+| 4090D | Not stated in the API appendix | `4090D` |
+
+Before *every* `create`, follow this selection procedure:
+
+1. Read the paper's GPU model, count, and VRAM. When the paper names a GPU but
+   not its VRAM, obtain the VRAM from the manufacturer's authoritative
+   specification; do not guess from a similarly named product.
+2. Check whether the exact model appears in the table. If it does, use its
+   corresponding ID. If it does not, exclude every pool GPU with unknown or
+   lower VRAM, then choose the closest remaining model: prefer the same vendor
+   and architecture/generation, then the smallest VRAM surplus. Record the
+   paper GPU, the selected pool GPU, their VRAM, and why it is the closest
+   eligible substitute in the plan and final report.
+3. Stop explicitly if no listed GPU has sufficient documented VRAM. Never use
+   `4090D` as a fallback while its VRAM is unstated; it may be used only when it
+   is the paper's exact model and its capacity is confirmed in the AutoDL
+   console.
+4. Pass only the selected table ID to `create --gpu-spec`. The script repeats
+   this pool-membership check and rejects every other value before any API call.
+5. After creation, use `nvidia-smi` to confirm the observed model, GPU count,
+   and VRAM before uploading data or starting the experiment.
 
 Recheck the official Pro API appendix before every rental because this mapping
 may change. The public Pro API does not expose a read-only endpoint for current
 rentable inventory. Confirm availability in the AutoDL market or console; do not
 use `create` as an availability probe because a successful call starts billing.
-If the exact required resource cannot be confirmed, stop explicitly.
+If the selected resource cannot be confirmed, stop explicitly.
 
 The Pro API accepts one to four GPUs per instance. Stop if the experiment needs
 more than four GPUs or another unsupported topology. Do not split the experiment
 across instances unless the paper and replication plan explicitly require a
 supported distributed topology.
+
+## Select an Image
+
+If the paper does not state framework, Python, CUDA, or other material software
+versions, use the configured default `AUTODL_IMAGE_UUID`. The project example
+defaults it to `base-image-l2t43iu6uk` (PyTorch 2.0.0, CUDA 11.8, Python 3.8).
+
+If the paper states material software versions, select an image from the
+official Pro API public-image appendix before creation. Prefer an exact match;
+otherwise choose the closest image with the same framework, then the nearest
+framework version, Python version, and CUDA version in that order. For a
+framework absent from the table, choose the closest Miniconda entry and install
+the paper-pinned framework afterwards. Do not silently use the default image
+when the paper states versions. Record the chosen image, the candidate
+environment, every mismatch, and the installation command that resolves it.
+
+| Framework | Public image UUID | Image environment |
+| --- | --- | --- |
+| PyTorch | `base-image-12be412037` | CUDA 11.1, cuDNN 8, Ubuntu 18.04, Python 3.8, PyTorch 1.9.0 |
+| PyTorch | `base-image-u9r24vthlk` | CUDA 11.3, cuDNN 8, Ubuntu 20.04, Python 3.8, PyTorch 1.10.0 |
+| PyTorch | `base-image-l374uiucui` | CUDA 11.3, cuDNN 8, Ubuntu 20.04, Python 3.8, PyTorch 1.11.0 |
+| PyTorch | `base-image-l2t43iu6uk` | CUDA 11.8, cuDNN 8, Ubuntu 20.04, Python 3.8, PyTorch 2.0.0 |
+| TensorFlow | `base-image-0gxqmciyth` | CUDA 11.2, cuDNN 8, Ubuntu 18.04, Python 3.8, TensorFlow 2.5.0 |
+| TensorFlow | `base-image-uxeklgirir` | CUDA 11.2, cuDNN 8, Ubuntu 20.04, Python 3.8, TensorFlow 2.9.0 |
+| TensorFlow | `base-image-4bpg0tt88l` | CUDA 11.4, Python 3.8, TensorFlow 1.15.5 |
+| Miniconda | `base-image-mbr2n4urrc` | CUDA 11.6, cuDNN 8, Ubuntu 20.04, Python 3.8 |
+| Miniconda | `base-image-qkkhitpik5` | CUDA 10.2, cuDNN 7, Ubuntu 18.04, Python 3.8 |
+| Miniconda | `base-image-h041hn36yt` | CUDA 11.1, cuDNN 8, Ubuntu 18.04, Python 3.8 |
+| Miniconda | `base-image-7bn8iqhkb5` | CUDA GL 11.3, cuDNN 8, Ubuntu 20.04, Python 3.8 |
+| Miniconda | `base-image-k0vep6kyq8` | CUDA 9.0, cuDNN 7, Ubuntu 16.04, Python 3.6 |
+| TensorRT | `base-image-l2843iu23k` | CUDA 11.8, cuDNN 8, Ubuntu 20.04, Python 3.8, TensorRT 8.5.1 |
+
+Pass an explicit selected image with:
+
+```bash
+python <skill-dir>/scripts/autodl.py create \
+  --gpu-spec <gpu-specification-id> \
+  --image-uuid <paper-selected-image-uuid> \
+  --gpu-count <count> \
+  --state <run-state-path>
+```
 
 ## Script and State Contract
 
@@ -105,18 +170,22 @@ After successful creation, the script writes:
   "created_by_run": true,
   "released": false,
   "provider_state": {
-    "instance_uuid": "<provider-instance-uuid>"
+    "instance_uuid": "<provider-instance-uuid>",
+    "gpu_spec_uuid": "<selected-pro-specification-id>",
+    "gpu_count": 1,
+    "image_uuid": "<selected-image-uuid>"
   }
 }
 ```
 
 The top-level fields form the generic orchestration envelope. The AutoDL script
-owns the exact `provider_state` format and requires `instance_uuid`. That UUID
-is sufficient for the script to fetch current SSH host, port, and password from
-the snapshot API immediately before each connection or transfer. Do not persist
-the returned password or Jupyter token. Record the selected GPU specification
-and count in the run's plan artifacts; do not hand-edit the provider,
-ownership, lifecycle, or provider-state fields.
+owns the exact `provider_state` format and requires `instance_uuid`. It also
+records the selected GPU specification/count and non-secret image UUID for
+auditability. The instance UUID is sufficient for the script to fetch current
+SSH host, port, and password from the snapshot API immediately before each
+connection or transfer. Do not persist the returned password or Jupyter token.
+Record the selection rationale in the plan artifacts; do not hand-edit the
+provider, ownership, lifecycle, or provider-state fields.
 
 The script uses these reviewed Pro API operations:
 
@@ -153,7 +222,8 @@ The current script:
 - lets AutoDL choose the data center;
 - requests no system-disk expansion;
 - requires a host driver compatible with CUDA 11.8 or newer;
-- uses `AUTODL_IMAGE_UUID` and a timestamped `medai-` instance name;
+- uses `--image-uuid` when supplied, otherwise `AUTODL_IMAGE_UUID`, and a
+  timestamped `medai-` instance name;
 - waits up to ten minutes, polling every ten seconds for `running`; and
 - writes state only after the instance reaches `running`.
 

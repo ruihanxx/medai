@@ -84,15 +84,19 @@ JAX) rather than implementing the GPU-dependent work on CPU.
 
 {% if computation_provider %}
 If the paper requires GPU resources that are unavailable or insufficient
-locally, check {{ computation_provider }} for resources meeting the required
-GPU type, count, and VRAM. If a matching resource is available, rent it by
-following `{{ skills_dir }}/computation_provider/SKILL.md`. After selecting the
-provider, read the provider reference required by that skill before performing
-any provider operation. Store the instance state at
+locally, use {{ computation_provider }} only through the GPU and image-selection
+procedure in `{{ skills_dir }}/computation_provider/SKILL.md`. It first verifies
+that the requested GPU is in the provider's supported pool; when the paper's
+exact GPU is absent, it selects the closest pool GPU whose VRAM is at least the
+paper requirement and records the divergence. For paper-stated software
+versions, select the closest official image UUID; otherwise use the configured
+default image UUID. After selecting the provider, read the provider reference
+required by that skill before performing any provider operation. Store the
+instance state at
 `{{ computation_provider_state_path }}`
-and leave it running for the plan and replication stages. If no matching
-resource is available, stop explicitly. Do not rent weaker hardware or reduce
-the experiment scale.
+and leave it running for the plan and replication stages. If no eligible
+resource or compatible image is available, stop explicitly. Do not rent weaker
+hardware or reduce the experiment scale.
 {% else %}
 If the paper requires GPU resources that are unavailable or insufficient
 locally, stop explicitly: no remote computation provider is configured. Do not

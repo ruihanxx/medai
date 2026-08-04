@@ -79,6 +79,13 @@ The `codex` provider accepts `--codex-model` and
 `MEDAI_CODEX_MODEL` and `MEDAI_CODEX_REASONING_EFFORT` in the project `.env`.
 The resolved values are recorded in `manifest.json`.
 
+For AutoDL remote compute, `AUTODL_IMAGE_UUID` is the configured default image
+UUID. The AutoDL skill may pass a per-paper `--image-uuid` only when the paper
+states material software versions and the selected official Pro image is the
+closest compatible entry; otherwise it uses the configured default. The skill
+also validates every requested GPU specification against the documented Pro
+pool before it can create an instance.
+
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a
 baseline run, and may make at most five hypothesis-driven adjustment rounds per

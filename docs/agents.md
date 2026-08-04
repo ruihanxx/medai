@@ -43,3 +43,10 @@
   host cleanup retries release on failure paths. The generic
   `remote_compute/instance.json` records the selected provider and common
   lifecycle state; each provider reference defines its provider-specific state.
+- Before an AutoDL instance is created, the skill must verify that its GPU
+  specification belongs to the current Pro pool. If the paper GPU is absent,
+  it may use only the closest documented pool GPU with at least the paper VRAM,
+  recording the hardware divergence. Paper-stated software versions require the
+  closest compatible official image UUID; without stated versions, the
+  configured default image UUID is used. The provider state records the
+  selected non-secret GPU and image identifiers.

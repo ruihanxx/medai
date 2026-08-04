@@ -14,6 +14,15 @@ from typing import Any
 
 BASE_URL = os.environ.get("AUTODL_API_BASE_URL", "https://api.autodl.com").rstrip("/")
 TOKEN = os.environ.get("AUTODL_TOKEN", "")
+SUPPORTED_GPU_SPECS = {
+    "h800",
+    "v-48g",
+    "pro6000-p",
+    "v-32g-p",
+    "v-48g-350w",
+    "5090-p",
+    "4090D",
+}
 
 
 def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -71,6 +80,10 @@ subparsers = parser.add_subparsers(dest="action", required=True)
 create = subparsers.add_parser("create")
 create.add_argument("--gpu-spec", required=True)
 create.add_argument("--gpu-count", type=int, default=1)
+create.add_argument(
+    "--image-uuid",
+    help="Paper-specific image UUID; overrides the AUTODL_IMAGE_UUID default.",
+)
 create.add_argument("--state", type=Path, required=True)
 
 for name in ("status", "release"):
@@ -94,9 +107,16 @@ download.add_argument("--destination", type=Path, required=True)
 args = parser.parse_args()
 
 if args.action == "create":
-    image_uuid = os.environ.get("AUTODL_IMAGE_UUID", "")
+    if args.gpu_spec not in SUPPORTED_GPU_SPECS:
+        choices = ", ".join(sorted(SUPPORTED_GPU_SPECS))
+        raise SystemExit(
+            f"Unsupported AutoDL Pro GPU specification: {args.gpu_spec}; choose one of {choices}"
+        )
+    if not 1 <= args.gpu_count <= 4:
+        raise SystemExit("AutoDL Pro GPU count must be between 1 and 4")
+    image_uuid = (args.image_uuid or os.environ.get("AUTODL_IMAGE_UUID", "")).strip()
     if not image_uuid:
-        raise SystemExit("AUTODL_IMAGE_UUID is not configured")
+        raise SystemExit("Configure AUTODL_IMAGE_UUID or pass --image-uuid")
     payload = request(
         "POST",
         "/api/v1/dev/instance/pro/create",
@@ -133,7 +153,12 @@ if args.action == "create":
                 "provider": "autodl",
                 "created_by_run": True,
                 "released": False,
-                "provider_state": {"instance_uuid": instance_uuid},
+                "provider_state": {
+                    "instance_uuid": instance_uuid,
+                    "gpu_spec_uuid": args.gpu_spec,
+                    "gpu_count": args.gpu_count,
+                    "image_uuid": image_uuid,
+                },
             },
             indent=2,
         )
