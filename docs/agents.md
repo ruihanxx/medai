@@ -56,7 +56,7 @@
   compute; CPU feasibility or a smaller inferred workload does not permit a
   CPU substitution.
 - When codegen requires remote compute, it records that decision and the exact
-  current-run state path in `codegen_plan.json`. A failed provider `create`
-  command must make the Codex agent exit nonzero; before codegen completes,
-  orchestration validates that the recorded instance is current-run-owned,
-  unreleased, and has the required connection state.
+  current-run state path in `codegen_plan.json`. A failed remote-instance
+  creation operation must make the Codex agent exit nonzero. Before codegen
+  completes, orchestration validates that the recorded instance is
+  current-run-owned, unreleased, and has the required connection state.

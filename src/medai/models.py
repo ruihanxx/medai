@@ -83,7 +83,7 @@ class DatasetPatchFile(RootModel[list[DatasetPatch]]):
 
 
 class RemoteComputePlan(StrictModel):
-    provider: Literal["autodl"]
+    provider: str = Field(min_length=1)
     state_path: str
     remote_working_directory: str
     setup_hints: list[str]

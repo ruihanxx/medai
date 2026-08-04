@@ -107,9 +107,10 @@ experiment scale or silently substitute CPU execution.
 {% endif %}
 
 **Remote creation failures are terminal.** If remote compute is required, a
-failed provider `create` command must immediately make the Codex agent CLI exit
-nonzero. Do not catch or suppress that failure, choose another resource, fall
-back to CPU, or continue code generation, planning, or replication.
+failed remote-instance creation operation must immediately make the Codex agent
+CLI exit nonzero. Follow the selected provider reference for that operation's
+actual command. Do not catch or suppress that failure, choose another resource,
+fall back to CPU, or continue code generation, planning, or replication.
 
 Before committing to a stack, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) to see actual CPU core count, RAM, and GPU VRAM — size your implementation to what is actually there instead of guessing capacity.
 

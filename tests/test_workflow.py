@@ -27,10 +27,10 @@ def test_codegen_remote_compute_requires_current_instance_state(tmp_path: Path):
             "shared_state": "None",
             "ambiguities": [],
             "remote_compute": {
-                "provider": "autodl",
+                "provider": "example-provider",
                 "state_path": str(state_path),
                 "remote_working_directory": "/root/autodl-tmp/run",
-                "setup_hints": ["Use AutoDL."],
+                "setup_hints": ["Use the selected provider reference."],
             },
         }
     )
@@ -40,7 +40,7 @@ def test_codegen_remote_compute_requires_current_instance_state(tmp_path: Path):
     state_path.write_text(
         json.dumps(
             {
-                "provider": "autodl",
+                "provider": "example-provider",
                 "created_by_run": True,
                 "released": False,
                 "provider_state": {
