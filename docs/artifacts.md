@@ -29,7 +29,9 @@ runs/<run_id>/
 ├── prompts/
 │   └── audit_attempt_001.md
 ├── system_maintenance/dataset/patch.json
-└── remote_compute/instance.json
+└── remote_compute/
+    ├── instance.json
+    └── creation_failure.json  # AutoDL creation failure only; terminates codegen
 ```
 
 Auto Research adds this isolated subtree to a completed base run:

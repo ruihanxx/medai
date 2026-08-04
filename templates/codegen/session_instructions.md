@@ -106,6 +106,12 @@ explicitly: no remote computation provider is configured. Do not reduce the
 experiment scale or silently substitute CPU execution.
 {% endif %}
 
+**Remote creation failures are terminal.** Run the provider's `create` command
+without suppressing its exit status. If it fails, do not choose another resource,
+fall back to CPU, or continue code generation, planning, or replication. The
+AutoDL script records the failure for orchestration; stop immediately so the
+existing stage-failure mechanism marks this run `failed` and performs cleanup.
+
 Before committing to a stack, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) to see actual CPU core count, RAM, and GPU VRAM — size your implementation to what is actually there instead of guessing capacity.
 
 Outline the file structure of your codebase before writing any code:

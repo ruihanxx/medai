@@ -37,6 +37,11 @@ when it starts.
 There is no reduced-scale fallback. Missing evidence, invalid artifacts, or an
 agent failure stops the run explicitly.
 
+A remote instance creation error is an agent failure: its provider failure
+record is checked by codegen and terminates the current run through the normal
+`failed` state and cleanup path. It does not permit a local fallback or another
+billable creation attempt.
+
 Audit PASS proceeds to planning. Audit FAIL returns to codegen with the failed
 report and permits changes only to the complete preprocessing chain and related
 configuration; model, training, evaluation, and generated results remain out of

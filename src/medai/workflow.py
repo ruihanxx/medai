@@ -180,6 +180,24 @@ def read_audit_verdict(report_path: Path) -> str:
     return lines[-1].removeprefix("Verdict: ")
 
 
+def raise_if_remote_creation_failed(state_path: Path) -> None:
+    failure_path = state_path.with_name("creation_failure.json")
+    if not failure_path.is_file():
+        return
+    try:
+        failure = json.loads(failure_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Remote instance creation failure record is invalid: {failure_path}"
+        ) from exc
+    if failure.get("provider") != "autodl" or failure.get("operation") != "create":
+        raise RuntimeError(f"Remote instance creation failure record is invalid: {failure_path}")
+    error = failure.get("error")
+    if not isinstance(error, str) or not error:
+        raise RuntimeError(f"Remote instance creation failure record is invalid: {failure_path}")
+    raise RuntimeError(f"Remote instance creation failed: {error}")
+
+
 def preflight_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
@@ -376,6 +394,8 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         print("resume codegen_agent stage: skipped (already completed)")
         return {"codebase_dir": str(codebase_dir)}
 
+    raise_if_remote_creation_failed(computation_provider_state_path)
+
     print("enter codegen stage")
     if audit_revision:
         pipeline_state.invalidate_stages(
@@ -449,6 +469,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
+    raise_if_remote_creation_failed(computation_provider_state_path)
     load_model(codegen_plan_path, CodegenPlan)
     load_model(dataset_patch_path, DatasetPatchFile)
     pipeline_state.complete_stage(

@@ -74,39 +74,25 @@ def ssh_prefix(details: dict[str, Any]) -> list[str]:
     return []
 
 
-parser = argparse.ArgumentParser()
-subparsers = parser.add_subparsers(dest="action", required=True)
+def record_creation_failure(state_path: Path, error: BaseException) -> None:
+    failure_path = state_path.with_name("creation_failure.json")
+    failure_path.parent.mkdir(parents=True, exist_ok=True)
+    failure_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "operation": "create",
+                "error": str(error) or error.__class__.__name__,
+                "failed_at_unix": int(time.time()),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
-create = subparsers.add_parser("create")
-create.add_argument("--gpu-spec", required=True)
-create.add_argument("--gpu-count", type=int, default=1)
-create.add_argument(
-    "--image-uuid",
-    help="Paper-specific image UUID; overrides the AUTODL_IMAGE_UUID default.",
-)
-create.add_argument("--state", type=Path, required=True)
 
-for name in ("status", "release"):
-    command = subparsers.add_parser(name)
-    command.add_argument("--state", type=Path, required=True)
-
-execute = subparsers.add_parser("exec")
-execute.add_argument("--state", type=Path, required=True)
-execute.add_argument("command", nargs=argparse.REMAINDER)
-
-upload = subparsers.add_parser("upload")
-upload.add_argument("--state", type=Path, required=True)
-upload.add_argument("--source", type=Path, required=True)
-upload.add_argument("--remote", required=True)
-
-download = subparsers.add_parser("download")
-download.add_argument("--state", type=Path, required=True)
-download.add_argument("--remote", required=True)
-download.add_argument("--destination", type=Path, required=True)
-
-args = parser.parse_args()
-
-if args.action == "create":
+def create_instance(args: argparse.Namespace) -> None:
     if args.gpu_spec not in SUPPORTED_GPU_SPECS:
         choices = ", ".join(sorted(SUPPORTED_GPU_SPECS))
         raise SystemExit(
@@ -166,6 +152,46 @@ if args.action == "create":
         encoding="utf-8",
     )
     print(instance_uuid)
+
+
+parser = argparse.ArgumentParser()
+subparsers = parser.add_subparsers(dest="action", required=True)
+
+create = subparsers.add_parser("create")
+create.add_argument("--gpu-spec", required=True)
+create.add_argument("--gpu-count", type=int, default=1)
+create.add_argument(
+    "--image-uuid",
+    help="Paper-specific image UUID; overrides the AUTODL_IMAGE_UUID default.",
+)
+create.add_argument("--state", type=Path, required=True)
+
+for name in ("status", "release"):
+    command = subparsers.add_parser(name)
+    command.add_argument("--state", type=Path, required=True)
+
+execute = subparsers.add_parser("exec")
+execute.add_argument("--state", type=Path, required=True)
+execute.add_argument("command", nargs=argparse.REMAINDER)
+
+upload = subparsers.add_parser("upload")
+upload.add_argument("--state", type=Path, required=True)
+upload.add_argument("--source", type=Path, required=True)
+upload.add_argument("--remote", required=True)
+
+download = subparsers.add_parser("download")
+download.add_argument("--state", type=Path, required=True)
+download.add_argument("--remote", required=True)
+download.add_argument("--destination", type=Path, required=True)
+
+args = parser.parse_args()
+
+if args.action == "create":
+    try:
+        create_instance(args)
+    except (RuntimeError, SystemExit) as error:
+        record_creation_failure(args.state, error)
+        raise
 elif args.action == "status":
     state = load_state(args.state)
     print(

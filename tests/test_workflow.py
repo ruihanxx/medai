@@ -8,10 +8,29 @@ from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.workflow import (
     create_workflow,
+    raise_if_remote_creation_failed,
     release_run_computation_instance,
     replicate_agent_node,
     resolve_replication_output,
 )
+
+
+def test_remote_creation_failure_stops_codegen(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    state_path.parent.mkdir()
+    state_path.with_name("creation_failure.json").write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "operation": "create",
+                "error": "AutoDL HTTP 503: unavailable",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="Remote instance creation failed: AutoDL HTTP 503"):
+        raise_if_remote_creation_failed(state_path)
 
 
 def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
