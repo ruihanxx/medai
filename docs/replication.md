@@ -37,12 +37,16 @@ when it starts.
 There is no reduced-scale fallback. Missing evidence, invalid artifacts, or an
 agent failure stops the run explicitly.
 
-A remote instance creation error is an agent failure and must make the invoking
-Codex agent exit nonzero. When codegen records a remote-compute plan, its
-instance state is statically validated before the stage completes; a missing or
-invalid state terminates the run through the normal `failed` state and cleanup
-path. Neither condition permits a local fallback or another billable creation
-attempt.
+A failed remote interaction starts bounded, safe recovery: the agent begins
+with the selected provider reference, may consult official provider
+documentation and use reasoned diagnostics, and must not blindly repeat a
+billable operation. If recovery remains unsuccessful, the invoking Codex agent
+exits nonzero. When codegen records a remote-compute plan, its instance state is
+statically validated before the stage completes; a missing or invalid state
+terminates the run through the normal `failed` state and cleanup path. A
+successful procedure that conflicts with the skill reference is recorded in
+`system_maintenance/skills/corrections.json`, not applied to the repository
+skill during the run.
 
 Audit PASS proceeds to planning. Audit FAIL returns to codegen with the failed
 report and permits changes only to the complete preprocessing chain and related

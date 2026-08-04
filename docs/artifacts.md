@@ -29,6 +29,7 @@ runs/<run_id>/
 ├── prompts/
 │   └── audit_attempt_001.md
 ├── system_maintenance/dataset/patch.json
+├── system_maintenance/skills/corrections.json
 └── remote_compute/instance.json
 ```
 
@@ -83,6 +84,13 @@ document, it may add an object containing exactly `"file name"` and
 read-only source dataset. The patch content follows the target document's
 structure and remains a reviewable run artifact rather than being applied
 automatically.
+
+Each run also initializes `system_maintenance/skills/corrections.json` as an
+empty JSON array. Codegen appends an entry only when a successful remote-server
+procedure conflicts with the selected skill reference. Every entry records the
+skill, provider, reference path, discrepancy, resolved procedure, and consulted
+official documentation URLs. It is a review artifact, not a permission to edit
+the repository skill during the run.
 
 Every scientific preprocessing audit has its own numbered attempt directory;
 technical provider retries remain within that directory and archive earlier

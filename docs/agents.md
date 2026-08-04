@@ -56,9 +56,13 @@
   compute; CPU feasibility or a smaller inferred workload does not permit a
   CPU substitution.
 - When codegen requires remote compute, it records that decision and the exact
-  current-run state path in `codegen_plan.json`. A failed remote-instance
-  creation operation must make the Codex agent exit nonzero. Before codegen
-  completes, orchestration validates that the recorded instance is
-  current-run-owned, unreleased, and has the required connection state.
-  The same nonzero-exit rule applies to every remote-server interaction that
-  remains unsuccessful after provider-reference-permitted bounded recovery.
+  current-run state path in `codegen_plan.json`. Before codegen completes,
+  orchestration validates that the recorded instance is current-run-owned,
+  unreleased, and has the required connection state. For every remote-server
+  interaction, including instance creation, the agent starts with the selected
+  provider reference but may consult official online documentation and use
+  reasoned, non-secret diagnostics for bounded, safe recovery attempts. If
+  recovery still fails, it exits nonzero. A successful procedure that conflicts
+  with the reference is recorded for review in
+  `system_maintenance/skills/corrections.json`; it does not edit repository
+  skills during the run.

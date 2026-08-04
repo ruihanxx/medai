@@ -82,6 +82,19 @@ class DatasetPatchFile(RootModel[list[DatasetPatch]]):
     pass
 
 
+class SkillCorrection(StrictModel):
+    skill: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    reference_path: str = Field(min_length=1)
+    discrepancy: str = Field(min_length=1)
+    resolved_procedure: str = Field(min_length=1)
+    documentation_urls: list[str]
+
+
+class SkillCorrectionsFile(RootModel[list[SkillCorrection]]):
+    pass
+
+
 class RemoteComputePlan(StrictModel):
     provider: str = Field(min_length=1)
     state_path: str

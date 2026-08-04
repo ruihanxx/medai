@@ -21,6 +21,7 @@ from medai.models import (
     ExperimentTodo,
     ReplicationLog,
     ReplicationPlan,
+    SkillCorrectionsFile,
     SmartReplicateLog,
     validate_experiment_coverage,
     validate_replication_log,
@@ -214,6 +215,7 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
     pipeline_state = PipelineState(config.output)
     resources_path = config.output / "preflight" / "resources.json"
     dataset_patch_path = config.output / "system_maintenance" / "dataset" / "patch.json"
+    skill_corrections_path = config.output / "system_maintenance" / "skills" / "corrections.json"
     if config.data is None:
         print("enter preflight stage")
         pipeline_state.start_stage("preflight")
@@ -226,6 +228,9 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         if not isinstance(resources, dict) or not isinstance(resources.get("gpus"), list):
             raise RuntimeError(f"Completed preflight artifact is invalid: {resources_path}")
         load_model(dataset_patch_path, DatasetPatchFile)
+        if not skill_corrections_path.exists():
+            write_json(skill_corrections_path, [])
+        load_model(skill_corrections_path, SkillCorrectionsFile)
         print("resume preflight stage: skipped (already completed)")
         return {"resources_path": str(resources_path)}
 
@@ -242,13 +247,15 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         "prompts",
         "remote_compute",
         "system_maintenance/dataset",
+        "system_maintenance/skills",
     ):
         (config.output / name).mkdir(parents=True, exist_ok=True)
     write_json(resources_path, detect_resources(config.output))
     write_json(dataset_patch_path, [])
+    write_json(skill_corrections_path, [])
     pipeline_state.complete_stage(
         "preflight",
-        [str(resources_path), str(dataset_patch_path)],
+        [str(resources_path), str(dataset_patch_path), str(skill_corrections_path)],
     )
     return {"resources_path": str(resources_path)}
 
@@ -374,6 +381,9 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     dataset_patch_path = (
         config.output / "system_maintenance" / "dataset" / "patch.json"
     )
+    skill_corrections_path = (
+        config.output / "system_maintenance" / "skills" / "corrections.json"
+    )
     audit_stage = pipeline_state.state["stages"].get("audit_agent", {})
     audit_checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
     codegen_attempt = int(previous_stage.get("attempts", 0))
@@ -400,6 +410,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
         load_model(codegen_plan_path, CodegenPlan)
         load_model(dataset_patch_path, DatasetPatchFile)
+        load_model(skill_corrections_path, SkillCorrectionsFile)
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed codegen transcript is missing: {transcript_path}")
         print("resume codegen_agent stage: skipped (already completed)")
@@ -463,6 +474,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         skills_dir=skills_dir(),
         codegen_plan_path=codegen_plan_path,
         dataset_patch_path=dataset_patch_path,
+        skill_corrections_path=skill_corrections_path,
         computation_provider_state_path=computation_provider_state_path,
         gpu_info=resources["gpus"],
         computation_provider=computation_provider,
@@ -481,12 +493,14 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     codegen_plan = load_model(codegen_plan_path, CodegenPlan)
     validate_codegen_remote_compute(codegen_plan, computation_provider_state_path)
     load_model(dataset_patch_path, DatasetPatchFile)
+    load_model(skill_corrections_path, SkillCorrectionsFile)
     pipeline_state.complete_stage(
         "codegen_agent",
         [
             str(codebase_dir),
             str(codegen_plan_path),
             str(dataset_patch_path),
+            str(skill_corrections_path),
             str(transcript_path),
         ],
     )

@@ -16,6 +16,7 @@ from medai.models import (
     ReplicationLog,
     ReplicationPlan,
     RoundSummary,
+    SkillCorrectionsFile,
     validate_codegen_audit,
     validate_experiment_coverage,
     validate_idea_implementation_plan,
@@ -98,6 +99,21 @@ def test_claim_and_experiment_coverage_is_exact():
     todo.experiments[0].claims = ["C2"]
     with pytest.raises(ValueError, match="unknown claims"):
         validate_experiment_coverage(claims, todo)
+
+
+def test_skill_correction_requires_reviewable_nonsecret_fields():
+    SkillCorrectionsFile.model_validate(
+        [
+            {
+                "skill": "computation-provider",
+                "provider": "example-provider",
+                "reference_path": "references/example-provider.md",
+                "discrepancy": "The documented command was obsolete.",
+                "resolved_procedure": "Used the current documented command.",
+                "documentation_urls": ["https://provider.example/docs"],
+            }
+        ]
+    )
 
 
 def test_replication_plan_must_cover_claims_and_artifacts():

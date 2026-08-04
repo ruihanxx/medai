@@ -106,16 +106,36 @@ explicitly: no remote computation provider is configured. Do not reduce the
 experiment scale or silently substitute CPU execution.
 {% endif %}
 
-**Remote creation failures are terminal.** If remote compute is required, a
-failed remote-instance creation operation must immediately make the Codex agent
-CLI exit nonzero. Follow the selected provider reference for that operation's
-actual command. Do not catch or suppress that failure, choose another resource,
-fall back to CPU, or continue code generation, planning, or replication.
+**Unresolved remote-server failures are terminal.** If remote compute is
+required, use the recovery procedure below for a failed instance-creation or
+other remote-server interaction. Do not catch or suppress a final failure,
+choose another resource, fall back to CPU, or continue code generation,
+planning, or replication.
 
-More generally, if any remote-server interaction remains unsuccessful after the
-bounded retries or recovery explicitly allowed by the selected provider
-reference, immediately make the Codex agent CLI exit nonzero. Do not continue
-with local work or a later workflow phase.
+More generally, treat the selected provider reference as the starting point for
+every remote-server interaction, not the only source of troubleshooting. When
+an interaction fails, inspect the complete non-secret error, consult the
+provider's official online documentation when useful, and reason through a
+small, bounded sequence of multiple distinct, safe recovery attempts. Do not
+blindly repeat a billable operation. If the interaction remains unsuccessful after
+those attempts, immediately make the Codex agent CLI exit nonzero. Do not
+continue with local work or a later workflow phase.
+
+If a successful, evidence-based procedure conflicts with the selected skill
+reference, do not edit the repository skill. Append one reviewable correction
+to `{{ skill_corrections_path }}` instead:
+```json
+{
+  "skill": "computation-provider",
+  "provider": "<selected provider>",
+  "reference_path": "references/<provider>.md",
+  "discrepancy": "What the reference says and what differed.",
+  "resolved_procedure": "The successful, safe procedure used in this run.",
+  "documentation_urls": ["https://official-provider-documentation.example/"]
+}
+```
+Use only non-secret information. Leave this initialized JSON array unchanged
+when no correction is needed.
 
 Before committing to a stack, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) to see actual CPU core count, RAM, and GPU VRAM — size your implementation to what is actually there instead of guessing capacity.
 
@@ -383,8 +403,9 @@ that depends on it. For each such upstream step, confirm:
 ## Hard constraints
 
 - Write into `{{ codebase_dir }}/`, except that dataset-document improvements
-  may be written to `{{ dataset_patch_path }}` as described above. Do not modify
-  the source dataset documents or raw data.
+  may be written to `{{ dataset_patch_path }}` and provider-skill corrections to
+  `{{ skill_corrections_path }}` as described above. Do not modify the source
+  dataset documents, raw data, or repository skills.
 - `codegen_plan.json` and `config.yaml` both live at the codebase root.
 - Do not commit (no `git commit`) — the host-side EXIT trap captures
   the diff against an empty initial state.

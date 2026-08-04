@@ -310,8 +310,11 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert (output / "codegen" / "codebase" / "README.md").is_file()
     dataset_patch_path = output / "system_maintenance" / "dataset" / "patch.json"
     assert json.loads(dataset_patch_path.read_text(encoding="utf-8")) == []
+    skill_corrections_path = output / "system_maintenance" / "skills" / "corrections.json"
+    assert json.loads(skill_corrections_path.read_text(encoding="utf-8")) == []
     codegen_prompt = (output / "prompts" / "codegen.md").read_text(encoding="utf-8")
     assert str(dataset_patch_path) in codegen_prompt
+    assert str(skill_corrections_path) in codegen_prompt
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
     assert "/explore-data/" not in codegen_prompt
     audit_prompt = (output / "prompts" / "audit_attempt_001.md").read_text(
@@ -649,6 +652,7 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
         resources_path=tmp_path / "resources.json",
         codegen_plan_path=tmp_path / "codegen_plan.json",
         dataset_patch_path=tmp_path / "patch.json",
+        skill_corrections_path=tmp_path / "corrections.json",
         computation_provider_state_path=tmp_path / "instance.json",
         gpu_info=[],
         computation_provider="AutoDL",
@@ -675,6 +679,7 @@ def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path:
         resources_path=tmp_path / "resources.json",
         codegen_plan_path=tmp_path / "codegen_plan.json",
         dataset_patch_path=tmp_path / "patch.json",
+        skill_corrections_path=tmp_path / "corrections.json",
         computation_provider_state_path=tmp_path / "instance.json",
         gpu_info=[],
         computation_provider=None,

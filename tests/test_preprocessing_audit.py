@@ -63,6 +63,9 @@ def _audit_state(tmp_path: Path) -> dict[str, object]:
     dataset_patch_path = output / "system_maintenance" / "dataset" / "patch.json"
     dataset_patch_path.parent.mkdir(parents=True)
     dataset_patch_path.write_text("[]\n", encoding="utf-8")
+    skill_corrections_path = output / "system_maintenance" / "skills" / "corrections.json"
+    skill_corrections_path.parent.mkdir(parents=True)
+    skill_corrections_path.write_text("[]\n", encoding="utf-8")
     codebase_dir = output / "codegen" / "codebase"
     codebase_dir.mkdir(parents=True)
     codegen_plan_path = codebase_dir / "codegen_plan.json"
