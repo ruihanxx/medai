@@ -34,6 +34,8 @@ from medai.prompts import render_prompt
 from medai.providers import run_agent
 from medai.resources import detect_resources
 
+MAX_AUDIT_REWRITES = 3
+
 
 class WorkflowState(TypedDict, total=False):
     config: RunConfig
@@ -42,6 +44,8 @@ class WorkflowState(TypedDict, total=False):
     claims_path: str
     experiments_path: str
     codebase_dir: str
+    audit_verdict: str
+    audit_report_path: str
     replicate_plan_path: str
     report_path: str
 
@@ -155,11 +159,36 @@ def validate_report_experiment(
     )
 
 
+def read_audit_verdict(report_path: Path) -> str:
+    try:
+        lines = [
+            line.strip()
+            for line in report_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Audit agent did not write its report: {report_path}") from exc
+    verdict_lines = [line for line in lines if line.startswith("Verdict:")]
+    if len(verdict_lines) != 1 or not lines or lines[-1] not in {
+        "Verdict: PASS",
+        "Verdict: FAIL",
+    }:
+        raise RuntimeError(
+            "Audit report must contain exactly one verdict and end with "
+            f"`Verdict: PASS` or `Verdict: FAIL`: {report_path}"
+        )
+    return lines[-1].removeprefix("Verdict: ")
+
+
 def preflight_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
     resources_path = config.output / "preflight" / "resources.json"
     dataset_patch_path = config.output / "system_maintenance" / "dataset" / "patch.json"
+    if config.data is None:
+        print("enter preflight stage")
+        pipeline_state.start_stage("preflight")
+        raise ValueError("Replicate runs require --data for preprocessing audit")
     if pipeline_state.is_stage_completed("preflight"):
         try:
             resources = json.loads(resources_path.read_text(encoding="utf-8"))
@@ -303,9 +332,8 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     previous_status = pipeline_state.get_stage_status("codegen_agent")
     codebase_dir = config.output / "codegen" / "codebase"
     previous_stage = pipeline_state.state["stages"].get("codegen_agent", {})
-    source_prepared = pipeline_state.get_stage_checkpoints("codegen_agent").get(
-        "source_prepared", False
-    ) or (
+    codegen_checkpoints = pipeline_state.get_stage_checkpoints("codegen_agent")
+    source_prepared = codegen_checkpoints.get("source_prepared", False) or (
         previous_status in {"running", "failed"}
         and "checkpoints" not in previous_stage
         and codebase_dir.is_dir()
@@ -317,7 +345,28 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     dataset_patch_path = (
         config.output / "system_maintenance" / "dataset" / "patch.json"
     )
-    if pipeline_state.is_stage_completed("codegen_agent"):
+    audit_stage = pipeline_state.state["stages"].get("audit_agent", {})
+    audit_checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
+    codegen_attempt = int(previous_stage.get("attempts", 0))
+    audit_revision = (
+        previous_status == "completed"
+        and audit_stage.get("status") == "completed"
+        and audit_checkpoints.get("verdict") == "FAIL"
+        and audit_checkpoints.get("audited_codegen_attempt") == codegen_attempt
+    )
+    if audit_revision:
+        audit_feedback_path = Path(str(audit_checkpoints["report_path"]))
+    elif previous_status in {"running", "failed"} and codegen_checkpoints.get(
+        "audit_feedback_path"
+    ):
+        audit_feedback_path = Path(str(codegen_checkpoints["audit_feedback_path"]))
+    else:
+        audit_feedback_path = None
+    if audit_feedback_path is not None and read_audit_verdict(audit_feedback_path) != "FAIL":
+        raise RuntimeError(
+            f"Codegen audit feedback is not a FAIL report: {audit_feedback_path}"
+        )
+    if pipeline_state.is_stage_completed("codegen_agent") and not audit_revision:
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
         load_model(codegen_plan_path, CodegenPlan)
@@ -328,7 +377,17 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         return {"codebase_dir": str(codebase_dir)}
 
     print("enter codegen stage")
+    if audit_revision:
+        pipeline_state.invalidate_stages(
+            ["plan_agent", "replicate_agent", "report_agents"],
+            f"Codegen revised after failed preprocessing audit: {audit_feedback_path}",
+        )
     pipeline_state.start_stage("codegen_agent")
+    if audit_feedback_path is not None:
+        pipeline_state.update_stage_checkpoints(
+            "codegen_agent",
+            {"audit_feedback_path": str(audit_feedback_path)},
+        )
     if not source_prepared or not codebase_dir.is_dir():
         if (
             previous_status is None
@@ -379,6 +438,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         gpu_info=resources["gpus"],
         computation_provider=computation_provider,
         resuming=previous_status in {"running", "failed"},
+        audit_feedback_path=audit_feedback_path,
     )
     run_agent(
         provider=config.provider,
@@ -401,6 +461,119 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         ],
     )
     return {"codebase_dir": str(codebase_dir)}
+
+
+def audit_agent_node(state: WorkflowState) -> dict[str, str]:
+    config = state["config"]
+    pipeline_state = PipelineState(config.output)
+    codegen_stage = pipeline_state.state["stages"].get("codegen_agent", {})
+    codegen_attempt = int(codegen_stage.get("attempts", 0))
+    if codegen_stage.get("status") != "completed" or codegen_attempt < 1:
+        raise RuntimeError("Preprocessing audit requires a completed codegen attempt")
+
+    checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
+    audited_codegen_attempt = checkpoints.get("audited_codegen_attempt")
+    if (
+        pipeline_state.is_stage_completed("audit_agent")
+        and audited_codegen_attempt == codegen_attempt
+    ):
+        report_path = Path(str(checkpoints.get("report_path", "")))
+        verdict = read_audit_verdict(report_path)
+        if verdict != checkpoints.get("verdict"):
+            raise RuntimeError(
+                f"Audit report verdict does not match its checkpoint: {report_path}"
+            )
+        print("resume audit_agent stage: skipped (already completed)")
+        return {
+            "audit_verdict": verdict,
+            "audit_report_path": str(report_path),
+        }
+
+    rewrite_rounds_used = int(checkpoints.get("rewrite_rounds_used", 0))
+    if (
+        pipeline_state.get_stage_status("audit_agent") == "failed"
+        and audited_codegen_attempt == codegen_attempt
+        and checkpoints.get("verdict") == "FAIL"
+        and rewrite_rounds_used >= MAX_AUDIT_REWRITES
+    ):
+        raise RuntimeError(
+            "Preprocessing audit failed after three codegen rewrite rounds; "
+            f"latest report: {checkpoints.get('report_path')}"
+        )
+
+    print("enter audit agent stage")
+    previous_audit_status = pipeline_state.get_stage_status("audit_agent")
+    pipeline_state.start_stage("audit_agent")
+    scientific_attempt = rewrite_rounds_used + 1
+    attempt_dir = (
+        config.output / "codegen" / "audit" / f"attempt_{scientific_attempt:03d}"
+    )
+    scripts_dir = attempt_dir / "scripts"
+    results_dir = attempt_dir / "results"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    results_dir.mkdir(parents=True, exist_ok=True)
+    report_path = attempt_dir / "audit_report.md"
+    transcript_path = attempt_dir / "audit_transcript.jsonl"
+    prompt_path = render_prompt(
+        "codegen/audit_session_instructions.md",
+        config.output / "prompts" / f"audit_attempt_{scientific_attempt:03d}.md",
+        paper_markdown=state["paper_markdown"],
+        codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
+        codebase_dir=state["codebase_dir"],
+        data_dir=config.data,
+        resources_path=state["resources_path"],
+        skills_dir=skills_dir(),
+        audit_dir=attempt_dir,
+        scripts_dir=scripts_dir,
+        results_dir=results_dir,
+        report_path=report_path,
+        codegen_attempt=codegen_attempt,
+        remote_compute_state_path=config.output / "remote_compute" / "instance.json",
+        remote_compute_active=(
+            config.output / "remote_compute" / "instance.json"
+        ).is_file(),
+        resuming=previous_audit_status in {"running", "failed"},
+    )
+    run_agent(
+        provider=config.provider,
+        prompt_path=prompt_path,
+        working_dir=attempt_dir,
+        transcript_path=transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+    )
+    verdict = read_audit_verdict(report_path)
+    checkpoint = {
+        "audited_codegen_attempt": codegen_attempt,
+        "verdict": verdict,
+        "report_path": str(report_path),
+        "rewrite_rounds_used": rewrite_rounds_used,
+    }
+    outputs = [str(attempt_dir), str(report_path), str(transcript_path)]
+    if verdict == "FAIL" and rewrite_rounds_used >= MAX_AUDIT_REWRITES:
+        pipeline_state.update_stage_checkpoints("audit_agent", checkpoint)
+        error = (
+            "Preprocessing audit failed after three codegen rewrite rounds; "
+            f"latest report: {report_path}"
+        )
+        pipeline_state.fail(error, outputs)
+        raise RuntimeError(error)
+    if verdict == "FAIL":
+        checkpoint["rewrite_rounds_used"] = rewrite_rounds_used + 1
+    pipeline_state.update_stage_checkpoints("audit_agent", checkpoint)
+    pipeline_state.complete_stage("audit_agent", outputs)
+    return {
+        "audit_verdict": verdict,
+        "audit_report_path": str(report_path),
+    }
+
+
+def audit_route(state: WorkflowState) -> str:
+    verdict = state.get("audit_verdict")
+    if verdict not in {"PASS", "FAIL"}:
+        raise RuntimeError(f"Invalid preprocessing audit verdict: {verdict!r}")
+    return "plan_agent" if verdict == "PASS" else "codegen_agent"
 
 
 def plan_agent_node(state: WorkflowState) -> dict[str, str]:
@@ -663,6 +836,7 @@ def create_workflow():
     builder.add_node("preprocess_pdf", preprocess_pdf_node)
     builder.add_node("preprocessing_agent", preprocessing_agent_node)
     builder.add_node("codegen_agent", codegen_agent_node)
+    builder.add_node("audit_agent", audit_agent_node)
     builder.add_node("plan_agent", plan_agent_node)
     builder.add_node("replicate_agent", replicate_agent_node)
     builder.add_node("report_agents", report_agents_node)
@@ -670,7 +844,12 @@ def create_workflow():
     builder.add_edge("preflight", "preprocess_pdf")
     builder.add_edge("preprocess_pdf", "preprocessing_agent")
     builder.add_edge("preprocessing_agent", "codegen_agent")
-    builder.add_edge("codegen_agent", "plan_agent")
+    builder.add_edge("codegen_agent", "audit_agent")
+    builder.add_conditional_edges(
+        "audit_agent",
+        audit_route,
+        {"plan_agent": "plan_agent", "codegen_agent": "codegen_agent"},
+    )
     builder.add_edge("plan_agent", "replicate_agent")
     builder.add_edge("replicate_agent", "report_agents")
     builder.add_edge("report_agents", END)

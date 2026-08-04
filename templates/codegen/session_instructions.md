@@ -1,6 +1,17 @@
 # Codegen agent
 
-{% if resuming %}
+{% if audit_feedback_path|default(none) %}
+This stage is revising a completed implementation after the local preprocessing
+audit rejected it. Read the audit report at
+`{{ audit_feedback_path }}` before changing code. Preserve valid work and change
+only the complete preprocessing chain needed to resolve the reported cause:
+data reading, cohort construction, window/feature aggregation, missing-data
+handling, and their configuration. Do not change model definitions, training,
+evaluation, or generated results. Update the corresponding
+`codegen_plan.json` ambiguity so its assumption records the evidence-based
+resolution and implementation location. Do not chase a larger cohort or a paper
+result; the next audit reruns the actual preprocessing.
+{% elif resuming %}
 This stage is resuming after an interrupted code-generation attempt. Inspect the
 existing files in `{{ codebase_dir }}/`, preserve valid completed work, repair or
 finish incomplete work, and rerun every self-review check before declaring the
@@ -18,6 +29,9 @@ implementation of the paper's methodology.
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
+{% if audit_feedback_path|default(none) %}
+- Failed local preprocessing audit: `{{ audit_feedback_path }}`
+{% endif %}
 
 
 ## Available skills

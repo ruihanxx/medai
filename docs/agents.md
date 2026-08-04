@@ -4,6 +4,9 @@
   under `templates/autoresearch/<stage>/`; runtime skills live under
   `templates/skills/`. None is stored under `src/`.
 - Prompts are rendered with Jinja2 and saved before invocation.
+- The base preprocessing-audit prompt lives beside codegen at
+  `templates/codegen/audit_session_instructions.md`; rendered prompts are saved
+  per scientific attempt as `prompts/audit_attempt_<NNN>.md`.
 - Each agent invocation's provider event stream is preserved as a JSONL
   transcript beside that stage's artifacts. Before a retried invocation, an
   existing transcript is preserved as `<name>.attempt-<N>.jsonl`. Transcript
@@ -21,6 +24,18 @@
   rerunning the baseline.
 - Plan agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.
+- The preprocessing audit agent runs with its attempt directory as working
+  directory. It treats source data and `codegen/codebase/` as read-only, writes
+  only audit scripts/results/report artifacts, and may install dependencies only
+  locally. It runs full locally feasible preprocessing and paper-aware basic
+  statistics without model training, tuning, evaluation, remote-instance access,
+  or the `computation-provider` skill. Device-only adaptations may change CPU/GPU
+  placement, batching, chunking, or streaming, but not scientific semantics.
+- A codegen retry caused by audit reads the latest failed report and may change
+  data reading, cohort construction, window/feature aggregation, missing-data
+  handling, and related configuration only. It must repair the evidenced root
+  cause and update the corresponding ambiguity; it may not alter models,
+  training, evaluation, or result artifacts to chase paper values.
 - Remote compute access is exposed through the `computation-provider` skill;
   its first supported provider is AutoDL. Only instances created by the current
   run may be automatically powered off or released. After replication finishes

@@ -223,6 +223,30 @@ class PipelineState:
         self.state["current_stage"] = None
         self._save()
 
+    def invalidate_stages(self, names: list[str], reason: str) -> None:
+        changed = False
+        for name in names:
+            stage = self.state["stages"].get(name)
+            if stage is None:
+                continue
+            stage.update(
+                {
+                    "status": "invalidated",
+                    "completed_at": None,
+                    "success": None,
+                    "checkpoints": {},
+                    "outputs": [],
+                    "invalidated_reason": reason,
+                }
+            )
+            stage.pop("error", None)
+            changed = True
+        if changed:
+            self.state["status"] = "running"
+            self.state.pop("completed_at", None)
+            self.state.pop("error", None)
+            self._save()
+
     def mark_completed(self) -> None:
         self.state["status"] = "completed"
         self.state["completed_at"] = _now()
@@ -238,7 +262,7 @@ class PipelineState:
         self.state.pop("error", None)
         self._save()
 
-    def fail(self, error: str) -> None:
+    def fail(self, error: str, outputs: list[str] | None = None) -> None:
         current_stage = self.state.get("current_stage")
         if current_stage:
             stage = self.state["stages"].setdefault(current_stage, {})
@@ -250,6 +274,8 @@ class PipelineState:
                     "error": error,
                 }
             )
+            if outputs is not None:
+                stage["outputs"] = outputs
         self.state["status"] = "failed"
         self.state["current_stage"] = None
         self.state["error"] = error

@@ -20,6 +20,8 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "README.md").write_text("source", encoding="utf-8")
+    data = tmp_path / "data"
+    data.mkdir()
     output = tmp_path / "output"
     output.mkdir()
     config = RunConfig.create(
@@ -27,7 +29,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         output=output,
         provider="codex",
         repo=repo,
-        data=None,
+        data=data,
         siliconflow_config=None,
     )
     PipelineState.create(output, {"paper": str(paper), "provider": "codex"})
@@ -98,6 +100,19 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                         ],
                     }
                 ),
+                encoding="utf-8",
+            )
+        elif name == "audit_attempt_001.md":
+            (working_dir / "audit_report.md").write_text(
+                "# Preprocessing Audit Report\n\n"
+                "## Scope\n\nFull local preprocessing.\n\n"
+                "## Paper expectations\n\nOne binary target.\n\n"
+                "## Commands executed\n\n`python preprocess.py`\n\n"
+                "## Observed statistics\n\nBoth classes remain.\n\n"
+                "## Sanity assessment\n\nNo significant issue.\n\n"
+                "## Limitations\n\nNone.\n\n"
+                "## Required codegen changes\n\nNone.\n\n"
+                "Verdict: PASS\n",
                 encoding="utf-8",
             )
         elif name == "plan.md":
@@ -235,6 +250,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "enter preprocessing stage",
         "enter preprocessing agent stage",
         "enter codegen stage",
+        "enter audit agent stage",
         "enter plan stage",
         "enter replicate stage",
         "enter report stage",
@@ -243,6 +259,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert transcript_paths == [
         "preprocessing/preprocessing_transcript.jsonl",
         "codegen/codegen_transcript.jsonl",
+        "codegen/audit/attempt_001/audit_transcript.jsonl",
         "plan/plan_transcript.jsonl",
         "replication/replication_transcript.jsonl",
         "report/E1_transcript.jsonl",
@@ -254,6 +271,12 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert str(dataset_patch_path) in codegen_prompt
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
     assert "/explore-data/" not in codegen_prompt
+    audit_prompt = (output / "prompts" / "audit_attempt_001.md").read_text(
+        encoding="utf-8"
+    )
+    assert str(data) in audit_prompt
+    assert "Do not connect to, query, stop, release" in audit_prompt
+    assert "Run the complete preprocessing locally" in audit_prompt
     plan_prompt = (output / "prompts" / "plan.md").read_text(encoding="utf-8")
     assert '"environment"' in plan_prompt
     assert '"command_hint"' in plan_prompt
@@ -279,6 +302,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "preprocess_pdf",
         "preprocessing_agent",
         "codegen_agent",
+        "audit_agent",
         "plan_agent",
         "replicate_agent",
         "report_agents",
@@ -287,9 +311,9 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     resumed = create_workflow().invoke({"config": config})
     resumed_lines = capsys.readouterr().out.splitlines()
     assert not [line for line in resumed_lines if line.startswith("enter ")]
-    assert len([line for line in resumed_lines if line.startswith("resume ")]) == 7
+    assert len([line for line in resumed_lines if line.startswith("resume ")]) == 8
     assert Path(resumed["report_path"]) == output / "report" / "reproduction_report.md"
-    assert len(transcript_paths) == 5
+    assert len(transcript_paths) == 6
 
 
 def test_replication_outputs_stay_inside_run_roots(tmp_path: Path):
@@ -515,6 +539,7 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     monkeypatch.setattr(workflow, "preprocess_pdf_node", fails)
     monkeypatch.setattr(workflow, "preprocessing_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "codegen_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "audit_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "plan_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "replicate_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "report_agents_node", must_not_run)
@@ -522,6 +547,50 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="stop"):
         workflow.create_workflow().invoke({"config": object()})
     assert calls == ["preflight", "preprocess_pdf"]
+
+
+def test_graph_routes_failed_audit_back_to_codegen_once(monkeypatch):
+    import medai.workflow as workflow
+
+    calls = []
+    audit_verdicts = iter(["FAIL", "PASS"])
+
+    def stage(name, result=None):
+        def run(state):
+            calls.append(name)
+            return result or {}
+
+        return run
+
+    def audit(state):
+        calls.append("audit_agent")
+        return {"audit_verdict": next(audit_verdicts)}
+
+    monkeypatch.setattr(workflow, "preflight_node", stage("preflight"))
+    monkeypatch.setattr(workflow, "preprocess_pdf_node", stage("preprocess_pdf"))
+    monkeypatch.setattr(
+        workflow, "preprocessing_agent_node", stage("preprocessing_agent")
+    )
+    monkeypatch.setattr(workflow, "codegen_agent_node", stage("codegen_agent"))
+    monkeypatch.setattr(workflow, "audit_agent_node", audit)
+    monkeypatch.setattr(workflow, "plan_agent_node", stage("plan_agent"))
+    monkeypatch.setattr(workflow, "replicate_agent_node", stage("replicate_agent"))
+    monkeypatch.setattr(workflow, "report_agents_node", stage("report_agents"))
+
+    workflow.create_workflow().invoke({"config": object()})
+
+    assert calls == [
+        "preflight",
+        "preprocess_pdf",
+        "preprocessing_agent",
+        "codegen_agent",
+        "audit_agent",
+        "codegen_agent",
+        "audit_agent",
+        "plan_agent",
+        "replicate_agent",
+        "report_agents",
+    ]
 
 
 def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path):

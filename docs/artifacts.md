@@ -13,6 +13,11 @@ runs/<run_id>/
 ├── preprocessing/preprocessing_transcript.jsonl
 ├── codegen/codebase/codegen_plan.json
 ├── codegen/codegen_transcript.jsonl
+├── codegen/audit/attempt_001/
+│   ├── audit_report.md
+│   ├── audit_transcript.jsonl
+│   ├── scripts/
+│   └── results/
 ├── plan/replicate_plan.json
 ├── plan/plan_transcript.jsonl
 ├── replication/replication_log.json
@@ -22,6 +27,7 @@ runs/<run_id>/
 ├── report/reproduction_report.md
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
+│   └── audit_attempt_001.md
 ├── system_maintenance/dataset/patch.json
 └── remote_compute/instance.json
 ```
@@ -77,3 +83,13 @@ document, it may add an object containing exactly `"file name"` and
 read-only source dataset. The patch content follows the target document's
 structure and remains a reviewable run artifact rather than being applied
 automatically.
+
+Every scientific preprocessing audit has its own numbered attempt directory;
+technical provider retries remain within that directory and archive earlier
+transcripts using the normal transcript convention. Audit-only CPU, streaming,
+or small-batch adapters remain under `scripts/` and never enter
+`codegen/codebase/`; preprocessing outputs, command logs, and statistics remain
+under `results/`. The Markdown report has no schema or static body validation.
+Its sole machine protocol is exactly one verdict marker as the final non-empty
+line: `Verdict: PASS` or `Verdict: FAIL`. Audit reports are stage artifacts and
+do not change the reproduction report's three-section contract.

@@ -19,6 +19,7 @@ def test_help_lists_required_inputs():
     assert "--paper" in result.stdout
     assert "--output" in result.stdout
     assert "--provider" in result.stdout
+    assert "--data" in result.stdout
     assert "--codex-model" in result.stdout
     assert "--codex-reasoning-effort" in result.stdout
     assert "--smart-replicate" in result.stdout
@@ -166,6 +167,33 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
     assert f"Resuming Replication run: {output}" in result.stdout
     assert invoked == [output]
     assert PipelineState(output).state["resume_count"] == 1
+
+
+def test_replicate_without_data_fails_in_preflight(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    monkeypatch.setattr("medai.cli.release_run_computation_instance", lambda config: None)
+
+    result = runner.invoke(
+        app,
+        [
+            "--replicate",
+            "--paper",
+            str(paper),
+            "--output",
+            str(output),
+            "--provider",
+            "codex",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "require --data" in result.stderr
+    manifest = PipelineState(output).state
+    assert manifest["status"] == "failed"
+    assert manifest["stages"]["preflight"]["status"] == "failed"
+    assert list(manifest["stages"]) == ["preflight"]
 
 
 def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, monkeypatch):

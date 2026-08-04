@@ -41,7 +41,11 @@ def run(
         help="Provider (replicate default: codex; Auto Research default: inherit)",
     ),
     repo: Optional[Path] = typer.Option(None, "--repo", help="Optional code repository"),
-    data: Optional[Path] = typer.Option(None, "--data", help="Optional local data directory"),
+    data: Optional[Path] = typer.Option(
+        None,
+        "--data",
+        help="Local data directory (required for replication; checked in preflight)",
+    ),
     siliconflow_config: Optional[Path] = typer.Option(
         None,
         "--siliconflow-config",

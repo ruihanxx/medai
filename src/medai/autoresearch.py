@@ -53,6 +53,7 @@ REQUIRED_BASE_STAGES = (
     "preprocess_pdf",
     "preprocessing_agent",
     "codegen_agent",
+    "audit_agent",
     "plan_agent",
     "replicate_agent",
     "report_agents",

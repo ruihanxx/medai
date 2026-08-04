@@ -30,8 +30,11 @@ the launcher invokes the host `mineru` command and mounts its temporary output
 read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
 sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
 `MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper` and
-`--provider`; `--repo` and `--data` are optional. Auto Research requires
-`--output runs/<run_id>`, accepts `--max-iter` from 1 through 10 (default 1),
+`--provider`, and `--data`; `--repo` is optional. The CLI accepts a missing
+`--data` long enough to create the run manifest, then fails the started
+`preflight` stage explicitly so the failed run remains inspectable. Auto
+Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 through
+10 (default 1),
 accepts a non-negative `--assessment-threshold` for the weighted relative
 improvement score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
 and `--smart-replicate`.
@@ -43,7 +46,7 @@ filename. Passing `--output runs/<run_id>` mounts that existing directory and
 resumes it.
 
 Auto Research restores paper, repository, and data locations from the base
-manifest, skips MinerU, and requires the base run to be completed with all seven
+manifest, skips MinerU, and requires the base run to be completed with all eight
 canonical replicate stages reloadable. The launcher mounts the base run
 read-only at `/workspace/base-run`, mounts only its `autoresearch/` child
 writable at `/workspace/autoresearch`, and remounts the recorded source data
