@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -28,11 +29,18 @@ SUPPORTED_GPU_SPECS = {
 def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
     if not TOKEN:
         raise RuntimeError("AUTODL_TOKEN is not configured")
+    url = BASE_URL + path
+    data = json.dumps(body).encode("utf-8")
+    headers = {"Authorization": TOKEN, "Content-Type": "application/json"}
+    if method == "GET":
+        url += "?" + urllib.parse.urlencode(body)
+        data = None
+        headers.pop("Content-Type")
     http_request = urllib.request.Request(
-        BASE_URL + path,
-        data=json.dumps(body).encode("utf-8"),
+        url,
+        data=data,
         method=method,
-        headers={"Authorization": TOKEN, "Content-Type": "application/json"},
+        headers=headers,
     )
     try:
         with urllib.request.urlopen(http_request, timeout=30) as response:
@@ -75,6 +83,10 @@ def ssh_prefix(details: dict[str, Any]) -> list[str]:
 
 
 def create_instance(args: argparse.Namespace) -> None:
+    if args.state.exists():
+        raise SystemExit(
+            f"AutoDL state already exists; inspect or release it before creating: {args.state}"
+        )
     if args.gpu_spec not in SUPPORTED_GPU_SPECS:
         choices = ", ".join(sorted(SUPPORTED_GPU_SPECS))
         raise SystemExit(
@@ -99,21 +111,6 @@ def create_instance(args: argparse.Namespace) -> None:
         },
     )
     instance_uuid = str(payload["data"])
-    deadline = time.monotonic() + 600
-    status = ""
-    while time.monotonic() < deadline:
-        status = str(
-            request(
-                "GET",
-                "/api/v1/dev/instance/pro/status",
-                {"instance_uuid": instance_uuid},
-            )["data"]
-        )
-        if status == "running":
-            break
-        time.sleep(10)
-    if status != "running":
-        raise SystemExit(f"AutoDL instance did not start; last status={status}")
     args.state.parent.mkdir(parents=True, exist_ok=True)
     args.state.write_text(
         json.dumps(
@@ -133,6 +130,21 @@ def create_instance(args: argparse.Namespace) -> None:
         + "\n",
         encoding="utf-8",
     )
+    deadline = time.monotonic() + 600
+    status = ""
+    while time.monotonic() < deadline:
+        status = str(
+            request(
+                "GET",
+                "/api/v1/dev/instance/pro/status",
+                {"instance_uuid": instance_uuid},
+            )["data"]
+        )
+        if status == "running":
+            break
+        time.sleep(10)
+    if status != "running":
+        raise SystemExit(f"AutoDL instance did not start; last status={status}")
     print(instance_uuid)
 
 

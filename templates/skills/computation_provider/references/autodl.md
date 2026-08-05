@@ -187,7 +187,10 @@ connection or transfer. Do not persist the returned password or Jupyter token.
 Record the selection rationale in the plan artifacts; do not hand-edit the
 provider, ownership, lifecycle, or provider-state fields.
 
-The script uses these reviewed Pro API operations:
+The script sends `POST` request bodies as JSON. For the provider's `GET`
+operations, it sends `instance_uuid` as a URL query parameter (not a JSON
+body), because the current API rejects GET JSON bodies with a parameter error.
+It uses these reviewed Pro API operations:
 
 | Purpose | Method and path |
 | --- | --- |
@@ -224,8 +227,10 @@ The current script:
 - requires a host driver compatible with CUDA 11.8 or newer;
 - uses `--image-uuid` when supplied, otherwise `AUTODL_IMAGE_UUID`, and a
   timestamped `medai-` instance name;
-- waits up to ten minutes, polling every ten seconds for `running`; and
-- writes state only after the instance reaches `running`.
+- records current-run ownership and the returned instance UUID immediately
+  after AutoDL accepts the create request; and
+- waits up to ten minutes, polling every ten seconds for `running` before
+  returning success.
 
 If the experiment needs a specific region, system-disk expansion, another CUDA
 driver floor, a different billing mode, or more than four GPUs, this script does
@@ -392,11 +397,10 @@ durable backup.
   operation, and do not choose another resource or retry billable creation
   blindly. A failed `create` must make the invoking Codex agent exit nonzero;
   do not continue the run locally or with another rental.
-- **Creation timeout:** The API may have created an instance before the script's
-  ten-minute wait failed, but the current script writes state only after
-  `running`. Inspect the AutoDL console immediately, identify the timestamped
-  `medai-` instance created by the attempt, and power it off and release it
-  manually. Do not call `create` again until cleanup is confirmed.
+- **Creation timeout or status-poll failure:** The current-run state is written
+  as soon as AutoDL returns the instance UUID, before polling starts. Inspect
+  that state with `status`, then power off and release the recorded instance if
+  it cannot be used. Do not call `create` again while that state exists.
 - **SSH failure:** Recheck `status`; then validate the current snapshot host,
   port, credential availability, local `ssh`/`scp`/`sshpass`, network access,
   and host identity. Never disable host verification to force a connection.
