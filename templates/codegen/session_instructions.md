@@ -244,11 +244,20 @@ your decisions so they are inspectable and machine-readable. Schema:
 }
 ```
 
-If remote compute is required, `remote_compute` must instead contain its
-provider, the exact `{{ computation_provider_state_path }}`, remote working
-directory, and setup hints. Codegen validates that state before this stage can
-complete; a missing, released, foreign, or malformed instance state fails the
-run before the next agent starts.
+If remote compute is required, `remote_compute` must instead contain these
+required fields:
+
+```json
+{
+  "state_path": "{{ computation_provider_state_path }}",
+  "remote_working_dir": "<provider-reference-defined-run-directory>",
+  "remote_dataset_dir": "<provider-reference-defined-read-only-dataset-directory>"
+}
+```
+
+You may add provider, resource, image, connection, setup, or rationale fields
+needed for execution and audit. Static validation checks only the three required
+fields above; `state_path` must name the exact current-run path shown here.
 
 The `ambiguities` field is the place to flag every point where the paper
 underspecifies methodology and you had to make a judgment call. List the

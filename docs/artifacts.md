@@ -102,3 +102,12 @@ under `results/`. The Markdown report has no schema or static body validation.
 Its sole machine protocol is exactly one verdict marker as the final non-empty
 line: `Verdict: PASS` or `Verdict: FAIL`. Audit reports are stage artifacts and
 do not change the reproduction report's three-section contract.
+
+Remote-compute objects in codegen, replication, and Auto Research plans require
+only `state_path`, `remote_working_dir`, and `remote_dataset_dir`. The directory
+fields identify the run-owned remote workspace and the remote read-only dataset
+location. Additional provider, resource, image, connection, setup, and rationale
+fields are accepted. Schema validation is limited to these three required
+fields. Codegen orchestration additionally verifies that `state_path` is the
+current run's canonical remote-state path; provider-specific lifecycle
+validation remains a runtime provider-script responsibility.

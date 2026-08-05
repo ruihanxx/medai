@@ -96,11 +96,12 @@ class SkillCorrectionsFile(RootModel[list[SkillCorrection]]):
     pass
 
 
-class RemoteComputePlan(StrictModel):
-    provider: str = Field(min_length=1)
-    state_path: str
-    remote_working_directory: str
-    setup_hints: list[str]
+class RemoteComputePlan(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    state_path: str = Field(min_length=1)
+    remote_working_dir: str = Field(min_length=1)
+    remote_dataset_dir: str = Field(min_length=1)
 
 
 class CodegenPlan(StrictModel):

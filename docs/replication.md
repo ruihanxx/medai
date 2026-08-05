@@ -45,9 +45,10 @@ inventory query is available, the agent rents the selected resource directly.
 An explicit no-inventory response permits exactly one attempt with a stronger
 eligible GPU that preserves every original requirement; a failed retry is
 terminal. If recovery remains unsuccessful, the invoking Codex agent exits
-nonzero. When codegen records a remote-compute plan, its instance state is
-statically validated before the stage completes; a missing or invalid state
-terminates the run through the normal `failed` state and cleanup path. A
+nonzero. When codegen records a remote-compute plan, orchestration statically
+validates only its current-run state path, remote working directory, and remote
+dataset directory before the stage completes. Additional provider metadata is
+accepted, and provider-specific lifecycle validation occurs at runtime. A
 successful procedure that conflicts with the skill reference is recorded in
 `system_maintenance/skills/corrections.json`, not applied to the repository
 skill during the run.

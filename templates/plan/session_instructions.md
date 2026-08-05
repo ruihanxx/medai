@@ -152,9 +152,10 @@ If replication requires remote compute, add this top-level object alongside
 ```json
 {
     "remote_compute": {
-        "provider": "<selected-provider>",
         "state_path": "{{ computation_provider_state_path }}",
-        "remote_working_directory": "<provider-reference-defined-run-directory>",
+        "remote_working_dir": "<provider-reference-defined-run-directory>",
+        "remote_dataset_dir": "<provider-reference-defined-read-only-dataset-directory>",
+        "provider": "<selected-provider>",
         "setup_hints": [
             "Use the selected provider reference and the local state at {{ computation_provider_state_path }} to resolve the current connection and connect to the remote server.",
             "Upload the code from {{ codebase_dir }}/ and the experiment's required input data to the run-owned locations defined by the selected provider reference."
@@ -162,6 +163,8 @@ If replication requires remote compute, add this top-level object alongside
     }
 }
 ```
+Only `state_path`, `remote_working_dir`, and `remote_dataset_dir` are required
+and statically validated. Additional provider and execution fields are allowed.
 Also add a step in `"steps"` to terminate and release the instance.
 
 Begin your analysis now.

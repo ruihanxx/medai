@@ -47,7 +47,9 @@ Write `{{ experiment_plan_path }}`:
 ```
 
 Add the existing optional `remote_compute` object only when remote compute is
-required.
+required. Copy its required `state_path`, `remote_working_dir`, and
+`remote_dataset_dir` fields; additional provider and execution fields are
+allowed.
 
 ## Constraints
 

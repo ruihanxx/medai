@@ -190,24 +190,6 @@ def validate_codegen_remote_compute(plan: CodegenPlan, state_path: Path) -> None
             "Codegen remote-compute state path does not match the current run: "
             f"{remote_compute.state_path}"
         )
-    try:
-        instance = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(
-            f"Codegen requires a valid remote instance state: {state_path}"
-        ) from exc
-    provider_state = instance.get("provider_state")
-    if (
-        instance.get("provider") != remote_compute.provider
-        or instance.get("created_by_run") is not True
-        or instance.get("released") is not False
-        or not isinstance(provider_state, dict)
-        or not all(
-            provider_state.get(name)
-            for name in ("instance_uuid", "gpu_spec_uuid", "gpu_count", "image_uuid")
-        )
-    ):
-        raise RuntimeError(f"Codegen remote instance state is invalid: {state_path}")
 
 
 def preflight_node(state: WorkflowState) -> dict[str, str]:

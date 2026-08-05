@@ -16,44 +16,48 @@ from medai.workflow import (
 )
 
 
-def test_codegen_remote_compute_requires_current_instance_state(tmp_path: Path):
+def test_codegen_remote_compute_requires_only_static_paths(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
-    state_path.parent.mkdir()
-    plan = CodegenPlan.model_validate(
+    remote_compute = {
+        "state_path": str(state_path),
+        "remote_working_dir": "/remote/run",
+        "remote_dataset_dir": "/remote/data",
+        "provider": "example-provider",
+        "selection_rationale": "Selected by the provider procedure.",
+    }
+    payload = {
+        "files": [{"path": "run.py", "responsibility": "Run"}],
+        "dependency_order": ["run.py"],
+        "entry_points": ["run.py"],
+        "shared_state": "None",
+        "ambiguities": [],
+        "remote_compute": remote_compute,
+    }
+    plan = CodegenPlan.model_validate(payload)
+
+    assert plan.remote_compute is not None
+    assert plan.remote_compute.model_dump()["selection_rationale"].startswith("Selected")
+    validate_codegen_remote_compute(plan, state_path)
+
+    for field in ("state_path", "remote_working_dir", "remote_dataset_dir"):
+        missing = {
+            **payload,
+            "remote_compute": {k: v for k, v in remote_compute.items() if k != field},
+        }
+        with pytest.raises(ValueError, match=field):
+            CodegenPlan.model_validate(missing)
+
+    mismatched = CodegenPlan.model_validate(
         {
-            "files": [{"path": "run.py", "responsibility": "Run"}],
-            "dependency_order": ["run.py"],
-            "entry_points": ["run.py"],
-            "shared_state": "None",
-            "ambiguities": [],
+            **payload,
             "remote_compute": {
-                "provider": "example-provider",
-                "state_path": str(state_path),
-                "remote_working_directory": "/root/autodl-tmp/run",
-                "setup_hints": ["Use the selected provider reference."],
+                **remote_compute,
+                "state_path": str(tmp_path / "other" / "instance.json"),
             },
         }
     )
-    with pytest.raises(RuntimeError, match="requires a valid remote instance state"):
-        validate_codegen_remote_compute(plan, state_path)
-
-    state_path.write_text(
-        json.dumps(
-            {
-                "provider": "example-provider",
-                "created_by_run": True,
-                "released": False,
-                "provider_state": {
-                    "instance_uuid": "pro-123",
-                    "gpu_spec_uuid": "v-48g",
-                    "gpu_count": 1,
-                    "image_uuid": "base-image-l2t43iu6uk",
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    validate_codegen_remote_compute(plan, state_path)
+    with pytest.raises(RuntimeError, match="does not match the current run"):
+        validate_codegen_remote_compute(mismatched, state_path)
 
 
 def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):

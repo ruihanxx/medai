@@ -71,14 +71,14 @@
   If local capacity is below that floor, codegen must use configured remote
   compute; CPU feasibility or a smaller inferred workload does not permit a
   CPU substitution.
-- When codegen requires remote compute, it records that decision and the exact
-  current-run state path in `codegen_plan.json`. Before codegen completes,
-  orchestration validates that the recorded instance is current-run-owned,
-  unreleased, and has the required connection state. For every remote-server
-  interaction, including instance creation, the agent starts with the selected
-  provider reference but may consult official online documentation and use
-  reasoned, non-secret diagnostics for bounded, safe recovery attempts. If
-  recovery still fails, it exits nonzero. A successful procedure that conflicts
-  with the reference is recorded for review in
+- When codegen requires remote compute, it records the exact current-run state
+  path, remote working directory, and remote dataset directory in
+  `codegen_plan.json`. Orchestration statically validates only these required
+  fields and accepts additional provider-specific plan metadata. For every
+  remote-server interaction, including instance creation, the agent starts with
+  the selected provider reference but may consult official online documentation
+  and use reasoned, non-secret diagnostics for bounded, safe recovery attempts.
+  If recovery still fails, it exits nonzero. A successful procedure that
+  conflicts with the reference is recorded for review in
   `system_maintenance/skills/corrections.json`; it does not edit repository
   skills during the run.
