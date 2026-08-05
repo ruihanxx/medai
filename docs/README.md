@@ -25,5 +25,7 @@ contract files by default.
 - `artifacts.md`: persistent path and artifact-validation contract.
 - `agents.md`: agent, prompt, skill, and external-compute boundaries.
 - `acceptance.md`: repository acceptance checks.
+- `../scripts/`: operator-maintained API guides for external services; these are
+  not runtime skills or agent instructions.
 
 Put each rule in one canonical file. Link to it elsewhere instead of restating it.
