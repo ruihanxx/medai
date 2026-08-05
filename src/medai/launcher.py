@@ -377,7 +377,8 @@ def _run_parser() -> argparse.ArgumentParser:
     mode.add_argument("--autoresearch", action="store_true")
     parser.add_argument("--paper", type=Path)
     parser.add_argument("--repo", type=Path)
-    parser.add_argument("--data", type=Path)
+    parser.add_argument("--data")
+    parser.add_argument("--clouddrive", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--provider")
     parser.add_argument("--siliconflow-config", type=Path)
@@ -473,6 +474,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
     paper = None
     repo = None
     data = None
+    cloud_dataset = None
     base_run = None
     autoresearch_output = None
     inherited_inputs: dict[str, object] = {}
@@ -487,15 +489,32 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         if paper.suffix.casefold() != ".pdf":
             raise LauncherError(f"--paper must be a PDF: {paper}")
         repo = _optional_directory(args.repo, "--repo")
-        data = _optional_directory(args.data, "--data")
+        if args.clouddrive:
+            cloud_dataset = (args.data or "").strip()
+            if (
+                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", cloud_dataset)
+                or cloud_dataset in {".", ".."}
+            ):
+                raise LauncherError(
+                    "--clouddrive requires --data as one safe directory name"
+                )
+        else:
+            data = _optional_directory(Path(args.data), "--data") if args.data else None
         provider = (args.provider or "codex").strip().casefold()
         codex_model = args.codex_model
         codex_reasoning_effort = args.codex_reasoning_effort
         max_iter = None
         assessment_threshold = None
     else:
-        if args.paper is not None or args.repo is not None or args.data is not None:
-            raise LauncherError("--autoresearch does not accept --paper, --repo, or --data")
+        if (
+            args.paper is not None
+            or args.repo is not None
+            or args.data is not None
+            or args.clouddrive
+        ):
+            raise LauncherError(
+                "--autoresearch does not accept --paper, --repo, --data, or --clouddrive"
+            )
         if args.smart_replicate:
             raise LauncherError("--smart-replicate requires --replicate")
         max_iter = args.max_iter if args.max_iter is not None else 1
@@ -521,6 +540,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         if not isinstance(inherited, dict):
             raise LauncherError(f"Base run manifest has invalid inputs: {manifest_path}")
         inherited_inputs = inherited
+        if inherited_inputs.get("clouddrive"):
+            raise LauncherError("Auto Research does not support a cloud-backed base run")
         provider = (args.provider or str(inherited_inputs.get("provider", ""))).strip().casefold()
         if not provider:
             raise LauncherError("Base run does not record a provider; pass --provider")
@@ -711,6 +732,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             )
             if args.replicate:
                 cli_args.extend(["--data", "/workspace/data"])
+        if cloud_dataset:
+            cli_args.extend(["--clouddrive", "--data", cloud_dataset])
         if siliconflow_config:
             docker_args.extend(
                 [

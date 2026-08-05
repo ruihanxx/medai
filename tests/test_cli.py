@@ -20,6 +20,7 @@ def test_help_lists_required_inputs():
     assert "--output" in result.stdout
     assert "--provider" in result.stdout
     assert "--data" in result.stdout
+    assert "--clouddrive" in result.stdout
     assert "--codex-model" in result.stdout
     assert "--codex-reasoning-effort" in result.stdout
     assert "--smart-replicate" in result.stdout
@@ -78,6 +79,89 @@ def test_codex_reasoning_effort_is_validated(tmp_path: Path):
             data=None,
             siliconflow_config=None,
             codex_reasoning_effort="extreme",
+        )
+
+
+def test_cloud_drive_config_and_manifest_are_remote_only(
+    tmp_path: Path, monkeypatch
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    monkeypatch.setenv("AUTODL_TOKEN", "api-secret")
+    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image-id")
+    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "panel-secret")
+
+    config = RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data="mimic-iv",
+        siliconflow_config=None,
+        clouddrive=True,
+    )
+    inputs = build_run_inputs(config)
+
+    assert config.data is None
+    assert config.cloud_dataset == "mimic-iv"
+    assert config.drive_provider == "aliyun"
+    assert inputs["data"] is None
+    assert inputs["data_source"] is None
+    assert inputs["clouddrive"] is True
+    assert inputs["cloud_source"] == "medai/mimic-iv"
+    assert "panel-secret" not in json.dumps(inputs)
+
+
+@pytest.mark.parametrize("dataset", ["../mimic", "a/b", ".", "/absolute"])
+def test_cloud_drive_rejects_unsafe_dataset_names(
+    tmp_path: Path, monkeypatch, dataset: str
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    monkeypatch.setenv("AUTODL_TOKEN", "token")
+    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image")
+    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "password")
+
+    with pytest.raises(ValueError, match="safe directory name"):
+        RunConfig.create(
+            paper=paper,
+            output=tmp_path / "output",
+            provider="codex",
+            repo=None,
+            data=dataset,
+            siliconflow_config=None,
+            clouddrive=True,
+        )
+
+
+def test_cloud_drive_requires_supported_provider_and_password(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    monkeypatch.setenv("AUTODL_TOKEN", "token")
+    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image")
+    monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "other")
+
+    with pytest.raises(ValueError, match="must be 'aliyun'"):
+        RunConfig.create(
+            paper=paper,
+            output=tmp_path / "output",
+            provider="codex",
+            repo=None,
+            data="mimic-iv",
+            siliconflow_config=None,
+            clouddrive=True,
+        )
+
+    monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "aliyun")
+    with pytest.raises(ValueError, match="AUTODL_AUTOPANEL_PASSWORD"):
+        RunConfig.create(
+            paper=paper,
+            output=tmp_path / "output",
+            provider="codex",
+            repo=None,
+            data="mimic-iv",
+            siliconflow_config=None,
+            clouddrive=True,
         )
 
 
@@ -355,3 +439,20 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "between 1 and 10" in result.stderr
+
+
+def test_autoresearch_rejects_cloud_backed_base_run(tmp_path: Path):
+    base_run = tmp_path / "base"
+    base_run.mkdir()
+    (base_run / "manifest.json").write_text(
+        json.dumps({"inputs": {"provider": "codex", "clouddrive": True}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="cloud-backed"):
+        AutoResearchConfig.create(
+            base_run=base_run,
+            output=base_run / "autoresearch",
+            provider=None,
+            siliconflow_config=None,
+        )

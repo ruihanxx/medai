@@ -33,13 +33,20 @@ def build_run_inputs(config: RunConfig) -> dict[str, Any]:
             str(config.data) if config.data else "",
         )
         or None,
+        "clouddrive": config.clouddrive,
+        "drive_provider": config.drive_provider,
+        "cloud_dataset": config.cloud_dataset,
+        "cloud_source": (
+            f"medai/{config.cloud_dataset}" if config.cloud_dataset else None
+        ),
         "provider": config.provider,
         "codex_model": config.codex_model,
         "codex_reasoning_effort": config.codex_reasoning_effort,
         "smart_replicate": config.smart_replicate,
         "computation_provider": (
             "autodl"
-            if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
+            if config.clouddrive
+            or (os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID"))
             else None
         ),
         "autodl_image_uuid": (

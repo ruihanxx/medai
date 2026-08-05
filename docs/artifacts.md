@@ -111,3 +111,10 @@ fields are accepted. Schema validation is limited to these three required
 fields. Codegen orchestration additionally verifies that `state_path` is the
 current run's canonical remote-state path; provider-specific lifecycle
 validation remains a runtime provider-script responsibility.
+
+Replication manifest inputs distinguish local and cloud data. A cloud run sets
+`clouddrive: true`, `drive_provider`, `cloud_dataset`, and `cloud_source`, while
+both `data` and `data_source` remain null. These fields are part of the resume
+fingerprint. Local runs set the cloud fields to false/null and retain the
+existing `data` and `data_source` behavior. Secrets used to access AutoPanel or
+the drive are never persistent artifacts.

@@ -30,14 +30,21 @@ the launcher invokes the host `mineru` command and mounts its temporary output
 read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
 sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
 `MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper` and
-`--provider`, and `--data`; `--repo` is optional. The CLI accepts a missing
+`--provider`, and `--data`; `--repo` is optional. Normally `--data` is an
+existing local directory mounted read-only. With `--clouddrive`, `--data` is
+instead one safe dataset directory name (for example `mimic-iv`), no host data
+directory is mounted, and the dataset is fully downloaded onto the AutoDL data
+disk before any remote inspection. Cloud-drive names reject slashes, absolute
+paths, `.` and `..`. The CLI accepts a missing
 `--data` long enough to create the run manifest, then fails the started
 `preflight` stage explicitly so the failed run remains inspectable. Auto
 Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 through
 10 (default 1),
 accepts a non-negative `--assessment-threshold` for the weighted relative
 improvement score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
-and `--smart-replicate`.
+and `--smart-replicate`. Auto Research also rejects a base run whose data came
+from `--clouddrive`; cloud datasets are intentionally scoped to their original
+replication instance.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. The host `~/.ssh` directory is copied from its read-only
@@ -83,6 +90,14 @@ The `codex` provider accepts `--codex-model` and
 `--codex-reasoning-effort`. When omitted, these values come from
 `MEDAI_CODEX_MODEL` and `MEDAI_CODEX_REASONING_EFFORT` in the project `.env`.
 The resolved values are recorded in `manifest.json`.
+
+Cloud-drive configuration comes only from the environment. `MEDAI_DRIVE_PROVIDER`
+defaults to `aliyun`, which is currently the only accepted value;
+`AUTODL_AUTOPANEL_PASSWORD` is required. The password is never placed in the
+manifest, command arguments, prompts, or logs. `AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS`
+defaults to 1800, and `AUTODL_CLOUDDRIVE_GPU_SPEC` defaults to `v-32g-p` when
+the paper provides no GPU requirement. `AUTODL_TOKEN` and `AUTODL_IMAGE_UUID`
+remain required because cloud-drive mode always uses AutoDL.
 
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a

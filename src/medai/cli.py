@@ -41,10 +41,15 @@ def run(
         help="Provider (replicate default: codex; Auto Research default: inherit)",
     ),
     repo: Optional[Path] = typer.Option(None, "--repo", help="Optional code repository"),
-    data: Optional[Path] = typer.Option(
+    data: Optional[str] = typer.Option(
         None,
         "--data",
-        help="Local data directory (required for replication; checked in preflight)",
+        help="Local data directory, or one dataset name with --clouddrive",
+    ),
+    clouddrive: bool = typer.Option(
+        False,
+        "--clouddrive",
+        help="Materialize --data from the configured cloud drive on AutoDL",
     ),
     siliconflow_config: Optional[Path] = typer.Option(
         None,
@@ -104,15 +109,22 @@ def run(
                 codex_model=codex_model,
                 codex_reasoning_effort=codex_reasoning_effort,
                 smart_replicate=smart_replicate,
+                clouddrive=clouddrive,
             )
             inputs = build_run_inputs(config)
             workflow = create_workflow()
             completion_label = "Replication"
         else:
-            if paper is not None or repo is not None or data is not None or smart_replicate:
+            if (
+                paper is not None
+                or repo is not None
+                or data is not None
+                or smart_replicate
+                or clouddrive
+            ):
                 raise ValueError(
                     "--autoresearch does not accept --paper, --repo, --data, "
-                    "or --smart-replicate"
+                    "--clouddrive, or --smart-replicate"
                 )
             resolved_base_run = base_run or output
             resolved_output = output if base_run else output / "autoresearch"

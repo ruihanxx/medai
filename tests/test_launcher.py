@@ -303,3 +303,42 @@ def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
     assert f"src={base_run / 'autoresearch'},dst=/workspace/autoresearch" in calls
     assert "--autoresearch --base-run /workspace/base-run" in calls
     assert "--assessment-threshold 0.0" in calls
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")
+def test_cloud_drive_dataset_is_not_mounted_from_host(tmp_path: Path):
+    launcher, env, command_log, _ = prepare_launcher(tmp_path)
+    initialized = subprocess.run(
+        [str(launcher), "init"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    command_log.write_text("", encoding="utf-8")
+
+    run = subprocess.run(
+        [
+            str(launcher),
+            "--replicate",
+            "--paper",
+            str(paper),
+            "--clouddrive",
+            "--data",
+            "mimic-iv",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert run.returncode == 0, run.stderr
+    calls = command_log.read_text(encoding="utf-8")
+    assert "--clouddrive --data mimic-iv" in calls
+    assert "dst=/workspace/data" not in calls
