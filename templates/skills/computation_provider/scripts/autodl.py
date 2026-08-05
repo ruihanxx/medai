@@ -266,6 +266,12 @@ def _ssh_command(
 def remote_exec(state: dict[str, Any], command: list[str]) -> str:
     completed = _ssh_command(state, "exec", ["--", *command])
     if completed.returncode != 0:
+        for safe_error in (
+            "Password SSH fallback requires sshpass",
+            "SSH public-key authentication failed and no fallback password is available",
+        ):
+            if safe_error in completed.stderr:
+                raise RuntimeError(f"AutoDL remote command failed: {safe_error}")
         raise RuntimeError("AutoDL remote command failed")
     return completed.stdout.strip()
 

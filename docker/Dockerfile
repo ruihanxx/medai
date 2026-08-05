@@ -24,6 +24,10 @@ RUN MAKEFLAGS=-j1 R --vanilla --slave -e '\
     install("rms", "8.1-1"); \
     install("comorbidity", "1.1.0")'
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssh-client sshpass \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY templates ./templates
