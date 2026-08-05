@@ -45,6 +45,11 @@ settings and store configuration in the repository-root `.env`:
 | `AUTODL_IMAGE_UUID` | Yes | Default private or public image UUID used when the paper has no explicit software versions. |
 | `AUTODL_API_BASE_URL` | No | API origin; the script defaults to `https://api.autodl.com`. |
 
+`AUTODL_TOKEN` may be written with or without one pair of surrounding single or
+double quotes. This accommodates Docker `--env-file`, which preserves those
+quotes; the script removes only the outer quote pair before sending the
+Authorization header.
+
 Do not print these values or copy them into prompts, transcripts, state files,
 remote commands, logs, or result artifacts. The runtime must provide Python,
 OpenSSH client tools, and `sshpass` when the API returns a root password. The

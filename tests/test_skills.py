@@ -40,6 +40,21 @@ def autodl_api(
                 response_counts[key] = index + 1
             else:
                 payload = response
+            expected_authorization = payload.get("_expected_authorization")
+            if (
+                expected_authorization is not None
+                and self.headers.get("Authorization") != expected_authorization
+            ):
+                payload = {
+                    "code": "AuthenticationFailed",
+                    "msg": "unexpected Authorization header",
+                }
+            else:
+                payload = {
+                    name: value
+                    for name, value in payload.items()
+                    if name != "_expected_authorization"
+                }
             encoded = json.dumps(payload).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -115,6 +130,44 @@ def test_autodl_skill_rejects_gpu_outside_the_pro_pool_before_api_access(tmp_pat
     )
     assert completed.returncode != 0
     assert "Unsupported AutoDL Pro GPU specification" in completed.stderr
+
+
+def test_autodl_create_strips_outer_quotes_from_token(tmp_path: Path):
+    instance_uuid = "pro-quoted-token"
+    with autodl_api(
+        {
+            ("POST", "/api/v1/dev/instance/pro/create"): {
+                "_expected_authorization": "test-token",
+                "code": "Success",
+                "data": instance_uuid,
+            },
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "Success",
+                "data": "running",
+            },
+        }
+    ) as (base_url, _):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "create",
+                "--gpu-spec",
+                "v-48g-350w",
+                "--state",
+                str(tmp_path / "instance.json"),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": '"test-token"',
+                "AUTODL_IMAGE_UUID": "base-image-test",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_autodl_create_uses_query_status_and_retains_state_after_poll_failure(

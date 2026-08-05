@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 BASE_URL = os.environ.get("AUTODL_API_BASE_URL", "https://api.autodl.com").rstrip("/")
-TOKEN = os.environ.get("AUTODL_TOKEN", "")
+TOKEN = os.environ.get("AUTODL_TOKEN", "").strip().strip("'\"")
 SUPPORTED_GPU_SPECS = {
     "h800",
     "v-48g",

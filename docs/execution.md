@@ -40,10 +40,12 @@ improvement score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
 and `--smart-replicate`.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
-mounted read-only. A new invocation creates a unique run directory under the
-repository-root `runs/` directory, named from its UTC start time and paper
-filename. Passing `--output runs/<run_id>` mounts that existing directory and
-resumes it.
+mounted read-only. The project `.env` is passed to Docker with `--env-file`, so
+provider skills must tolerate Docker's literal preservation of optional
+surrounding quotes in credential values. A new invocation creates a unique run
+directory under the repository-root `runs/` directory, named from its UTC start
+time and paper filename. Passing `--output runs/<run_id>` mounts that existing
+directory and resumes it.
 
 Auto Research restores paper, repository, and data locations from the base
 manifest, skips MinerU, and requires the base run to be completed with all eight
