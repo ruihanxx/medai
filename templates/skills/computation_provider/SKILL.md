@@ -69,10 +69,13 @@ derive a provider-specific state filename.
 
 ### Connect to a Remote Machine
 
-Confirm the instance is running and use the connection method documented by the
-provider. Keep authentication material local, validate the remote identity, and
-avoid exposing credentials through arguments, logs, transcripts, or artifacts.
-Fail explicitly when the connection cannot be authenticated or established.
+Confirm the instance is running, then let the selected provider resolve only its
+provider-specific SSH host, port, user, and optional fallback password. Delegate
+authentication, command execution, and transfers to the sibling
+`../remote-server/SKILL.md`. That provider-independent skill safely probes SSH
+public-key authentication first and uses a provider-supplied password only when
+the key probe fails. Keep authentication material local, validate the remote
+identity, and fail explicitly when neither method authenticates.
 
 ### Initialize the Remote Environment
 

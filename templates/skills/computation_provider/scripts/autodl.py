@@ -3,9 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shlex
-import shutil
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -15,6 +14,9 @@ from typing import Any
 
 BASE_URL = os.environ.get("AUTODL_API_BASE_URL", "https://api.autodl.com").rstrip("/")
 TOKEN = os.environ.get("AUTODL_TOKEN", "").strip().strip("'\"")
+REMOTE_SERVER_SCRIPT = (
+    Path(__file__).resolve().parents[2] / "remote-server" / "scripts" / "ssh.py"
+)
 SUPPORTED_GPU_SPECS = {
     "h800",
     "v-48g",
@@ -79,16 +81,6 @@ def snapshot(state: dict[str, Any]) -> dict[str, Any]:
         {"instance_uuid": state["provider_state"]["instance_uuid"]},
     )
     return payload["data"]
-
-
-def ssh_prefix(details: dict[str, Any]) -> list[str]:
-    password = str(details.get("root_password") or "")
-    if password:
-        sshpass = shutil.which("sshpass")
-        if sshpass is None:
-            raise RuntimeError("Password SSH requires sshpass")
-        return [sshpass, "-p", password]
-    return []
 
 
 def create_instance(args: argparse.Namespace) -> None:
@@ -240,46 +232,31 @@ elif args.action == "release":
 elif args.action in {"exec", "upload", "download"}:
     state = load_state(args.state)
     details = snapshot(state)
-    host = str(details["proxy_host"])
-    port = str(details["ssh_port"])
-    target = f"root@{host}"
-    prefix = ssh_prefix(details)
+    command = [
+        sys.executable,
+        str(REMOTE_SERVER_SCRIPT),
+        "--host",
+        str(details["proxy_host"]),
+        "--port",
+        str(details["ssh_port"]),
+        "--user",
+        "root",
+        args.action,
+    ]
     if args.action == "exec":
         command_parts = args.command[1:] if args.command[:1] == ["--"] else args.command
         if not command_parts:
             raise SystemExit("exec requires a command")
-        remote_command = " ".join(shlex.quote(item) for item in command_parts)
-        command = [
-            *prefix,
-            "ssh",
-            "-p",
-            port,
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            target,
-            remote_command,
-        ]
+        command.extend(["--", *command_parts])
     elif args.action == "upload":
-        command = [
-            *prefix,
-            "scp",
-            "-rP",
-            port,
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            str(args.source),
-            f"{target}:{args.remote}",
-        ]
+        command.extend(["--source", str(args.source), "--remote", args.remote])
     else:
-        args.destination.parent.mkdir(parents=True, exist_ok=True)
-        command = [
-            *prefix,
-            "scp",
-            "-rP",
-            port,
-            "-o",
-            "StrictHostKeyChecking=accept-new",
-            f"{target}:{args.remote}",
-            str(args.destination),
-        ]
-    raise SystemExit(subprocess.run(command).returncode)
+        command.extend(
+            ["--remote", args.remote, "--destination", str(args.destination)]
+        )
+    environment = os.environ.copy()
+    environment.pop("REMOTE_SERVER_PASSWORD", None)
+    password = str(details.get("root_password") or "")
+    if password:
+        environment["REMOTE_SERVER_PASSWORD"] = password
+    raise SystemExit(subprocess.run(command, env=environment).returncode)

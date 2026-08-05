@@ -54,6 +54,9 @@
   cause and update the corresponding ambiguity; it may not alter models,
   training, evaluation, or result artifacts to chase paper values.
 - Remote compute access is exposed through the `computation-provider` skill.
+  Provider references resolve provider-specific SSH connection metadata; the
+  sibling `remote-server` skill owns provider-independent key-first
+  authentication, password fallback, command execution, and file transfer.
   Only instances created by the current run may be automatically powered off or
   released. After replication finishes and required outputs are transferred,
   the replicate stage must release them; host cleanup retries release on
