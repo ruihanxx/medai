@@ -214,11 +214,15 @@ elif args.action == "release":
     state = load_state(args.state)
     if not state.get("created_by_run"):
         raise SystemExit("Refusing to release an instance not created by this run")
-    request(
-        "POST",
-        "/api/v1/dev/instance/pro/power_off",
-        {"instance_uuid": state["provider_state"]["instance_uuid"]},
-    )
+    try:
+        request(
+            "POST",
+            "/api/v1/dev/instance/pro/power_off",
+            {"instance_uuid": state["provider_state"]["instance_uuid"]},
+        )
+    except RuntimeError as exc:
+        if "当前实例已关机" not in str(exc):
+            raise
     request(
         "POST",
         "/api/v1/dev/instance/pro/release",

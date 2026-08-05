@@ -60,9 +60,12 @@
   Only instances created by the current run may be automatically powered off or
   released. After replication finishes and required outputs are transferred,
   the replicate stage must release them; host cleanup retries release on
-  failure paths. The generic `remote_compute/instance.json` records the
-  selected provider and common lifecycle state; each provider reference defines
-  its provider-specific selection procedure, operations, and state.
+  failure paths. A provider's already-shut-down response to the release
+  power-off precondition is idempotent: cleanup proceeds to release and writes
+  `released` only after that succeeds. The generic
+  `remote_compute/instance.json` records the selected provider and common
+  lifecycle state; each provider reference defines its provider-specific
+  selection procedure, operations, and state.
 - Before an instance is created, the selected provider reference must validate
   the requested resource and image against that provider's supported pool. If
   the paper's exact GPU is absent, selection may use only the closest documented
