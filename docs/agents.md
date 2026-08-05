@@ -61,8 +61,9 @@
   released. After replication finishes and required outputs are transferred,
   the replicate stage must release them; host cleanup retries release on
   failure paths. A provider's already-shut-down response to the release
-  power-off precondition is idempotent: cleanup proceeds to release and writes
-  `released` only after that succeeds. The generic
+  power-off precondition is idempotent: cleanup waits for the provider to
+  report shutdown, then proceeds to release and writes `released` only after
+  that succeeds. The generic
   `remote_compute/instance.json` records the selected provider and common
   lifecycle state; each provider reference defines its provider-specific
   selection procedure, operations, and state.

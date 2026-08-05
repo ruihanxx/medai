@@ -223,6 +223,24 @@ elif args.action == "release":
     except RuntimeError as exc:
         if "当前实例已关机" not in str(exc):
             raise
+    deadline = time.monotonic() + 90
+    status = ""
+    while time.monotonic() < deadline:
+        status = str(
+            request(
+                "GET",
+                "/api/v1/dev/instance/pro/status",
+                {"instance_uuid": state["provider_state"]["instance_uuid"]},
+            )["data"]
+        )
+        if status == "shutdown":
+            break
+        time.sleep(5)
+    if status != "shutdown":
+        raise RuntimeError(
+            "AutoDL instance did not reach shutdown before release; "
+            f"last status={status}"
+        )
     request(
         "POST",
         "/api/v1/dev/instance/pro/release",

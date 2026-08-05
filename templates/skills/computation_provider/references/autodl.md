@@ -382,8 +382,9 @@ expose independent power-on or power-off actions. It supports:
 
 - `create`, which creates and starts an instance;
 - `status`, which reads lifecycle state; and
-- `release`, which calls power-off and then release. If the provider reports
-  that the instance is already shut down, it continues directly to release.
+- `release`, which calls power-off, waits up to 90 seconds for the provider to
+  report `shutdown`, and then calls release. If the provider reports that the
+  instance is already shut down, it begins the same status check directly.
 
 If a workflow requires an independent stop/restart cycle, stop explicitly and
 request a script extension. Do not issue ad hoc lifecycle requests outside the
@@ -429,11 +430,12 @@ durable backup.
 - **Remote command failure:** Preserve logs and the exit-status file, download
   available evidence, mark the experiment failed, and continue to cleanup.
 - **Release failure:** Preserve the state file and error. The script treats the
-  provider's already-shut-down power-off response as idempotent and still calls
-  release; it writes `released` only after that call succeeds. Do not set it
-  manually. The host cleanup path may retry; if the script cannot complete
-  release, verify and release it through the AutoDL console. Report the cleanup
-  failure with the experiment failure.
+  provider's already-shut-down power-off response as idempotent, then polls for
+  `shutdown` for up to 90 seconds before calling release; it writes `released`
+  only after that call succeeds. Do not set it manually. The host cleanup path
+  may retry; if the script cannot complete release, verify and release it
+  through the AutoDL console. Report the cleanup failure with the experiment
+  failure.
 
 ## Official Documentation
 
