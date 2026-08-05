@@ -14,9 +14,7 @@ from typing import Any
 
 BASE_URL = os.environ.get("AUTODL_API_BASE_URL", "https://api.autodl.com").rstrip("/")
 TOKEN = os.environ.get("AUTODL_TOKEN", "").strip().strip("'\"")
-REMOTE_SERVER_SCRIPT = (
-    Path(__file__).resolve().parents[2] / "remote-server" / "scripts" / "ssh.py"
-)
+SSH_SCRIPT = Path(__file__).resolve().with_name("ssh.py")
 SUPPORTED_GPU_SPECS = {
     "h800",
     "v-48g",
@@ -234,7 +232,7 @@ elif args.action in {"exec", "upload", "download"}:
     details = snapshot(state)
     command = [
         sys.executable,
-        str(REMOTE_SERVER_SCRIPT),
+        str(SSH_SCRIPT),
         "--host",
         str(details["proxy_host"]),
         "--port",
@@ -255,8 +253,8 @@ elif args.action in {"exec", "upload", "download"}:
             ["--remote", args.remote, "--destination", str(args.destination)]
         )
     environment = os.environ.copy()
-    environment.pop("REMOTE_SERVER_PASSWORD", None)
+    environment.pop("COMPUTATION_PROVIDER_SSH_PASSWORD", None)
     password = str(details.get("root_password") or "")
     if password:
-        environment["REMOTE_SERVER_PASSWORD"] = password
+        environment["COMPUTATION_PROVIDER_SSH_PASSWORD"] = password
     raise SystemExit(subprocess.run(command, env=environment).returncode)

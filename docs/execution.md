@@ -41,9 +41,9 @@ and `--smart-replicate`.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. The host `~/.ssh` directory is copied from its read-only
-mount into the container's ephemeral HOME so remote-server operations can use
-OpenSSH config and identities without modifying host credentials. The project
-`.env` is passed to Docker with `--env-file`, so provider skills must tolerate
+mount into the container's ephemeral HOME so computation-provider SSH operations
+can use OpenSSH config and identities without modifying host credentials. The
+project `.env` is passed to Docker with `--env-file`, so provider skills must tolerate
 Docker's literal preservation of optional surrounding quotes in credential
 values. A new invocation creates a unique run
 directory under the repository-root `runs/` directory, named from its UTC start

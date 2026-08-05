@@ -1,25 +1,34 @@
 ---
 name: computation-provider
-description: Connect to and operate remote computation providers. Use when local CPU, memory, storage, accelerator capacity, or runtime availability cannot satisfy an experiment and remote infrastructure must be inspected, acquired, connected, initialized, supplied with code or data, operated, powered down, or released.
+description: Acquire and operate remote computation resources, including provider selection, lifecycle management, key-first SSH authentication, environment initialization, file transfer, remote execution, result retrieval, and cleanup. Use when local CPU, memory, storage, accelerator capacity, or runtime availability cannot satisfy an experiment.
 ---
 
 # Computation Provider
 
 ## Overview
 
-Use this skill as the provider-independent entry point for remote computation.
-Treat provider selection, resource discovery, instance operations, data movement,
-and remote execution as separate capabilities. Combine only the capabilities the
-task requires; their order below is not a mandatory workflow.
+Use this skill as the single entry point for remote computation. Treat provider
+selection, resource discovery, instance lifecycle, SSH access, data movement,
+and remote execution as separate internal capabilities. Combine only the
+capabilities the task requires; their order below is not a mandatory workflow.
 
 After determining the provider, read `references/<provider>.md` before invoking
 any provider operation. Follow that reference for configuration names, supported
-operations, scripts, state fields, safety checks, and failure handling.
+operations, scripts, state fields, provider-specific connection resolution,
+safety checks, and failure handling.
 
-## When to Use
+## Capability Boundary
 
-Use this skill when an experiment requires a remote computation platform because
-the available local environment cannot meet its full-scale execution needs.
+Keep provider API calls, machine selection, instance lifecycle, connection
+metadata resolution, and provider-specific filesystem or image rules in the
+provider adapter and `references/<provider>.md`.
+
+Keep SSH authentication, command execution, upload, and download in the shared
+`scripts/ssh.py` helper. Treat this helper as an internal sub-capability, not as
+a provider or a separately triggered skill. A provider adapter may expose
+`exec`, `upload`, and `download` commands, but it must only refresh and validate
+provider connection metadata before delegating the actual SSH operation to the
+shared helper.
 
 ## Supported Providers
 
@@ -33,13 +42,17 @@ reference, or for a capability that its reference does not document.
 Store provider keys, API URLs, and other local provider configuration in the
 project-root `.env`. Keep only empty or non-secret defaults in the project-root
 `.env.example`. Read the selected provider reference for its exact configuration
-contract.
+contract. Keep the matching SSH private key under the host `~/.ssh` directory.
+Set `COMPUTATION_PROVIDER_SSH_IDENTITY_FILE` only when a specific key must be
+selected; otherwise allow OpenSSH to use its normal config and default identities.
+Never configure `COMPUTATION_PROVIDER_SSH_PASSWORD` in `.env`; reserve it for a
+provider adapter to pass an ephemeral fallback password to the SSH child process.
 
 Never copy secrets into a run state file, generated prompt, transcript, command
 output, remote log, or result artifact. Persist only the non-secret identifiers
 and connection metadata required to resume or clean up the current run.
 
-## Sub Skills
+## Capabilities
 
 ### Determine the Provider
 
@@ -71,11 +84,20 @@ derive a provider-specific state filename.
 
 Confirm the instance is running, then let the selected provider resolve only its
 provider-specific SSH host, port, user, and optional fallback password. Delegate
-authentication, command execution, and transfers to the sibling
-`../remote-server/SKILL.md`. That provider-independent skill safely probes SSH
-public-key authentication first and uses a provider-supplied password only when
-the key probe fails. Keep authentication material local, validate the remote
-identity, and fail explicitly when neither method authenticates.
+authentication, command execution, and transfers to `scripts/ssh.py` through the
+provider adapter.
+
+For every operation, the shared helper first runs the harmless remote command
+`true` with `BatchMode=yes`. If public-key authentication succeeds, use the same
+identity for the requested command or transfer. If the probe fails and the
+provider supplied a fallback password, use `sshpass -e`; keep the password only
+in the child environment and never pass it as a command argument. Fail explicitly
+when neither method authenticates.
+
+Use `StrictHostKeyChecking=accept-new`. Never disable host-key checking, print or
+persist authentication material, or retry the requested remote operation after
+a connection failure. Authentication fallback may occur only during the
+side-effect-free probe.
 
 ### Initialize the Remote Environment
 

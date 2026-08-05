@@ -87,7 +87,7 @@ structure and remains a reviewable run artifact rather than being applied
 automatically.
 
 Each run also initializes `system_maintenance/skills/corrections.json` as an
-empty JSON array. Codegen appends an entry only when a successful remote-server
+empty JSON array. Codegen appends an entry only when a successful remote-compute
 procedure conflicts with the selected skill reference. Every entry records the
 skill, provider, reference path, discrepancy, resolved procedure, and consulted
 official documentation URLs. It is a review artifact, not a permission to edit

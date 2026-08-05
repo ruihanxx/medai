@@ -55,8 +55,8 @@
   training, evaluation, or result artifacts to chase paper values.
 - Remote compute access is exposed through the `computation-provider` skill.
   Provider references resolve provider-specific SSH connection metadata; the
-  sibling `remote-server` skill owns provider-independent key-first
-  authentication, password fallback, command execution, and file transfer.
+  skill's shared SSH helper owns provider-independent key-first authentication,
+  password fallback, command execution, and file transfer.
   Only instances created by the current run may be automatically powered off or
   released. After replication finishes and required outputs are transferred,
   the replicate stage must release them; host cleanup retries release on
@@ -82,7 +82,7 @@
   path, remote working directory, and remote dataset directory in
   `codegen_plan.json`. Orchestration statically validates only these required
   fields and accepts additional provider-specific plan metadata. For every
-  remote-server interaction, including instance creation, the agent starts with
+  remote-compute interaction, including instance creation, the agent starts with
   the selected provider reference but may consult official online documentation
   and use reasoned, non-secret diagnostics for bounded, safe recovery attempts.
   If recovery still fails, it exits nonzero. A successful procedure that

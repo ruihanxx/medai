@@ -31,7 +31,11 @@ host_options = [
     "StrictHostKeyChecking=accept-new",
 ]
 identity_options: list[str] = []
-identity = os.environ.get("REMOTE_SERVER_SSH_IDENTITY_FILE", "").strip().strip("'\"")
+identity = (
+    os.environ.get("COMPUTATION_PROVIDER_SSH_IDENTITY_FILE", "")
+    .strip()
+    .strip("'\"")
+)
 if identity:
     identity_path = Path(identity).expanduser()
     if not identity_path.is_file():
@@ -39,7 +43,7 @@ if identity:
     identity_options = ["-i", str(identity_path), "-o", "IdentitiesOnly=yes"]
 
 environment = os.environ.copy()
-password = environment.pop("REMOTE_SERVER_PASSWORD", "")
+password = environment.pop("COMPUTATION_PROVIDER_SSH_PASSWORD", "")
 probe = subprocess.run(
     [
         "ssh",

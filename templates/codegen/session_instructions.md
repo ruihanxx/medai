@@ -113,14 +113,14 @@ explicitly: no remote computation provider is configured. Do not reduce the
 experiment scale or silently substitute CPU execution.
 {% endif %}
 
-**Unresolved remote-server failures are terminal.** If remote compute is
+**Unresolved remote-compute failures are terminal.** If remote compute is
 required, use the recovery procedure below for a failed instance-creation or
-other remote-server interaction. Do not catch or suppress a final failure,
+other provider or SSH interaction. Do not catch or suppress a final failure,
 choose another resource, fall back to CPU, or continue code generation,
 planning, or replication.
 
 More generally, treat the selected provider reference as the starting point for
-every remote-server interaction, not the only source of troubleshooting. When
+every remote-compute interaction, not the only source of troubleshooting. When
 an interaction fails, inspect the complete non-secret error, consult the
 provider's official online documentation when useful, and reason through a
 small, bounded sequence of multiple distinct, safe recovery attempts. Do not
@@ -436,6 +436,14 @@ that depends on it. For each such upstream step, confirm:
   Write these checks as assertions or warnings **in the code** so the
   replicate phase surfaces a corrupted intermediate instead of silently
   propagating it into every claim.
+h. Code efficiency audit
+
+Double-check the generated code files related to data loading, preprocessing,
+cohort construction. Make sure it follows the pattern:
+- Reads large raw tables/dataframe in chunks or bounded batches,
+- applies chunk-eligible preprocessing immediately after each chunk read, projects required columns,
+drops unrelated columns before retaining data, and defers full-data operations
+such as downsampling after chunk-processed compact data is merged.
 
 ## Hard constraints
 

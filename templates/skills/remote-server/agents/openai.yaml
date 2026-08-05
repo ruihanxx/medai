@@ -1,4 +1,0 @@
-interface:
-  display_name: "Remote Server"
-  short_description: "SSH key-first remote execution and transfers"
-  default_prompt: "Use $remote-server to connect, transfer files, or run commands on a remote host with key-first SSH authentication."

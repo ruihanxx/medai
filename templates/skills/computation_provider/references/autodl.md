@@ -45,10 +45,11 @@ settings and store configuration in the repository-root `.env`:
 | `AUTODL_IMAGE_UUID` | Yes | Default private or public image UUID used when the paper has no explicit software versions. |
 | `AUTODL_API_BASE_URL` | No | API origin; the script defaults to `https://api.autodl.com`. |
 
-SSH authentication is provider-independent. Configure an AutoDL account-level
-public key, keep the matching private key under the host `~/.ssh`, and optionally
-set `REMOTE_SERVER_SSH_IDENTITY_FILE` to its path within that directory. Read
-the sibling `remote-server` skill for the key-first and password-fallback rules.
+Configure an AutoDL account-level public key and keep the matching private key
+under the host `~/.ssh`. Optionally set
+`COMPUTATION_PROVIDER_SSH_IDENTITY_FILE` to select that key explicitly. The
+parent skill's shared SSH helper owns key-first authentication and
+provider-password fallback.
 
 `AUTODL_TOKEN` may be written with or without one pair of surrounding single or
 double quotes. This accommodates Docker `--env-file`, which preserves those
@@ -266,10 +267,9 @@ before uploading large data or starting the experiment.
 
 The `exec`, `upload`, and `download` actions fetch the current instance snapshot
 and pass its `root` user, proxy host, SSH port, and optional snapshot password to
-the provider-independent `remote-server` skill. AutoDL supports account-level
-SSH public keys configured through its console, so the shared layer tries the
-matching local key first and falls back to the snapshot password through
-`sshpass -e` only when the harmless key-authentication probe fails.
+the parent skill's shared SSH helper. AutoDL supports account-level SSH public
+keys configured through its console. Follow the parent skill's generic
+authentication rules; do not implement authentication in the AutoDL adapter.
 
 The script provides non-interactive SSH execution, not an interactive shell:
 

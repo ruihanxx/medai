@@ -12,8 +12,13 @@ AUTODL_SCRIPT = (
     ROOT / "templates" / "skills" / "computation_provider" / "scripts" / "autodl.py"
 )
 AUTODL_INSTANCES_SCRIPT = ROOT / "scripts" / "autodl_pro_instances.py"
-REMOTE_SERVER_SCRIPT = (
-    ROOT / "templates" / "skills" / "remote-server" / "scripts" / "ssh.py"
+COMPUTATION_PROVIDER_SSH_SCRIPT = (
+    ROOT
+    / "templates"
+    / "skills"
+    / "computation_provider"
+    / "scripts"
+    / "ssh.py"
 )
 
 
@@ -24,7 +29,7 @@ def fake_ssh_environment(tmp_path: Path, probe_exit: int) -> tuple[dict[str, str
     ssh = fake_bin / "ssh"
     ssh.write_text(
         """#!/usr/bin/env bash
-if [[ -n "${REMOTE_SERVER_PASSWORD:-}" ]]; then
+if [[ -n "${COMPUTATION_PROVIDER_SSH_PASSWORD:-}" ]]; then
     exit 97
 fi
 printf 'ssh %s\\n' "$*" >> "$MEDAI_TEST_SSH_COMMAND_LOG"
@@ -39,7 +44,7 @@ exit 0
     sshpass = fake_bin / "sshpass"
     sshpass.write_text(
         """#!/usr/bin/env bash
-if [[ -n "${REMOTE_SERVER_PASSWORD:-}" ]]; then
+if [[ -n "${COMPUTATION_PROVIDER_SSH_PASSWORD:-}" ]]; then
     exit 97
 fi
 if [[ -n "${SSHPASS:-}" ]]; then
@@ -390,21 +395,21 @@ def test_autodl_pro_instances_operates_on_explicit_uuid(tmp_path: Path):
     assert json.loads(requests[3][2])["instance_uuid"] == instance_uuid
 
 
-def test_remote_server_prefers_configured_ssh_identity(tmp_path: Path):
+def test_computation_provider_prefers_configured_ssh_identity(tmp_path: Path):
     environment, command_log = fake_ssh_environment(tmp_path, probe_exit=0)
     identity = tmp_path / "id_remote"
     identity.write_text("test identity", encoding="utf-8")
     environment.update(
         {
-            "REMOTE_SERVER_SSH_IDENTITY_FILE": str(identity),
-            "REMOTE_SERVER_PASSWORD": "unused-fallback-password",
+            "COMPUTATION_PROVIDER_SSH_IDENTITY_FILE": str(identity),
+            "COMPUTATION_PROVIDER_SSH_PASSWORD": "unused-fallback-password",
         }
     )
 
     completed = subprocess.run(
         [
             sys.executable,
-            str(REMOTE_SERVER_SCRIPT),
+            str(COMPUTATION_PROVIDER_SSH_SCRIPT),
             "--host",
             "remote.example",
             "--port",

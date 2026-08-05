@@ -75,6 +75,15 @@ For a MedAI run, after a successful release, update only through the AutoDL
 provider script so its run state records `released: true`. Do not hand-edit the
 state file.
 
+### One line command
+
+``` python3
+python3 scripts/autodl_pro_instances.py list
+python3 scripts/autodl_pro_instances.py power-on pro-你的UUID
+python3 scripts/autodl_pro_instances.py power-off pro-你的UUID
+python3 scripts/autodl_pro_instances.py release pro-你的UUID
+```
+
 ## Reference
 
 - [AutoDL Container Instance Pro API](https://www.autodl.com/docs/instance_pro_api/)
