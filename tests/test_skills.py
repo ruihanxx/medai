@@ -131,7 +131,23 @@ def autodl_api(
             else:
                 payload = response
             expected_authorization = payload.get("_expected_authorization")
-            if (
+            expected_panel_token = payload.get("_expected_panel_token")
+            authorization_must_be_absent = payload.get(
+                "_expected_authorization_absent", False
+            )
+            if expected_panel_token is not None and self.headers.get(
+                "AutodlAutoPanelToken"
+            ) != expected_panel_token:
+                payload = {
+                    "code": "AuthenticationFailed",
+                    "msg": "unexpected AutoPanel instance token header",
+                }
+            elif authorization_must_be_absent and self.headers.get("Authorization") is not None:
+                payload = {
+                    "code": "AuthenticationFailed",
+                    "msg": "unexpected Authorization header",
+                }
+            elif (
                 expected_authorization is not None
                 and self.headers.get("Authorization") != expected_authorization
             ):
@@ -143,7 +159,12 @@ def autodl_api(
                 payload = {
                     name: value
                     for name, value in payload.items()
-                    if name != "_expected_authorization"
+                    if name
+                    not in {
+                        "_expected_authorization",
+                        "_expected_authorization_absent",
+                        "_expected_panel_token",
+                    }
                 }
             encoded = json.dumps(payload).encode("utf-8")
             self.send_response(200)
@@ -474,38 +495,64 @@ def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
         {
             "code": "success",
             "data": {
-                "list": [
-                    {"name": "medai", "file_id": "dir-medai", "is_dir": True}
-                ]
+                "list": {
+                    "FsType": "AutoDL_AliPan",
+                    "List": [
+                        {"name": "medai", "file_id": "dir-medai", "is_dir": True}
+                    ],
+                },
+                "next_marker": "",
             },
         },
         {
             "code": "success",
             "data": {
-                "list": [
-                    {
-                        "name": "mimic-iv",
-                        "file_id": "dir-dataset",
-                        "is_dir": True,
-                    }
-                ]
+                "list": {
+                    "FsType": "AutoDL_AliPan",
+                    "List": [
+                        {
+                            "name": "mimic-iv",
+                            "file_id": "dir-dataset",
+                            "is_dir": True,
+                        }
+                    ],
+                },
+                "next_marker": "",
             },
         },
         {
             "code": "success",
             "data": {
-                "list": [
-                    {"name": "one.csv", "file_id": "f1", "is_dir": False, "size": 10},
-                    {"name": "nested", "file_id": "dir-nested", "is_dir": True},
-                ]
+                "list": {
+                    "FsType": "AutoDL_AliPan",
+                    "List": [
+                        {
+                            "name": "one.csv",
+                            "file_id": "f1",
+                            "is_dir": False,
+                            "size": 10,
+                        },
+                        {"name": "nested", "file_id": "dir-nested", "is_dir": True},
+                    ],
+                },
+                "next_marker": "",
             },
         },
         {
             "code": "success",
             "data": {
-                "list": [
-                    {"name": "two.csv", "file_id": "f2", "is_dir": False, "size": 20}
-                ]
+                "list": {
+                    "FsType": "AutoDL_AliPan",
+                    "List": [
+                        {
+                            "name": "two.csv",
+                            "file_id": "f2",
+                            "is_dir": False,
+                            "size": 20,
+                        }
+                    ],
+                },
+                "next_marker": "",
             },
         },
     ]
@@ -521,11 +568,19 @@ def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
         },
         ("POST", "/autopanel/v1/sign_in"): {
             "code": "success",
-            "data": {"authorization": "panel-session"},
+            "data": "panel-session",
+            "_expected_panel_token": "panel-instance-token",
+            "_expected_authorization_absent": True,
         },
         ("GET", "/autopanel/v1/netdisk/list"): {
             "code": "success",
-            "data": [{"provider": "aliyun", "fsid": "ali-fs"}],
+            "data": [
+                {
+                    "type": "AutoDL_AliPan",
+                    "fs_id": "ali-fs",
+                    "user_info": {"default_drive_id": "backup-drive"},
+                }
+            ],
         },
         ("GET", "/autopanel/v1/netdisk/file"): directory_pages * 2,
         ("POST", "/autopanel/v1/netdisk/download"): {
@@ -536,6 +591,7 @@ def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
         or {
             "code": "success",
             "data": {
+                "task_pre": [],
                 "task_doing": [],
                 "task_done": [{"task_id": "task-1", "status": "success"}],
             },
@@ -595,7 +651,10 @@ def test_autodl_cloud_pull_materializes_and_records_only_nonsecret_state(tmp_pat
     assert completed.stdout.strip() == "/root/autodl-tmp/medai/mimic-iv"
     state_text = state_path.read_text(encoding="utf-8")
     assert "panel-secret" not in state_text + completed.stdout + completed.stderr
-    assert hashlib.sha1(b"panel-secret").hexdigest() not in state_text
+    plain_hash = hashlib.sha1(b"panel-secret").hexdigest()
+    salted_hash = hashlib.sha1(b"autodlpanel-secretAutoDL").hexdigest()
+    assert plain_hash not in state_text
+    assert salted_hash not in state_text
     cloud = json.loads(state_text)["provider_state"]["cloud_drive"]
     assert cloud["status"] == "completed"
     assert cloud["remote_file_count"] == cloud["local_file_count"] == 2
@@ -605,7 +664,12 @@ def test_autodl_cloud_pull_materializes_and_records_only_nonsecret_state(tmp_pat
     assert "rm -rf" not in commands
     assert "chmod -R a-w" in commands
     sign_in = next(body for method, path, body in requests if path == "/autopanel/v1/sign_in")
-    assert json.loads(sign_in)["password"] == hashlib.sha1(b"panel-secret").hexdigest()
+    assert json.loads(sign_in)["password"] == salted_hash
+    file_requests = [path for _, path, _ in requests if "/netdisk/file?" in path]
+    assert file_requests
+    assert all("driver_id=backup-drive" in path for path in file_requests)
+    download = next(body for _, path, body in requests if path == "/autopanel/v1/netdisk/download")
+    assert json.loads(download)["drive_id"] == "backup-drive"
 
 
 def test_autodl_cloud_pull_timeout_reuses_active_task(tmp_path: Path):
@@ -626,13 +690,15 @@ def test_autodl_cloud_pull_timeout_reuses_active_task(tmp_path: Path):
         {
             "code": "success",
             "data": {
-                "task_doing": [{"task_id": "task-1"}],
+                "task_pre": [{"task_id": "task-1"}],
+                "task_doing": [],
                 "task_done": [],
             },
         },
         {
             "code": "success",
             "data": {
+                "task_pre": [],
                 "task_doing": [],
                 "task_done": [{"task_id": "task-1", "status": "success"}],
             },
@@ -678,8 +744,16 @@ def test_autodl_cloud_pull_fails_fast_on_ambiguous_aliyun_binding(tmp_path: Path
     responses[("GET", "/autopanel/v1/netdisk/list")] = {
         "code": "success",
         "data": [
-            {"provider": "aliyun", "fsid": "one"},
-            {"provider": "aliyun", "fsid": "two"},
+            {
+                "type": "AutoDL_AliPan",
+                "fs_id": "one",
+                "user_info": {"default_drive_id": "drive-one"},
+            },
+            {
+                "type": "AutoDL_AliPan",
+                "fs_id": "two",
+                "user_info": {"default_drive_id": "drive-two"},
+            },
         ],
     }
     with autodl_api(responses) as (base_url, _):

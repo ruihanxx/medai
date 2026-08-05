@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 BASE_URL = os.environ.get("AUTODL_API_BASE_URL", "https://api.autodl.com").rstrip("/")
 TOKEN = os.environ.get("AUTODL_TOKEN", "").strip().strip("'\"")
@@ -41,7 +41,14 @@ PANEL_PATHS = {
     "download": "/autopanel/v1/netdisk/download",
     "tasks": "/autopanel/v1/netdisk/task",
 }
-ALIYUN_LABELS = {"aliyun", "aliyundrive", "alipan", "阿里云盘"}
+ALIYUN_LABELS = {
+    "aliyun",
+    "aliyundrive",
+    "alipan",
+    "autodl_alipan",
+    "autodl_alinetdisk",
+    "阿里云盘",
+}
 
 
 def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -280,7 +287,7 @@ def _panel_request(
     *,
     base: str,
     panel_token: str,
-    authorization: str,
+    authorization: str | None,
     method: str,
     path: str,
     body: dict[str, Any] | None = None,
@@ -290,10 +297,9 @@ def _panel_request(
     if query:
         url += "?" + urllib.parse.urlencode(query)
     data = None if body is None else json.dumps(body).encode("utf-8")
-    headers = {
-        "Autodl-Autopanel-Token": panel_token,
-        "Authorization": authorization,
-    }
+    headers = {"AutodlAutoPanelToken": panel_token}
+    if authorization:
+        headers["Authorization"] = authorization
     if data is not None:
         headers["Content-Type"] = "application/json"
     http_request = urllib.request.Request(url, data=data, method=method, headers=headers)
@@ -304,8 +310,16 @@ def _panel_request(
         raise RuntimeError(f"AutoPanel request failed with HTTP {exc.code}") from exc
     except (urllib.error.URLError, json.JSONDecodeError) as exc:
         raise RuntimeError("AutoPanel request failed or returned invalid JSON") from exc
-    if not isinstance(payload, dict) or str(payload.get("code", "")).casefold() != "success":
-        raise RuntimeError("AutoPanel rejected the request")
+    if not isinstance(payload, dict):
+        raise RuntimeError(
+            f"AutoPanel returned a non-object response at {path}"
+        )
+    response_code = payload.get("code")
+    if str(response_code or "").casefold() != "success":
+        safe_code = response_code if isinstance(response_code, (str, int)) else "unknown"
+        raise RuntimeError(
+            f"AutoPanel rejected the request at {path} (code={safe_code})"
+        )
     if "data" not in payload:
         raise RuntimeError("AutoPanel returned an unsupported response structure")
     return payload["data"]
@@ -316,11 +330,13 @@ def _panel_login(details: dict[str, Any]) -> tuple[str, str, str]:
     if not password:
         raise RuntimeError("AUTODL_AUTOPANEL_PASSWORD is not configured")
     base, panel_token = _panel_base(details)
-    password_hash = hashlib.sha1(password.encode("utf-8")).hexdigest()
+    password_hash = hashlib.sha1(
+        f"autodl{password}AutoDL".encode("utf-8")
+    ).hexdigest()
     data = _panel_request(
         base=base,
         panel_token=panel_token,
-        authorization="null",
+        authorization=None,
         method="POST",
         path=PANEL_PATHS["sign_in"],
         body={"password": password_hash},
@@ -342,6 +358,8 @@ def _panel_list(data: Any, label: str) -> list[dict[str, Any]]:
     values = data
     if isinstance(data, dict):
         values = data.get("list", data.get("List"))
+    if isinstance(values, dict):
+        values = values.get("List")
     if not isinstance(values, list) or not all(isinstance(item, dict) for item in values):
         raise RuntimeError(f"AutoPanel {label} response has an unsupported structure")
     return values
@@ -349,7 +367,7 @@ def _panel_list(data: Any, label: str) -> list[dict[str, Any]]:
 
 def _binding_fsid(
     *, base: str, panel_token: str, authorization: str
-) -> tuple[str, str]:
+) -> tuple[str, str, list[str]]:
     data = _panel_request(
         base=base,
         panel_token=panel_token,
@@ -371,10 +389,24 @@ def _binding_fsid(
         raise RuntimeError("AutoPanel must expose exactly one explicit Aliyun binding")
     binding = aliyun[0]
     fsid = binding.get("fsid", binding.get("fs_id"))
-    root_id = binding.get("root_file_id", binding.get("root_id", "root"))
-    if not isinstance(fsid, str) or not fsid or not isinstance(root_id, str) or not root_id:
+    binding_type = binding.get("type")
+    user_info = binding.get("user_info")
+    if (
+        not isinstance(fsid, str)
+        or not fsid
+        or not isinstance(binding_type, str)
+        or binding_type.casefold() not in ALIYUN_LABELS
+        or not isinstance(user_info, dict)
+    ):
         raise RuntimeError("AutoPanel Aliyun binding has an unsupported structure")
-    return fsid, root_id
+    drive_ids = []
+    for name in ("default_drive_id", "resource_drive_id"):
+        value = user_info.get(name)
+        if isinstance(value, str) and value and value not in drive_ids:
+            drive_ids.append(value)
+    if not drive_ids:
+        raise RuntimeError("AutoPanel Aliyun binding does not expose a usable drive")
+    return fsid, binding_type, drive_ids
 
 
 def _item_name(item: dict[str, Any]) -> str:
@@ -422,6 +454,7 @@ def _list_directory(
     panel_token: str,
     authorization: str,
     fsid: str,
+    drive_id: str,
     directory_id: str,
 ) -> list[dict[str, Any]]:
     marker = ""
@@ -434,7 +467,12 @@ def _list_directory(
             authorization=authorization,
             method="GET",
             path=PANEL_PATHS["files"],
-            query={"fs_id": fsid, "file_id": directory_id, "marker": marker},
+            query={
+                "fs_id": fsid,
+                "driver_id": drive_id,
+                "file_id": directory_id,
+                "marker": marker,
+            },
         )
         entries.extend(_panel_list(data, "file list"))
         if isinstance(data, dict):
@@ -454,7 +492,7 @@ def _find_directory(
     components: list[str],
     root_id: str,
     list_directory: Any,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     current_id = root_id
     current: dict[str, Any] | None = None
     for component in components:
@@ -463,6 +501,8 @@ def _find_directory(
             for item in list_directory(current_id)
             if _item_name(item) == component and _item_is_dir(item)
         ]
+        if not matches:
+            return None
         if len(matches) != 1:
             raise RuntimeError(
                 "Aliyun source directory is missing or ambiguous: "
@@ -470,7 +510,6 @@ def _find_directory(
             )
         current = matches[0]
         current_id = _item_id(current)
-    assert current is not None
     return current
 
 
@@ -538,16 +577,19 @@ def _task_id(data: Any) -> str:
     raise RuntimeError("AutoPanel download returned an unsupported task structure")
 
 
-def _task_lists(data: Any) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _task_lists(
+    data: Any,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     if not isinstance(data, dict):
         raise RuntimeError("AutoPanel task response has an unsupported structure")
+    pre = data.get("task_pre")
     doing = data.get("task_doing")
     done = data.get("task_done")
-    if not isinstance(doing, list) or not isinstance(done, list):
+    if not isinstance(pre, list) or not isinstance(doing, list) or not isinstance(done, list):
         raise RuntimeError("AutoPanel task response has an unsupported structure")
-    if not all(isinstance(item, dict) for item in [*doing, *done]):
+    if not all(isinstance(item, dict) for item in [*pre, *doing, *done]):
         raise RuntimeError("AutoPanel task response has an unsupported structure")
-    return doing, done
+    return pre, doing, done
 
 
 def _matching_task(tasks: list[dict[str, Any]], task_id: str) -> dict[str, Any] | None:
@@ -580,8 +622,8 @@ def _poll_download(
             path=PANEL_PATHS["tasks"],
             query={"limit": 20},
         )
-        doing, done = _task_lists(data)
-        if _matching_task(doing, task_id) is not None:
+        pre, doing, done = _task_lists(data)
+        if _matching_task([*pre, *doing], task_id) is not None:
             observed = True
             time.sleep(5)
             continue
@@ -648,23 +690,41 @@ def cloud_pull(args: argparse.Namespace) -> None:
     state = load_state(args.state)
     details = snapshot(state)
     base, panel_token, authorization = _panel_login(details)
-    fsid, root_id = _binding_fsid(
+    fsid, binding_type, drive_ids = _binding_fsid(
         base=base, panel_token=panel_token, authorization=authorization
     )
-    def list_directory(directory_id: str) -> list[dict[str, Any]]:
-        return _list_directory(
-            base=base,
-            panel_token=panel_token,
-            authorization=authorization,
-            fsid=fsid,
-            directory_id=directory_id,
-        )
     source_path = f"medai/{dataset}"
     staging_path = f"/root/autodl-tmp/{dataset}"
     target_path = f"/root/autodl-tmp/medai/{dataset}"
-    source = _find_directory(
-        components=["medai", dataset], root_id=root_id, list_directory=list_directory
-    )
+    sources: list[
+        tuple[str, dict[str, Any], Callable[[str], list[dict[str, Any]]]]
+    ] = []
+    for drive_id in drive_ids:
+        def list_drive_directory(
+            directory_id: str, *, selected_drive: str = drive_id
+        ) -> list[dict[str, Any]]:
+            return _list_directory(
+                base=base,
+                panel_token=panel_token,
+                authorization=authorization,
+                fsid=fsid,
+                drive_id=selected_drive,
+                directory_id=directory_id,
+            )
+
+        source = _find_directory(
+            components=["medai", dataset],
+            root_id="/",
+            list_directory=list_drive_directory,
+        )
+        if source is None:
+            continue
+        sources.append((drive_id, source, list_drive_directory))
+    if len(sources) != 1:
+        raise RuntimeError(
+            f"Aliyun source directory is missing or ambiguous: {source_path}"
+        )
+    drive_id, source, list_directory = sources[0]
     file_count, total_bytes = _inventory_tree(_item_id(source), list_directory)
     prior = state["provider_state"].get("cloud_drive")
     if prior is not None and not isinstance(prior, dict):
@@ -717,21 +777,24 @@ def cloud_pull(args: argparse.Namespace) -> None:
 
         task_id = cloud.get("task_id")
         if not isinstance(task_id, str) or not task_id:
+            download_body = {
+                "dst_path": "",
+                "fsid": fsid,
+                "src_path": source_path + "/",
+                "file_id": _item_id(source),
+                "is_dir": True,
+                "download_url": str(source.get("download_url") or ""),
+                "file_size": total_bytes,
+            }
+            if binding_type == "AutoDL_AliPan":
+                download_body["drive_id"] = drive_id
             download_data = _panel_request(
                 base=base,
                 panel_token=panel_token,
                 authorization=authorization,
                 method="POST",
                 path=PANEL_PATHS["download"],
-                body={
-                    "dst_path": "",
-                    "fsid": fsid,
-                    "src_path": source_path + "/",
-                    "file_id": _item_id(source),
-                    "is_dir": True,
-                    "download_url": str(source.get("download_url") or ""),
-                    "file_size": total_bytes,
-                },
+                body=download_body,
             )
             task_id = _task_id(download_data)
             cloud["task_id"] = task_id
