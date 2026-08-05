@@ -13,6 +13,7 @@ Instance Pro operations and the exact behavior of `../scripts/autodl.py`.
 - [Create and Inspect an Instance](#create-and-inspect-an-instance)
 - [Connect and Initialize the Environment](#connect-and-initialize-the-environment)
 - [Upload Code and Data](#upload-code-and-data)
+- [Materialize Aliyun Data](#materialize-aliyun-data)
 - [Run an Experiment](#run-an-experiment)
 - [Download Results](#download-results)
 - [Power and Release](#power-and-release)
@@ -44,6 +45,10 @@ settings and store configuration in the repository-root `.env`:
 | `AUTODL_TOKEN` | Yes | Developer token sent in the API `Authorization` header. |
 | `AUTODL_IMAGE_UUID` | Yes | Default private or public image UUID used when the paper has no explicit software versions. |
 | `AUTODL_API_BASE_URL` | No | API origin; the script defaults to `https://api.autodl.com`. |
+| `AUTODL_AUTOPANEL_PASSWORD` | With cloud drive | AutoPanel independent access password, used only in memory. |
+| `AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS` | No | Download polling limit; defaults to 1800. |
+| `AUTODL_CLOUDDRIVE_GPU_SPEC` | No | Default cloud-run GPU specification when the paper gives none; defaults to `v-32g-p`. |
+| `MEDAI_DRIVE_PROVIDER` | No | Drive selection; defaults to and currently only accepts `aliyun`. |
 
 Configure an AutoDL account-level public key and keep the matching private key
 under the host `~/.ssh`. Optionally set
@@ -218,6 +223,13 @@ After successful release, the script changes `released` to `true` and adds the
 top-level `released_at_unix` timestamp. Treat that marker as a guard against
 duplicate release.
 
+An explicit resumed run may call `create` again only after the state proves the
+previous current-run instance was released. The script moves its non-secret
+resource selection, cloud-drive state, and release time into
+`provider_state.instance_history`, then records the one replacement as the
+current instance. It refuses another rental while any current state is
+unreleased or cleanup did not complete.
+
 ## Create and Inspect an Instance
 
 Create only after the exact requirement and image UUID have been validated:
@@ -230,9 +242,10 @@ python <skill-dir>/scripts/autodl.py create \
   --state <run-state-path>
 ```
 
-Require the state path to be absent before creation. If it already exists,
-inspect and resume or clean up that recorded instance; never overwrite the state
-and create another billable instance.
+Require the state path to be absent for the first creation. On an explicit
+resume, reuse it only after `released: true`; creation archives the released
+instance as described above. Never overwrite or bypass an unreleased state to
+create another billable instance.
 
 The current script:
 
@@ -323,10 +336,24 @@ counts, sizes, and checksums when correctness depends on exact transfer. Do not
 modify the local read-only source dataset.
 
 Recursive SCP has no resume or exclusion support and can be slow for many small
-files. Package small files before transfer when appropriate. AutoDL recommends
-cloud storage for large transfers, but this skill currently has no reviewed
-cloud-provider document under `cloud/`; do not improvise cloud credentials or
-sync commands until such a document exists.
+files. Package small files before transfer when appropriate. For a run whose
+manifest selects Aliyun cloud data, read `../cloud/aliyun.md` and use only the
+reviewed `cloud-pull` command; do not improvise cloud credentials or sync tools.
+
+## Materialize Aliyun Data
+
+After instance creation and before inspecting or implementing data access, run:
+
+```bash
+python <skill-dir>/scripts/autodl.py cloud-pull \
+  --state <run-state-path> \
+  --dataset <safe-dataset-name>
+```
+
+Read `../cloud/aliyun.md` first. Continue only after the command exits zero and
+`provider_state.cloud_drive.status` is `completed`. Use its `target_path` as the
+plan's `remote_dataset_dir`; never upload or download the raw dataset through
+the local workflow.
 
 ## Run an Experiment
 
@@ -448,3 +475,4 @@ durable backup.
 - [Dependency installation](https://www.autodl.com/docs/deps/)
 - [Background processes](https://www.autodl.com/docs/daemon/)
 - [Instance data retention](https://www.autodl.com/docs/instance_data/)
+- [Public network drives](https://www.autodl.com/docs/netdisk/)

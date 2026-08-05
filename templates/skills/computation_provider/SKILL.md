@@ -17,6 +17,11 @@ any provider operation. Follow that reference for configuration names, supported
 operations, scripts, state fields, provider-specific connection resolution,
 safety checks, and failure handling.
 
+When the run supplies cloud-backed data, also read the selected drive document
+directly from this skill. The only current drive document is
+`cloud/aliyun.md`; use it only with the AutoDL provider and an `aliyun` drive
+selection.
+
 ## Capability Boundary
 
 Keep provider API calls, machine selection, instance lifecycle, connection

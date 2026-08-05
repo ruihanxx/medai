@@ -118,3 +118,13 @@ both `data` and `data_source` remain null. These fields are part of the resume
 fingerprint. Local runs set the cloud fields to false/null and retain the
 existing `data` and `data_source` behavior. Secrets used to access AutoPanel or
 the drive are never persistent artifacts.
+
+For AutoDL, `remote_compute/instance.json` stores current non-secret resource
+selection and lifecycle fields under `provider_state`. Cloud runs additionally
+store `provider_state.cloud_drive` with provider, dataset, fixed source,
+staging, and target paths, ownership marker, status and timestamps, task ID,
+and remote/local file-count and byte-total aggregates. A released instance
+retained across an explicit resume moves these non-secret fields and its release
+time into `provider_state.instance_history` before one replacement becomes
+current. Passwords, password hashes, Jupyter or AutoPanel tokens, and drive
+credentials are never state fields.

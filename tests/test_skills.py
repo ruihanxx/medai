@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -63,6 +64,42 @@ exit 0
         "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         "MEDAI_TEST_SSH_COMMAND_LOG": str(command_log),
         "MEDAI_TEST_SSH_PROBE_EXIT": str(probe_exit),
+    }
+    return environment, command_log
+
+
+def fake_cloud_ssh_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
+    fake_bin = tmp_path / "cloud-bin"
+    fake_bin.mkdir()
+    command_log = tmp_path / "cloud-ssh-commands.log"
+    materialized = tmp_path / "materialized"
+    ssh = fake_bin / "ssh"
+    ssh.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+command="${!#}"
+if [[ "$command" == "true" ]]; then
+    exit 0
+fi
+printf 'ssh %s\n' "$command" >> "$MEDAI_TEST_SSH_COMMAND_LOG"
+if [[ "$command" == *"df -PB1"* ]]; then
+    printf 'Filesystem 1-blocks Used Available Capacity Mounted\n/dev/test 100000 0 100000 0%% /root/autodl-tmp\n'
+elif [[ "$command" == *"mv --"* ]]; then
+    touch "$MEDAI_TEST_MATERIALIZED"
+elif [[ "$command" == *"python3 -c"*"/root/autodl-tmp/medai/mimic-iv"* ]]; then
+    if [[ -f "$MEDAI_TEST_MATERIALIZED" ]]; then printf '2 30\n'; else printf 'missing\n'; fi
+elif [[ "$command" == *"python3 -c"*"/root/autodl-tmp/mimic-iv"* ]]; then
+    printf '2 30\n'
+fi
+""",
+        encoding="utf-8",
+    )
+    ssh.chmod(0o755)
+    environment = {
+        **os.environ,
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "MEDAI_TEST_SSH_COMMAND_LOG": str(command_log),
+        "MEDAI_TEST_MATERIALIZED": str(materialized),
     }
     return environment, command_log
 
@@ -313,6 +350,347 @@ def test_autodl_create_tries_one_stronger_gpu_after_no_inventory(tmp_path: Path)
         "v-32g-p",
         "v-48g",
     ]
+
+
+def test_autodl_create_archives_released_instance_on_resume(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": True,
+                "released_at_unix": 123,
+                "provider_state": {
+                    "instance_uuid": "old-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "gpu_count": 1,
+                    "image_uuid": "old-image",
+                    "cloud_drive": {"status": "failed", "dataset": "mimic-iv"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with autodl_api(
+        {
+            ("POST", "/api/v1/dev/instance/pro/create"): {
+                "code": "Success",
+                "data": "replacement-instance",
+            },
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "Success",
+                "data": "running",
+            },
+        }
+    ) as (base_url, _):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "create",
+                "--gpu-spec",
+                "v-48g",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": "test-token",
+                "AUTODL_IMAGE_UUID": "new-image",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["released"] is False
+    assert state["provider_state"]["instance_uuid"] == "replacement-instance"
+    assert state["provider_state"]["instance_history"] == [
+        {
+            "instance_uuid": "old-instance",
+            "gpu_spec_uuid": "v-32g-p",
+            "gpu_count": 1,
+            "image_uuid": "old-image",
+            "cloud_drive": {"status": "failed", "dataset": "mimic-iv"},
+            "released_at_unix": 123,
+        }
+    ]
+
+
+def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
+    directory_pages = [
+        {
+            "code": "success",
+            "data": {
+                "list": [
+                    {"name": "medai", "file_id": "dir-medai", "is_dir": True}
+                ]
+            },
+        },
+        {
+            "code": "success",
+            "data": {
+                "list": [
+                    {
+                        "name": "mimic-iv",
+                        "file_id": "dir-dataset",
+                        "is_dir": True,
+                    }
+                ]
+            },
+        },
+        {
+            "code": "success",
+            "data": {
+                "list": [
+                    {"name": "one.csv", "file_id": "f1", "is_dir": False, "size": 10},
+                    {"name": "nested", "file_id": "dir-nested", "is_dir": True},
+                ]
+            },
+        },
+        {
+            "code": "success",
+            "data": {
+                "list": [
+                    {"name": "two.csv", "file_id": "f2", "is_dir": False, "size": 20}
+                ]
+            },
+        },
+    ]
+    return {
+        ("GET", "/api/v1/dev/instance/pro/snapshot"): {
+            "code": "Success",
+            "data": {
+                "proxy_host": "remote.example",
+                "ssh_port": 2200,
+                "jupyter_domain": "__BASE_URL__",
+                "jupyter_token": "panel-instance-token",
+            },
+        },
+        ("POST", "/autopanel/v1/sign_in"): {
+            "code": "success",
+            "data": {"authorization": "panel-session"},
+        },
+        ("GET", "/autopanel/v1/netdisk/list"): {
+            "code": "success",
+            "data": [{"provider": "aliyun", "fsid": "ali-fs"}],
+        },
+        ("GET", "/autopanel/v1/netdisk/file"): directory_pages * 2,
+        ("POST", "/autopanel/v1/netdisk/download"): {
+            "code": "success",
+            "data": {"task_id": "task-1"},
+        },
+        ("GET", "/autopanel/v1/netdisk/task"): task_responses
+        or {
+            "code": "success",
+            "data": {
+                "task_doing": [],
+                "task_done": [{"task_id": "task-1", "status": "success"}],
+            },
+        },
+    }
+
+
+def _run_cloud_pull(
+    *, state_path: Path, base_url: str, environment: dict[str, str], timeout: str = "30"
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            str(AUTODL_SCRIPT),
+            "cloud-pull",
+            "--state",
+            str(state_path),
+            "--dataset",
+            "mimic-iv",
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            **environment,
+            "AUTODL_TOKEN": "api-secret",
+            "AUTODL_API_BASE_URL": base_url,
+            "AUTODL_AUTOPANEL_PASSWORD": "panel-secret",
+            "AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS": timeout,
+        },
+    )
+
+
+def test_autodl_cloud_pull_materializes_and_records_only_nonsecret_state(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"instance_uuid": "cloud-instance"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment, command_log = fake_cloud_ssh_environment(tmp_path)
+    responses = _cloud_api_responses()
+    with autodl_api(responses) as (base_url, requests):
+        responses[("GET", "/api/v1/dev/instance/pro/snapshot")]["data"][
+            "jupyter_domain"
+        ] = base_url
+        completed = _run_cloud_pull(
+            state_path=state_path, base_url=base_url, environment=environment
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "/root/autodl-tmp/medai/mimic-iv"
+    state_text = state_path.read_text(encoding="utf-8")
+    assert "panel-secret" not in state_text + completed.stdout + completed.stderr
+    assert hashlib.sha1(b"panel-secret").hexdigest() not in state_text
+    cloud = json.loads(state_text)["provider_state"]["cloud_drive"]
+    assert cloud["status"] == "completed"
+    assert cloud["remote_file_count"] == cloud["local_file_count"] == 2
+    assert cloud["remote_total_bytes"] == cloud["local_total_bytes"] == 30
+    assert cloud["target_path"] == "/root/autodl-tmp/medai/mimic-iv"
+    commands = command_log.read_text(encoding="utf-8")
+    assert "rm -rf" not in commands
+    assert "chmod -R a-w" in commands
+    sign_in = next(body for method, path, body in requests if path == "/autopanel/v1/sign_in")
+    assert json.loads(sign_in)["password"] == hashlib.sha1(b"panel-secret").hexdigest()
+
+
+def test_autodl_cloud_pull_timeout_reuses_active_task(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"instance_uuid": "cloud-instance"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment, _ = fake_cloud_ssh_environment(tmp_path)
+    task_responses = [
+        {
+            "code": "success",
+            "data": {
+                "task_doing": [{"task_id": "task-1"}],
+                "task_done": [],
+            },
+        },
+        {
+            "code": "success",
+            "data": {
+                "task_doing": [],
+                "task_done": [{"task_id": "task-1", "status": "success"}],
+            },
+        },
+    ]
+    responses = _cloud_api_responses(task_responses)
+    with autodl_api(responses) as (base_url, requests):
+        responses[("GET", "/api/v1/dev/instance/pro/snapshot")]["data"][
+            "jupyter_domain"
+        ] = base_url
+        timed_out = _run_cloud_pull(
+            state_path=state_path,
+            base_url=base_url,
+            environment=environment,
+            timeout="1",
+        )
+        resumed = _run_cloud_pull(
+            state_path=state_path, base_url=base_url, environment=environment
+        )
+
+    assert timed_out.returncode != 0
+    assert "timed out" in timed_out.stderr
+    assert resumed.returncode == 0, resumed.stderr
+    downloads = [path for method, path, _ in requests if path == "/autopanel/v1/netdisk/download"]
+    assert downloads == ["/autopanel/v1/netdisk/download"]
+
+
+def test_autodl_cloud_pull_fails_fast_on_ambiguous_aliyun_binding(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"instance_uuid": "cloud-instance"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment, _ = fake_cloud_ssh_environment(tmp_path)
+    responses = _cloud_api_responses()
+    responses[("GET", "/autopanel/v1/netdisk/list")] = {
+        "code": "success",
+        "data": [
+            {"provider": "aliyun", "fsid": "one"},
+            {"provider": "aliyun", "fsid": "two"},
+        ],
+    }
+    with autodl_api(responses) as (base_url, _):
+        responses[("GET", "/api/v1/dev/instance/pro/snapshot")]["data"][
+            "jupyter_domain"
+        ] = base_url
+        completed = _run_cloud_pull(
+            state_path=state_path, base_url=base_url, environment=environment
+        )
+
+    assert completed.returncode != 0
+    assert "exactly one explicit Aliyun binding" in completed.stderr
+    assert "panel-secret" not in completed.stderr
+
+
+def test_autodl_cloud_pull_failed_retry_deletes_only_recorded_exact_paths(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "cloud-instance",
+                    "cloud_drive": {
+                        "provider": "aliyun",
+                        "dataset": "mimic-iv",
+                        "source_path": "medai/mimic-iv",
+                        "staging_path": "/root/autodl-tmp/mimic-iv",
+                        "target_path": "/root/autodl-tmp/medai/mimic-iv",
+                        "owned_paths": True,
+                        "status": "failed",
+                        "remote_file_count": 2,
+                        "remote_total_bytes": 30,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment, command_log = fake_cloud_ssh_environment(tmp_path)
+    responses = _cloud_api_responses()
+    with autodl_api(responses) as (base_url, _):
+        responses[("GET", "/api/v1/dev/instance/pro/snapshot")]["data"][
+            "jupyter_domain"
+        ] = base_url
+        completed = _run_cloud_pull(
+            state_path=state_path, base_url=base_url, environment=environment
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    cleanup = next(
+        line
+        for line in command_log.read_text(encoding="utf-8").splitlines()
+        if "rm -rf" in line
+    )
+    assert "/root/autodl-tmp/mimic-iv" in cleanup
+    assert "/root/autodl-tmp/medai/mimic-iv" in cleanup
+    assert "*" not in cleanup
 
 
 def test_autodl_pro_instances_lists_from_local_dotenv(tmp_path: Path):
