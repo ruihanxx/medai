@@ -61,6 +61,21 @@ PY
 The list endpoint is read-only. Its response contains each instance's `uuid`,
 `created_at`, and `status`.
 
+For normal use, run the included helper. It reads the repository-root `.env` by
+default and prints the complete API response:
+
+```bash
+python3 scripts/list_autodl_pro_instances.py
+```
+
+Pass an alternate local dotenv file only when needed:
+
+```bash
+python3 scripts/list_autodl_pro_instances.py --env-file /absolute/path/to/.env
+```
+
+The equivalent raw API call is:
+
 ```bash
 autodl_api POST /api/v1/dev/instance/pro/list '{"page_index":1,"page_size":100}'
 ```

@@ -11,6 +11,7 @@ ROOT = Path(__file__).parents[1]
 AUTODL_SCRIPT = (
     ROOT / "templates" / "skills" / "computation_provider" / "scripts" / "autodl.py"
 )
+AUTODL_LIST_SCRIPT = ROOT / "scripts" / "list_autodl_pro_instances.py"
 
 
 @contextmanager
@@ -151,3 +152,33 @@ def test_autodl_create_uses_query_status_and_retains_state_after_poll_failure(
     ]
     assert json.loads(requests[0][2])["gpu_spec_uuid"] == "v-48g-350w"
     assert requests[1][2] == ""
+
+
+def test_list_autodl_pro_instances_reads_local_dotenv(tmp_path: Path):
+    expected = {
+        "code": "Success",
+        "data": {"list": [{"uuid": "pro-test", "status": "shutdown"}]},
+    }
+    with autodl_api(
+        {("POST", "/api/v1/dev/instance/pro/list"): expected}
+    ) as (base_url, requests):
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            f"AUTODL_TOKEN=test-token\nAUTODL_API_BASE_URL={base_url}\n",
+            encoding="utf-8",
+        )
+        completed = subprocess.run(
+            [sys.executable, str(AUTODL_LIST_SCRIPT), "--env-file", str(env_file)],
+            capture_output=True,
+            text=True,
+        )
+
+    assert completed.returncode == 0
+    assert json.loads(completed.stdout) == expected
+    assert requests == [
+        (
+            "POST",
+            "/api/v1/dev/instance/pro/list",
+            '{"page_index": 1, "page_size": 100}',
+        )
+    ]
