@@ -100,9 +100,12 @@ Before *every* `create`, follow this selection procedure:
 
 Recheck the official Pro API appendix before every rental because this mapping
 may change. The public Pro API does not expose a read-only endpoint for current
-rentable inventory. Confirm availability in the AutoDL market or console; do not
-use `create` as an availability probe because a successful call starts billing.
-If the selected resource cannot be confirmed, stop explicitly.
+rentable inventory. When the market or console cannot be queried, choose one
+stronger eligible pool GPU in advance and pass it as `--fallback-gpu-spec` to
+the reviewed `create` command. The script makes that one additional billable
+request only when the first create response explicitly says the selected GPU is
+out of inventory. A second out-of-inventory response, or any other API error,
+stops the run; do not try further GPUs.
 
 The Pro API accepts one to four GPUs per instance. Stop if the experiment needs
 more than four GPUs or another unsupported topology. Do not split the experiment
@@ -211,6 +214,7 @@ Create only after the exact requirement and image UUID have been validated:
 ```bash
 python <skill-dir>/scripts/autodl.py create \
   --gpu-spec <gpu-specification-id> \
+  --fallback-gpu-spec <one-stronger-gpu-specification-id> \
   --gpu-count <count> \
   --state <run-state-path>
 ```
@@ -222,6 +226,8 @@ and create another billable instance.
 The current script:
 
 - creates a pay-as-you-go Container Instance Pro instance;
+- makes one preselected stronger-GPU create attempt only when the first request
+  explicitly reports no inventory;
 - lets AutoDL choose the data center;
 - requests no system-disk expansion;
 - requires a host driver compatible with CUDA 11.8 or newer;
@@ -393,10 +399,12 @@ durable backup.
 
 ## Failure Handling
 
-- **API or HTTP error:** Preserve the complete non-secret error, stop the current
-  operation, and do not choose another resource or retry billable creation
-  blindly. A failed `create` must make the invoking Codex agent exit nonzero;
-  do not continue the run locally or with another rental.
+- **API or HTTP error:** Preserve the complete non-secret error and stop the
+  current operation. The only exception is the script's one preselected
+  `--fallback-gpu-spec` attempt after an explicit no-inventory response; do not
+  choose another resource or retry billable creation beyond it. A failed
+  `create` must make the invoking Codex agent exit nonzero; do not continue the
+  run locally or with another rental.
 - **Creation timeout or status-poll failure:** The current-run state is written
   as soon as AutoDL returns the instance UUID, before polling starts. Inspect
   that state with `status`, then power off and release the recorded instance if

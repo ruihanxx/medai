@@ -54,6 +54,11 @@
   closest compatible official image UUID; without stated versions, the
   configured default image UUID is used. The provider state records the
   selected non-secret GPU and image identifiers.
+- When AutoDL Pro inventory cannot be queried read-only, codegen preselects one
+  stronger eligible GPU and supplies it as the provider script's
+  `--fallback-gpu-spec`. The script retries creation only after an explicit
+  no-inventory response; a second no-inventory response or any other API error
+  is terminal.
 - When a paper explicitly reports GPU hardware for its full experiment,
   codegen treats its GPU count and per-GPU VRAM as a required capacity floor.
   If local capacity is below that floor, codegen must use configured remote

@@ -24,6 +24,15 @@ SUPPORTED_GPU_SPECS = {
     "5090-p",
     "4090D",
 }
+NO_INVENTORY_MARKERS = (
+    "库存不足",
+    "无库存",
+    "暂无可用",
+    "无可用资源",
+    "暂无资源",
+    "no inventory",
+    "out of stock",
+)
 
 
 def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -87,29 +96,45 @@ def create_instance(args: argparse.Namespace) -> None:
         raise SystemExit(
             f"AutoDL state already exists; inspect or release it before creating: {args.state}"
         )
-    if args.gpu_spec not in SUPPORTED_GPU_SPECS:
-        choices = ", ".join(sorted(SUPPORTED_GPU_SPECS))
-        raise SystemExit(
-            f"Unsupported AutoDL Pro GPU specification: {args.gpu_spec}; choose one of {choices}"
-        )
+    for gpu_spec in (args.gpu_spec, args.fallback_gpu_spec):
+        if gpu_spec and gpu_spec not in SUPPORTED_GPU_SPECS:
+            choices = ", ".join(sorted(SUPPORTED_GPU_SPECS))
+            raise SystemExit(
+                "Unsupported AutoDL Pro GPU specification: "
+                f"{gpu_spec}; choose one of {choices}"
+            )
+    if args.fallback_gpu_spec == args.gpu_spec:
+        raise SystemExit("AutoDL fallback GPU specification must differ from --gpu-spec")
     if not 1 <= args.gpu_count <= 4:
         raise SystemExit("AutoDL Pro GPU count must be between 1 and 4")
     image_uuid = (args.image_uuid or os.environ.get("AUTODL_IMAGE_UUID", "")).strip()
     if not image_uuid:
         raise SystemExit("Configure AUTODL_IMAGE_UUID or pass --image-uuid")
-    payload = request(
-        "POST",
-        "/api/v1/dev/instance/pro/create",
-        {
-            "req_gpu_amount": args.gpu_count,
-            "expand_system_disk_by_gb": 0,
-            "gpu_spec_uuid": args.gpu_spec,
-            "image_uuid": image_uuid,
-            "cuda_v_from": 118,
-            "instance_name": f"medai-{int(time.time())}",
-            "start_command": "sleep 1",
-        },
-    )
+    gpu_specs = [args.gpu_spec]
+    if args.fallback_gpu_spec:
+        gpu_specs.append(args.fallback_gpu_spec)
+    for attempt, selected_gpu_spec in enumerate(gpu_specs):
+        try:
+            payload = request(
+                "POST",
+                "/api/v1/dev/instance/pro/create",
+                {
+                    "req_gpu_amount": args.gpu_count,
+                    "expand_system_disk_by_gb": 0,
+                    "gpu_spec_uuid": selected_gpu_spec,
+                    "image_uuid": image_uuid,
+                    "cuda_v_from": 118,
+                    "instance_name": f"medai-{int(time.time())}",
+                    "start_command": "sleep 1",
+                },
+            )
+            break
+        except RuntimeError as exc:
+            if attempt == 0 and len(gpu_specs) == 2 and any(
+                marker in str(exc).lower() for marker in NO_INVENTORY_MARKERS
+            ):
+                continue
+            raise
     instance_uuid = str(payload["data"])
     args.state.parent.mkdir(parents=True, exist_ok=True)
     args.state.write_text(
@@ -120,7 +145,7 @@ def create_instance(args: argparse.Namespace) -> None:
                 "released": False,
                 "provider_state": {
                     "instance_uuid": instance_uuid,
-                    "gpu_spec_uuid": args.gpu_spec,
+                    "gpu_spec_uuid": selected_gpu_spec,
                     "gpu_count": args.gpu_count,
                     "image_uuid": image_uuid,
                 },
@@ -153,6 +178,10 @@ subparsers = parser.add_subparsers(dest="action", required=True)
 
 create = subparsers.add_parser("create")
 create.add_argument("--gpu-spec", required=True)
+create.add_argument(
+    "--fallback-gpu-spec",
+    help="One stronger eligible Pro GPU to try only when --gpu-spec is out of inventory.",
+)
 create.add_argument("--gpu-count", type=int, default=1)
 create.add_argument(
     "--image-uuid",

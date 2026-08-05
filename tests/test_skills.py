@@ -15,8 +15,11 @@ AUTODL_INSTANCES_SCRIPT = ROOT / "scripts" / "autodl_pro_instances.py"
 
 
 @contextmanager
-def autodl_api(responses: dict[tuple[str, str], dict[str, object]]):
+def autodl_api(
+    responses: dict[tuple[str, str], dict[str, object] | list[dict[str, object]]],
+):
     requests: list[tuple[str, str, str]] = []
+    response_counts: dict[tuple[str, str], int] = {}
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -29,7 +32,14 @@ def autodl_api(responses: dict[tuple[str, str], dict[str, object]]):
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length).decode("utf-8")
             requests.append((self.command, self.path, body))
-            payload = responses[(self.command, self.path.split("?", 1)[0])]
+            key = (self.command, self.path.split("?", 1)[0])
+            response = responses[key]
+            if isinstance(response, list):
+                index = response_counts.get(key, 0)
+                payload = response[index]
+                response_counts[key] = index + 1
+            else:
+                payload = response
             encoded = json.dumps(payload).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -152,6 +162,51 @@ def test_autodl_create_uses_query_status_and_retains_state_after_poll_failure(
     ]
     assert json.loads(requests[0][2])["gpu_spec_uuid"] == "v-48g-350w"
     assert requests[1][2] == ""
+
+
+def test_autodl_create_tries_one_stronger_gpu_after_no_inventory(tmp_path: Path):
+    instance_uuid = "pro-fallback-instance"
+    with autodl_api(
+        {
+            ("POST", "/api/v1/dev/instance/pro/create"): [
+                {"code": "ResourceNotEnough", "msg": "库存不足"},
+                {"code": "Success", "data": instance_uuid},
+            ],
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "Success",
+                "data": "running",
+            },
+        }
+    ) as (base_url, requests):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "create",
+                "--gpu-spec",
+                "v-32g-p",
+                "--fallback-gpu-spec",
+                "v-48g",
+                "--state",
+                str(tmp_path / "instance.json"),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": "test-token",
+                "AUTODL_IMAGE_UUID": "base-image-test",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    state = json.loads((tmp_path / "instance.json").read_text(encoding="utf-8"))
+    assert state["provider_state"]["gpu_spec_uuid"] == "v-48g"
+    assert [json.loads(body)["gpu_spec_uuid"] for _, _, body in requests[:2]] == [
+        "v-32g-p",
+        "v-48g",
+    ]
 
 
 def test_autodl_pro_instances_lists_from_local_dotenv(tmp_path: Path):

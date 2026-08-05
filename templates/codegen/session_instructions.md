@@ -96,9 +96,15 @@ select the closest official image UUID; otherwise use the configured default
 image UUID. After selecting the provider, read the provider reference required
 by that skill before performing any provider operation. Store the instance state at
 `{{ computation_provider_state_path }}`
-and leave it running for the plan and replication stages. If no eligible
-resource or compatible image is available, stop explicitly. Do not rent weaker
-hardware or reduce the experiment scale.
+and leave it running for the plan and replication stages. AutoDL Pro has no
+read-only inventory endpoint, so do not block on a market or console lookup.
+Select one stronger eligible Pro GPU in advance and pass it to the provider
+script as `--fallback-gpu-spec` with the initial `--gpu-spec`. The script makes
+that one additional create request only if the initial response explicitly says
+the initial GPU has no inventory. A second no-inventory response or any other
+API error is terminal. Record both candidates and the selected GPU in the plan.
+If no eligible resource or compatible image exists, stop explicitly. Do not rent
+weaker hardware or reduce the experiment scale.
 {% else %}
 When the explicit paper GPU requirement above is not met locally, or other
 paper-required GPU resources are unavailable or insufficient locally, stop
@@ -120,6 +126,9 @@ small, bounded sequence of multiple distinct, safe recovery attempts. Do not
 blindly repeat a billable operation. If the interaction remains unsuccessful after
 those attempts, immediately make the Codex agent CLI exit nonzero. Do not
 continue with local work or a later workflow phase.
+
+The preselected AutoDL `--fallback-gpu-spec` is the only permitted second
+billable create request. Do not make further resource substitutions.
 
 If a successful, evidence-based procedure conflicts with the selected skill
 reference, do not edit the repository skill. Append one reviewable correction
