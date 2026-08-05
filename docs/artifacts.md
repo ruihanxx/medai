@@ -93,12 +93,15 @@ skill, provider, reference path, discrepancy, resolved procedure, and consulted
 official documentation URLs. It is a review artifact, not a permission to edit
 the repository skill during the run.
 
-Every scientific preprocessing audit has its own numbered attempt directory;
-technical provider retries remain within that directory and archive earlier
-transcripts using the normal transcript convention. Audit-only CPU, streaming,
-or small-batch adapters remain under `scripts/` and never enter
-`codegen/codebase/`; preprocessing outputs, command logs, and statistics remain
-under `results/`. The Markdown report has no schema or static body validation.
+Every scientific preprocessing audit has its own numbered local attempt
+directory; technical provider retries remain within that attempt and archive
+earlier transcripts using the normal transcript convention. Local-data
+audit-only CPU, streaming, or small-batch adapters remain under `scripts/` and
+never enter `codegen/codebase/`; preprocessing outputs, command logs, and
+statistics remain under `results/`. Cloud-data audits use a separate remote
+attempt beneath the codegen remote working directory and copy back only
+aggregate statistics, logs, and the report into these local paths. The Markdown
+report has no schema or static body validation.
 Its sole machine protocol is exactly one verdict marker as the final non-empty
 line: `Verdict: PASS` or `Verdict: FAIL`. Audit reports are stage artifacts and
 do not change the reproduction report's three-section contract.

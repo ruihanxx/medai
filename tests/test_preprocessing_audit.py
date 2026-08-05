@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -312,3 +313,80 @@ def test_remote_state_is_local_only_audit_context(
     assert "must not connect to it or operate it" in prompt
     assert "complete metadata, modality pairing, label" in prompt
     assert remote_state_path.read_text(encoding="utf-8") == original_state
+
+
+def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
+    tmp_path: Path,
+    monkeypatch,
+):
+    state = _audit_state(tmp_path)
+    local_config = state["config"]
+    assert isinstance(local_config, RunConfig)
+    config = replace(
+        local_config,
+        data=None,
+        clouddrive=True,
+        drive_provider="aliyun",
+        cloud_dataset="mimic-iv",
+    )
+    state["config"] = config
+    remote_state_path = config.output / "remote_compute" / "instance.json"
+    remote_state_path.parent.mkdir()
+    remote_dataset = "/root/autodl-tmp/medai/mimic-iv"
+    remote_state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "instance",
+                    "cloud_drive": {
+                        "status": "completed",
+                        "provider": "aliyun",
+                        "dataset": "mimic-iv",
+                        "target_path": remote_dataset,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    codegen_plan_path = Path(state["codebase_dir"]) / "codegen_plan.json"
+    codegen_plan_path.write_text(
+        json.dumps(
+            {
+                "files": [{"path": "run.py", "responsibility": "Run experiment"}],
+                "dependency_order": ["run.py"],
+                "entry_points": ["run.py"],
+                "shared_state": "Files",
+                "remote_compute": {
+                    "state_path": str(remote_state_path),
+                    "remote_working_dir": "/root/autodl-tmp/run-001",
+                    "remote_dataset_dir": remote_dataset,
+                },
+                "ambiguities": [
+                    {
+                        "question": "Missing values",
+                        "assumption": "Impute features only",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("medai.workflow.run_agent", _fake_agents(["PASS"], []))
+
+    result = audit_agent_node(state)
+
+    assert result["audit_verdict"] == "PASS"
+    prompt = (config.output / "prompts" / "audit_attempt_001.md").read_text(
+        encoding="utf-8"
+    )
+    assert remote_dataset in prompt
+    assert "/root/autodl-tmp/run-001/preprocessing_audit/attempt_001" in prompt
+    assert "Execute the complete dataset preprocessing remotely" in prompt
+    assert "make only small audit instrumentation" in prompt
+    assert "Download only aggregate statistics" in prompt
+    assert "local CPU, streaming, small-batch, or sampled substitute" in prompt
+    assert "Never use the `computation-provider` skill" not in prompt

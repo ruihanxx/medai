@@ -9,11 +9,41 @@ from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.workflow import (
     create_workflow,
+    preflight_node,
     release_run_computation_instance,
     replicate_agent_node,
     resolve_replication_output,
     validate_codegen_remote_compute,
 )
+
+
+def test_cloud_drive_preflight_accepts_remote_only_data(
+    tmp_path: Path, monkeypatch
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    monkeypatch.setenv("AUTODL_TOKEN", "token")
+    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image")
+    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "password")
+    config = RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data="mimic-iv",
+        siliconflow_config=None,
+        clouddrive=True,
+    )
+    PipelineState.create(config.output, {"paper": str(paper), "clouddrive": True})
+    monkeypatch.setattr(
+        "medai.workflow.detect_resources",
+        lambda output: {"cpu_count": 1, "gpus": []},
+    )
+
+    result = preflight_node({"config": config})
+
+    assert Path(result["resources_path"]).is_file()
+    assert PipelineState(config.output).is_stage_completed("preflight")
 
 
 def test_codegen_remote_compute_requires_only_static_paths(tmp_path: Path):
@@ -58,6 +88,78 @@ def test_codegen_remote_compute_requires_only_static_paths(tmp_path: Path):
     )
     with pytest.raises(RuntimeError, match="does not match the current run"):
         validate_codegen_remote_compute(mismatched, state_path)
+
+
+def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    state_path.parent.mkdir(parents=True)
+    target = "/root/autodl-tmp/medai/mimic-iv"
+    remote_compute = {
+        "state_path": str(state_path),
+        "remote_working_dir": "/root/autodl-tmp/medai-run",
+        "remote_dataset_dir": target,
+    }
+    plan = CodegenPlan.model_validate(
+        {
+            "files": [{"path": "run.py", "responsibility": "Run"}],
+            "dependency_order": ["run.py"],
+            "entry_points": ["run.py"],
+            "shared_state": "None",
+            "ambiguities": [],
+            "remote_compute": remote_compute,
+        }
+    )
+    envelope = {
+        "provider": "autodl",
+        "created_by_run": True,
+        "released": False,
+        "provider_state": {
+            "instance_uuid": "instance",
+            "cloud_drive": {
+                "status": "completed",
+                "provider": "aliyun",
+                "dataset": "mimic-iv",
+                "target_path": target,
+            },
+        },
+    }
+    state_path.write_text(json.dumps(envelope), encoding="utf-8")
+
+    cloud = validate_codegen_remote_compute(
+        plan,
+        state_path,
+        cloud_dataset="mimic-iv",
+        drive_provider="aliyun",
+    )
+    assert cloud is not None and cloud["target_path"] == target
+
+    envelope["provider_state"]["cloud_drive"]["status"] = "downloading"
+    state_path.write_text(json.dumps(envelope), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="incomplete or inconsistent"):
+        validate_codegen_remote_compute(
+            plan,
+            state_path,
+            cloud_dataset="mimic-iv",
+            drive_provider="aliyun",
+        )
+
+    envelope["provider_state"]["cloud_drive"]["status"] = "completed"
+    envelope["released"] = True
+    state_path.write_text(json.dumps(envelope), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="already released"):
+        validate_codegen_remote_compute(
+            plan,
+            state_path,
+            cloud_dataset="mimic-iv",
+            drive_provider="aliyun",
+        )
+    validate_codegen_remote_compute(
+        plan,
+        state_path,
+        cloud_dataset="mimic-iv",
+        drive_provider="aliyun",
+        require_active=False,
+    )
 
 
 def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
@@ -669,6 +771,41 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert "/skills/computation_provider/SKILL.md" in prompt
     assert str(tmp_path / "instance.json") in prompt
     assert "autodl" not in prompt.lower()
+
+
+def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
+    tmp_path: Path,
+):
+    prompt_path = render_prompt(
+        "codegen/session_instructions.md",
+        tmp_path / "cloud-codegen.md",
+        codebase_dir=tmp_path / "codebase",
+        paper_markdown=tmp_path / "paper.md",
+        claims_path=tmp_path / "claims.json",
+        experiments_path=tmp_path / "experiments.json",
+        data_dir=None,
+        cloud_drive_enabled=True,
+        cloud_dataset="mimic-iv",
+        drive_provider="aliyun",
+        cloud_source="medai/mimic-iv",
+        cloud_replacement_required=True,
+        skills_dir=Path("/skills"),
+        codegen_plan_path=tmp_path / "codegen_plan.json",
+        dataset_patch_path=tmp_path / "patch.json",
+        skill_corrections_path=tmp_path / "corrections.json",
+        computation_provider_state_path=tmp_path / "instance.json",
+        gpu_info=[],
+        computation_provider="AutoDL",
+        resuming=True,
+        audit_feedback_path=None,
+    )
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+    assert "Cloud-backed data makes remote computation mandatory" in prompt
+    assert "Before inspecting dataset documentation, schema, metadata, or content" in prompt
+    assert "mimic-iv" in prompt
+    assert "Create at most one replacement" in prompt
+    assert "Never copy\nraw cloud data into the local run" in prompt
 
 
 def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path: Path):

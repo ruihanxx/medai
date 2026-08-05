@@ -9,21 +9,25 @@ The LangGraph stages are:
 3. `preprocessing_agent`: audit `paper.md` in place by labeling linked
    Figure/Table assets with captions and correcting image-verified LaTeX,
    then write text/numeric claims and experiment definitions.
-4. `codegen_agent`: inspect supplied data directly through bounded, read-only,
+4. `codegen_agent`: inspect supplied data through bounded, read-only,
    non-executing reads, identify every paper-underspecified implementation
    decision before coding, resolve each using applicable medical knowledge and
    standard medical-research methods, record the executable resolution as a
    code-generation ambiguity, compare local GPU capacity with the paper's
    full-scale requirements, use the `computation-provider` skill to rent
    matching configured remote compute when needed, plan files, and write code.
-5. `audit_agent`: use the real read-only local data to run all locally feasible
-   preprocessing, compute paper-aware cohort and data-quality sanity statistics,
-   and write a free-form audit report. It works only in its local attempt
-   directory and never connects to remote compute, trains, tunes, or evaluates a
-   model. A live remote instance remains available for later stages; tabular and
-   time-series preprocessing is completed locally when feasible, while
-   multimodal audits cover full metadata, pairing, labels, and file availability
-   and identify any genuinely remote-heavy boundary.
+   Cloud-drive mode always selects AutoDL: codegen materializes the complete
+   dataset before any data inspection, then records the completed state's
+   read-only target as `remote_dataset_dir`.
+5. `audit_agent`: run real-data preprocessing, compute paper-aware cohort and
+   data-quality sanity statistics, and write a free-form audit report. Local
+   data runs keep the existing isolated local audit and never connect to remote
+   compute. Cloud-drive runs instead reuse codegen's active instance, remote
+   dataset, and preprocessing implementation in an independent remote audit
+   directory. They execute complete preprocessing with small audit-only
+   instrumentation, prohibit training/tuning/evaluation and local CPU adapters,
+   and retrieve only aggregate statistics, logs, and the report—not raw or
+   row-level data.
 6. `plan_agent`: check coverage, install dependencies, smoke-test, and write the
    replication plan.
 7. `replicate_agent`: execute every experiment and write evidence.
@@ -46,9 +50,12 @@ An explicit no-inventory response permits exactly one attempt with a stronger
 eligible GPU that preserves every original requirement; a failed retry is
 terminal. If recovery remains unsuccessful, the invoking Codex agent exits
 nonzero. When codegen records a remote-compute plan, orchestration statically
-validates only its current-run state path, remote working directory, and remote
-dataset directory before the stage completes. Additional provider metadata is
-accepted, and provider-specific lifecycle validation occurs at runtime. A
+validates its current-run state path, remote working directory, and remote
+dataset directory before the stage completes. For cloud runs it also requires
+an active `completed` cloud-drive state and exact agreement between that state's
+target and every codegen/replication plan `remote_dataset_dir`. Additional
+provider metadata is accepted, and other provider-specific lifecycle validation
+occurs at runtime. A
 successful procedure that conflicts with the skill reference is recorded in
 `system_maintenance/skills/corrections.json`, not applied to the repository
 skill during the run.
@@ -84,3 +91,10 @@ failure resumes the same scientific audit directory and does not consume a
 rewrite. A persisted fourth FAIL remains terminal on resume. When audit-driven
 codegen supersedes a legacy completed implementation, downstream plan,
 replication, and report stages are invalidated and rerun.
+
+Failure cleanup releases the current cloud instance. On an explicit resume,
+codegen creates at most one replacement only after the state proves the old
+instance was released, then rematerializes the dataset. The provider script
+archives non-secret selection, cloud state, and release time in instance
+history. An unreleased instance or failed cleanup blocks another rental. A
+completed run may validate its released final state without renting again.

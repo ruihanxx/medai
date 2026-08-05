@@ -37,13 +37,15 @@
   rerunning the baseline.
 - Plan agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.
-- The preprocessing audit agent runs with its attempt directory as working
-  directory. It treats source data and `codegen/codebase/` as read-only, writes
-  only audit scripts/results/report artifacts, and may install dependencies only
-  locally. It runs full locally feasible preprocessing and paper-aware basic
-  statistics without model training, tuning, evaluation, remote-instance access,
-  or the `computation-provider` skill. Device-only adaptations may change CPU/GPU
-  placement, batching, chunking, or streaming, but not scientific semantics.
+- The preprocessing audit agent runs with its local attempt directory as working
+  directory and treats `codegen/codebase/` as read-only. For local data it also
+  treats source data as read-only, writes only local audit artifacts, never uses
+  remote compute, and may make device-only adapters without changing scientific
+  semantics. For cloud data it must use the existing computation-provider state,
+  copy codegen's remote preprocessing into an independent remote audit attempt,
+  add only audit instrumentation, and execute complete preprocessing there. It
+  may download only aggregate statistics, logs, and the report; raw or row-level
+  data, local CPU adapters, training, tuning, and evaluation are prohibited.
 - For large raw tables/dataframes, codegen and the preprocessing audit read in
   chunks or bounded batches, immediately perform chunk-eligible preprocessing,
   retain only required columns, and postpone global operations such as
@@ -85,7 +87,9 @@
 - When codegen requires remote compute, it records the exact current-run state
   path, remote working directory, and remote dataset directory in
   `codegen_plan.json`. Orchestration statically validates only these required
-  fields and accepts additional provider-specific plan metadata. For every
+  fields and accepts additional provider-specific plan metadata. Cloud-backed
+  runs additionally require completed provider cloud state and exact agreement
+  between its target and every plan's `remote_dataset_dir`. For every
   remote-compute interaction, including instance creation, the agent starts with
   the selected provider reference but may consult official online documentation
   and use reasoned, non-secret diagnostics for bounded, safe recovery attempts.

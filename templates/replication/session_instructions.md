@@ -32,6 +32,11 @@ Write only under the working directory and the output directory above. Other sub
 
 - **Skills directory:** `{{ skills_dir }}/` (read-only) — consult applicable runtime skills here.
 - **Remote-compute state:** `{{ computation_provider_state_path }}` — use this state only when the plan requires remote compute.
+{% if cloud_drive_enabled %}
+- **Cloud dataset:** `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`).
+  Its only valid raw-data location is the completed read-only target in the
+  remote-compute state; do not transfer or rematerialize it.
+{% endif %}
 
 
 ## Reporting Discipline
@@ -115,6 +120,12 @@ matches the work in front of you. If the plan uses remote compute, read
 `{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected
 provider reference required by that skill and use the existing instance state
 at `{{ computation_provider_state_path }}`.
+{% if cloud_drive_enabled %}
+Verify that `provider_state.cloud_drive.status` remains `completed` and that its
+target equals the plan's `remote_dataset_dir` before execution. Reuse that same
+remote copy. Download only experiment outputs, aggregate evidence, and logs;
+never download raw or row-level dataset content.
+{% endif %}
 
 ## Environment Setup
 

@@ -1,7 +1,7 @@
 # Codegen agent
 
 {% if audit_feedback_path|default(none) %}
-This stage is revising a completed implementation after the local preprocessing
+This stage is revising a completed implementation after the preprocessing
 audit rejected it. Read the audit report at
 `{{ audit_feedback_path }}` before changing code. Preserve valid work and change
 only the complete preprocessing chain needed to resolve the reported cause:
@@ -25,7 +25,13 @@ implementation of the paper's methodology.
 
 ## Inputs
 - Paper Markdown: `{{ paper_markdown }}`
+{% if cloud_drive_enabled|default(false) %}
+- Cloud dataset name: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`)
+- Cloud source descriptor: `{{ cloud_source }}`. Resolve its materialized remote
+  path only through the computation-provider state; no local raw-data path exists.
+{% else %}
 - Data: `{{ data_dir or "not supplied" }}`
+{% endif %}
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
@@ -85,6 +91,30 @@ JAX) rather than implementing the GPU-dependent work on CPU.
 {% endif %}
 
 {% if computation_provider %}
+{% if cloud_drive_enabled|default(false) %}
+Cloud-backed data makes remote computation mandatory even when local hardware
+would otherwise be sufficient. Select the configured provider through the
+computation-provider skill. If the paper states a GPU requirement, preserve the
+existing capacity-floor selection rule; otherwise use the cloud-drive default
+resource specification defined by the selected provider reference and runtime
+environment. Do not choose a local, CPU, or weaker-resource fallback.
+
+Before inspecting dataset documentation, schema, metadata, or content, create
+or safely resume the run-owned instance, read the drive document routed by the
+parent skill, and invoke its reviewed cloud materialization command for
+`{{ cloud_dataset }}`. Continue only after the provider state reports the cloud
+drive `completed`. Use that state's materialized target path as
+`remote_dataset_dir` for codegen, audit, planning, and replication. Never copy
+raw cloud data into the local run.
+{% if cloud_replacement_required|default(false) %}
+
+This is an explicit resume after the prior instance was confirmed released.
+Create at most one replacement through the provider script; it must archive
+the prior non-secret instance and cloud state in instance history. Materialize
+the dataset afresh on that replacement. If creation, cleanup, authorization, or
+materialization fails, exit nonzero without another rental.
+{% endif %}
+{% endif %}
 When the explicit paper GPU requirement above is not met locally, or other
 paper-required GPU resources are unavailable or insufficient locally, use the
 configured remote computation provider only through the resource- and
@@ -161,7 +191,13 @@ Track Python dependencies in `pyproject.toml` or `requirements.txt` (your choice
 
 **Dataset Processing and Cohort Construction**
 
-{% if data_dir %}
+{% if cloud_drive_enabled|default(false) %}
+Inspect only the completed materialized remote dataset directory recorded in
+the current provider state. Keep it read-only. Use bounded, non-executing reads
+and inspect documentation or metadata before representative content. Do not
+download raw files locally, create a local CPU data adapter, or inspect the
+cloud source before materialization completes.
+{% elif data_dir %}
 Inspect `{{ data_dir }}` directly as needed to implement the paper.
 Keep the raw root read-only. Bound the number of files, bytes, rows, and field
 lengths read. Never extract archives or deserialize pickle, joblib, model
@@ -250,7 +286,8 @@ your decisions so they are inspectable and machine-readable. Schema:
 }
 ```
 
-If remote compute is required, `remote_compute` must instead contain these
+If remote compute is required{% if cloud_drive_enabled|default(false) %} (it is
+mandatory for this cloud-backed run){% endif %}, `remote_compute` must instead contain these
 required fields:
 
 ```json

@@ -4,7 +4,12 @@ You are generating a step-by-step replication plan for testing whether a paper's
 
 ## Inputs:
 - Paper Markdown: `{{ paper_markdown }}`
+{% if cloud_drive_enabled %}
+- Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
+  already materialized at the read-only path in remote provider state.
+{% else %}
 - Data: `{{ data_dir or "not supplied" }}` (read-only)
+{% endif %}
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
@@ -22,6 +27,12 @@ is fine.
 If remote computation was selected, read
 `{{ skills_dir }}/computation_provider/SKILL.md` and then the selected
 provider reference named by that skill before planning remote operations.
+{% if cloud_drive_enabled %}
+This cloud-backed run must keep using the existing remote instance and the
+completed materialized dataset. Read its target path from provider state and
+copy it exactly into every `remote_dataset_dir`; do not upload, download,
+remount, or rematerialize the raw dataset.
+{% endif %}
 
 
 ## Paper Claims and Experiment artifacts
@@ -158,7 +169,11 @@ If replication requires remote compute, add this top-level object alongside
         "provider": "<selected-provider>",
         "setup_hints": [
             "Use the selected provider reference and the local state at {{ computation_provider_state_path }} to resolve the current connection and connect to the remote server.",
+{% if cloud_drive_enabled %}
+            "Upload only code from {{ codebase_dir }}/; reuse the completed read-only cloud dataset recorded in provider state and never transfer raw data locally."
+{% else %}
             "Upload the code from {{ codebase_dir }}/ and the experiment's required input data to the run-owned locations defined by the selected provider reference."
+{% endif %}
         ]
     }
 }
