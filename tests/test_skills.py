@@ -420,6 +420,55 @@ def test_autodl_create_archives_released_instance_on_resume(tmp_path: Path):
     ]
 
 
+def test_autodl_create_allows_only_one_replacement_per_manifest_resume(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    state_path.parent.mkdir()
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"resume_count": 3}), encoding="utf-8"
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": True,
+                "released_at_unix": 123,
+                "provider_state": {
+                    "instance_uuid": "already-replaced",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "gpu_count": 1,
+                    "image_uuid": "image",
+                    "created_for_resume_count": 3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AUTODL_SCRIPT),
+            "create",
+            "--gpu-spec",
+            "v-32g-p",
+            "--state",
+            str(state_path),
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "AUTODL_TOKEN": "token",
+            "AUTODL_IMAGE_UUID": "image",
+            "AUTODL_API_BASE_URL": "http://127.0.0.1:1",
+        },
+    )
+
+    assert completed.returncode != 0
+    assert "already created for this manual resume" in completed.stderr
+
+
 def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
     directory_pages = [
         {

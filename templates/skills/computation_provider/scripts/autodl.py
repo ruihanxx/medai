@@ -96,12 +96,35 @@ def snapshot(state: dict[str, Any]) -> dict[str, Any]:
     return details
 
 
-def _history_from_released_state(state: dict[str, Any]) -> list[dict[str, Any]]:
+def _manifest_resume_count(state_path: Path) -> int | None:
+    manifest_path = state_path.parent.parent / "manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        value = json.loads(manifest_path.read_text(encoding="utf-8")).get("resume_count")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Run manifest is invalid: {manifest_path}") from exc
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RuntimeError(f"Run manifest has an invalid resume_count: {manifest_path}")
+    return value
+
+
+def _history_from_released_state(
+    state: dict[str, Any], state_path: Path
+) -> tuple[list[dict[str, Any]], int | None]:
     if not state.get("created_by_run") or state.get("released") is not True:
         raise RuntimeError(
             "AutoDL state still owns an unreleased instance; refusing another rental"
         )
     provider_state = state["provider_state"]
+    resume_count = _manifest_resume_count(state_path)
+    if (
+        resume_count is not None
+        and provider_state.get("created_for_resume_count") == resume_count
+    ):
+        raise RuntimeError(
+            "A replacement AutoDL instance was already created for this manual resume"
+        )
     history = provider_state.get("instance_history", [])
     if not isinstance(history, list):
         raise RuntimeError("AutoDL instance history has an invalid structure")
@@ -112,14 +135,21 @@ def _history_from_released_state(state: dict[str, Any]) -> list[dict[str, Any]]:
     }
     if isinstance(provider_state.get("cloud_drive"), dict):
         archived["cloud_drive"] = provider_state["cloud_drive"]
+    if "created_for_resume_count" in provider_state:
+        archived["created_for_resume_count"] = provider_state[
+            "created_for_resume_count"
+        ]
     archived["released_at_unix"] = state.get("released_at_unix")
-    return [*history, archived]
+    return [*history, archived], resume_count
 
 
 def create_instance(args: argparse.Namespace) -> None:
     history: list[dict[str, Any]] = []
+    resume_count = _manifest_resume_count(args.state)
     if args.state.exists():
-        history = _history_from_released_state(load_state(args.state))
+        history, resume_count = _history_from_released_state(
+            load_state(args.state), args.state
+        )
     for gpu_spec in (args.gpu_spec, args.fallback_gpu_spec):
         if gpu_spec and gpu_spec not in SUPPORTED_GPU_SPECS:
             choices = ", ".join(sorted(SUPPORTED_GPU_SPECS))
@@ -168,6 +198,8 @@ def create_instance(args: argparse.Namespace) -> None:
     }
     if history:
         provider_state["instance_history"] = history
+    if resume_count is not None:
+        provider_state["created_for_resume_count"] = resume_count
     save_state(
         args.state,
         {

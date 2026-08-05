@@ -102,6 +102,8 @@ mapping, fail without deleting anything.
 Every error exits nonzero so orchestration can release the current-run instance.
 Do not continue locally or rent a replacement until release is confirmed. On a
 later explicit resume, follow the AutoDL reference's instance-history rule.
+The provider script binds a replacement to the run manifest's current
+`resume_count` and refuses another replacement for that same manual resume.
 
 ## Official Guarantees and Private Assumption
 

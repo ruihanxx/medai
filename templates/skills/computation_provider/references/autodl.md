@@ -227,8 +227,10 @@ An explicit resumed run may call `create` again only after the state proves the
 previous current-run instance was released. The script moves its non-secret
 resource selection, cloud-drive state, and release time into
 `provider_state.instance_history`, then records the one replacement as the
-current instance. It refuses another rental while any current state is
-unreleased or cleanup did not complete.
+current instance. The current manifest `resume_count` is recorded with the
+rental so the script refuses a second replacement during the same manual
+resume. It also refuses another rental while any current state is unreleased or
+cleanup did not complete.
 
 ## Create and Inspect an Instance
 
