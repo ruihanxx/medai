@@ -69,6 +69,12 @@ before model computation.
 When no remote-compute state exists, use the complete local dataset and run the
 complete preprocessing. Do not replace it with a sample or toy path.
 
+For large raw tables/dataframes, use this processing pattern: Reads large raw
+tables/dataframe in chunks or bounded batches, applies chunk-eligible
+preprocessing immediately after each chunk read, projects required columns,
+drops unrelated columns before retaining data, and defers full-data operations
+such as downsampling after chunk-processed compact data is merged.
+
 When a remote-compute state exists, still complete all locally feasible work:
 
 - For tabular and time-series data, run full local preprocessing when it does

@@ -175,6 +175,12 @@ results.
 
 Strictly follow the paper's dataset processing and cohort construction procedures.
 
+For large raw tables/dataframes, use this processing pattern: Reads large raw
+tables/dataframe in chunks or bounded batches, applies chunk-eligible
+preprocessing immediately after each chunk read, projects required columns,
+drops unrelated columns before retaining data, and defers full-data operations
+such as downsampling after chunk-processed compact data is merged.
+
 When the paper uses specialized cohort, clinical, or methodological terms that cannot be mapped directly to the available dataset, infer the closest executable implementation using the dataset schema, metadata, and relevant medical knowledge. If the mapping remains unclear, search external sources.
 
 Do not skip, weaken, or obscure any requirement because of uncertainty. Record every non-direct mapping in the form of `"ambiguities"` in step 2.5.

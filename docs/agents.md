@@ -44,6 +44,10 @@
   statistics without model training, tuning, evaluation, remote-instance access,
   or the `computation-provider` skill. Device-only adaptations may change CPU/GPU
   placement, batching, chunking, or streaming, but not scientific semantics.
+- For large raw tables/dataframes, codegen and the preprocessing audit read in
+  chunks or bounded batches, immediately perform chunk-eligible preprocessing,
+  retain only required columns, and postpone global operations such as
+  downsampling until the compact chunk outputs are merged.
 - A codegen retry caused by audit reads the latest failed report and may change
   data reading, cohort construction, window/feature aggregation, missing-data
   handling, and related configuration only. It must repair the evidenced root
