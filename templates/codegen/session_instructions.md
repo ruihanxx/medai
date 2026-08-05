@@ -246,6 +246,17 @@ medical or medical-research convention and its code/configuration location.
 Downstream phases use this to distinguish "paper-underspecified" from
 "agent-misimplemented" outcomes.
 
+Double check the following places during cohort construction where the paper are highly likely to undrespecifies the methodology and implementations:
+- index-time definition, time-window specification, baseline ascertainment
+- window-level aggregation, value selection rule, worst-value selection, cumulative aggregation
+- episode reconstruction, exposure ascertainment, treatment-course construction
+- physiologic plausibility filtering, unit harmonization, record deduplication, concept mapping
+- computable phenotype, clinical-score reconstruction, outcome ascertainment
+- missing-data handling, default-normal imputation, absence-as-negative assumption
+- repeated-encounter handling, one-record-per-patient selection
+
+Make sure you put these issues in `"ambiguities"` field and address with the best approach based on established medical knowledge and standard clinical data-processing practices.
+
 ### 3. Implement
 
 Write the code, module-by-module. Guidelines:
