@@ -545,16 +545,12 @@ def _remote_free_bytes(state: dict[str, Any]) -> int:
 
 def _remote_inventory(state: dict[str, Any], path: str) -> tuple[int, int]:
     program = (
-        "import os,sys\n"
-        "path=sys.argv[1]\n"
-        "if not os.path.isdir(path): print('missing'); raise SystemExit(0)\n"
-        "n=s=0\n"
-        "for root,_,files in os.walk(path):\n"
-        "  for name in files:\n"
-        "    n+=1; s+=os.path.getsize(os.path.join(root,name))\n"
-        "print(n,s)"
+        'if [[ ! -d "$1" ]]; then printf "missing\\n"; exit 0; fi\n'
+        "LC_ALL=C find -- \"$1\" -type f -printf '%s\\n' | "
+        "awk '{ count += 1; total += $1 } "
+        "END { printf \"%.0f %.0f\\n\", count, total }'"
     )
-    output = remote_exec(state, ["python3", "-c", program, path])
+    output = remote_exec(state, ["bash", "-lc", program, "medai-inventory", path])
     if output == "missing":
         return -1, -1
     try:
@@ -573,16 +569,6 @@ def _update_cloud(
     save_state(state_path, state)
 
 
-def _task_id(data: Any) -> str:
-    if isinstance(data, str) and data:
-        return data
-    if isinstance(data, dict):
-        value = data.get("task_id", data.get("id"))
-        if isinstance(value, str) and value:
-            return value
-    raise RuntimeError("AutoPanel download returned an unsupported task structure")
-
-
 def _task_lists(
     data: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
@@ -598,15 +584,100 @@ def _task_lists(
     return pre, doing, done
 
 
-def _matching_task(tasks: list[dict[str, Any]], task_id: str) -> dict[str, Any] | None:
-    matches = [
-        item
-        for item in tasks
-        if str(item.get("task_id", item.get("id", ""))) == task_id
-    ]
-    if len(matches) > 1:
-        raise RuntimeError("AutoPanel returned duplicate download task identifiers")
-    return matches[0] if matches else None
+def _read_tasks(
+    *,
+    base: str,
+    panel_token: str,
+    authorization: str,
+    limit: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    request_limit = max(limit, 20)
+    for _ in range(2):
+        data = _panel_request(
+            base=base,
+            panel_token=panel_token,
+            authorization=authorization,
+            method="GET",
+            path=PANEL_PATHS["tasks"],
+            query={"limit": request_limit},
+        )
+        task_lists = _task_lists(data)
+        total = data.get("task_total") if isinstance(data, dict) else None
+        if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+            break
+        observed = sum(len(items) for items in task_lists)
+        if total == observed:
+            return task_lists
+        if total > request_limit:
+            request_limit = total
+            continue
+        break
+    raise RuntimeError("AutoPanel task totals have an unsupported structure")
+
+
+def _discover_download_task_ids(
+    *,
+    base: str,
+    panel_token: str,
+    authorization: str,
+    fsid: str,
+    drive_id: str,
+    staging_path: str,
+    excluded_task_ids: set[str],
+    expected_file_count: int,
+    expected_total_bytes: int,
+    timeout_seconds: int = 60,
+) -> list[str]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        task_lists = _read_tasks(
+            base=base,
+            panel_token=panel_token,
+            authorization=authorization,
+            limit=expected_file_count,
+        )
+        tasks = [item for items in task_lists for item in items]
+        new_tasks = [
+            item
+            for item in tasks
+            if str(item.get("task_id") or "") not in excluded_task_ids
+        ]
+        matches = [
+            item
+            for item in new_tasks
+            if str(item.get("task_type")) == "2"
+            and item.get("fsid") == fsid
+            and item.get("drive_id") == drive_id
+            and (
+                item.get("dst_path") == staging_path
+                or str(item.get("dst_path") or "").startswith(staging_path + "/")
+            )
+        ]
+        if len(matches) == expected_file_count:
+            if len(matches) != len(new_tasks):
+                raise RuntimeError(
+                    "AutoPanel contains unrelated transfer tasks during cloud pull"
+                )
+            if sum(_item_size(item) for item in matches) != expected_total_bytes:
+                raise RuntimeError(
+                    "AutoPanel download task bytes do not match the Aliyun inventory"
+                )
+            task_ids = [str(item.get("task_id") or "") for item in matches]
+            if any(not task_id for task_id in task_ids) or len(set(task_ids)) != len(
+                task_ids
+            ):
+                raise RuntimeError(
+                    "AutoPanel download tasks have invalid or duplicate identifiers"
+                )
+            return task_ids
+        if new_tasks and (
+            len(matches) != len(new_tasks) or len(matches) > expected_file_count
+        ):
+            raise RuntimeError(
+                "AutoPanel contains unrelated transfer tasks during cloud pull"
+            )
+        time.sleep(2)
+    raise RuntimeError("AutoPanel did not expose the queued download tasks")
 
 
 def _poll_download(
@@ -614,36 +685,62 @@ def _poll_download(
     base: str,
     panel_token: str,
     authorization: str,
-    task_id: str,
+    task_ids: list[str],
+    expected_file_count: int,
     timeout_seconds: int,
 ) -> str:
     deadline = time.monotonic() + timeout_seconds
-    observed = False
+    expected_ids = set(task_ids)
+    if len(expected_ids) != expected_file_count:
+        raise RuntimeError("AutoPanel download task state is incomplete")
     while time.monotonic() < deadline:
-        data = _panel_request(
+        pre, doing, done = _read_tasks(
             base=base,
             panel_token=panel_token,
             authorization=authorization,
-            method="GET",
-            path=PANEL_PATHS["tasks"],
-            query={"limit": 20},
+            limit=expected_file_count,
         )
-        pre, doing, done = _task_lists(data)
-        if _matching_task([*pre, *doing], task_id) is not None:
-            observed = True
+        active_ids = {
+            str(item.get("task_id") or "")
+            for item in [*pre, *doing]
+            if str(item.get("task_id") or "") in expected_ids
+        }
+        done_by_id = {
+            str(item.get("task_id") or ""): item
+            for item in done
+            if str(item.get("task_id") or "") in expected_ids
+        }
+        observed_ids = active_ids | set(done_by_id)
+        if observed_ids != expected_ids:
+            raise RuntimeError("AutoPanel download task batch changed during polling")
+        terminal_statuses = {
+            str(item.get("status", "")).casefold() for item in done_by_id.values()
+        }
+        if terminal_statuses - {
+            "success",
+            "completed",
+            "finished",
+            "failed",
+            "error",
+            "cancel",
+            "cancelled",
+            "canceled",
+        }:
+            raise RuntimeError("AutoPanel download task has an unknown terminal status")
+        if terminal_statuses & {
+            "failed",
+            "error",
+            "cancel",
+            "cancelled",
+            "canceled",
+        }:
+            return "failed"
+        if set(done_by_id) == expected_ids:
+            return "completed"
+        if active_ids:
             time.sleep(5)
             continue
-        finished = _matching_task(done, task_id)
-        if finished is not None:
-            status = str(finished.get("status", "")).casefold()
-            if status in {"success", "completed", "finished"}:
-                return "completed"
-            if status in {"failed", "error", "cancelled", "canceled"}:
-                return "failed"
-            raise RuntimeError("AutoPanel download task has an unknown terminal status")
-        if observed:
-            raise RuntimeError("AutoPanel download task disappeared before completion")
-        time.sleep(2)
+        raise RuntimeError("AutoPanel download task batch disappeared before completion")
     return "timeout"
 
 
@@ -770,59 +867,130 @@ def cloud_pull(args: argparse.Namespace) -> None:
         _update_cloud(args.state, state, cloud, "completed")
         print(target_path)
         return
-    if not is_new and cloud.get("status") in {"failed", "locating", "located"}:
+    if not is_new and cloud.get("status") == "failed":
         _controlled_cleanup(state, cloud)
 
     ready_to_finalize = cloud.get("status") == "verifying"
     if not ready_to_finalize:
-        free_bytes = _remote_free_bytes(state)
-        if free_bytes < total_bytes:
-            cloud["available_bytes"] = free_bytes
-            _update_cloud(args.state, state, cloud, "failed")
-            raise RuntimeError("AutoDL data disk does not have enough free space")
+        raw_task_ids = cloud.get("task_ids")
+        if raw_task_ids is not None and (
+            not isinstance(raw_task_ids, list)
+            or len(raw_task_ids) != file_count
+            or not all(isinstance(value, str) and value for value in raw_task_ids)
+            or len(set(raw_task_ids)) != len(raw_task_ids)
+        ):
+            raise RuntimeError("AutoDL cloud-drive task state has an invalid structure")
+        task_ids = raw_task_ids or []
+        if not task_ids:
+            prior_task_ids = cloud.get("preexisting_task_ids")
+            should_post = False
+            if cloud.get("status") == "enqueueing":
+                if not isinstance(prior_task_ids, list) or not all(
+                    isinstance(value, str) and value for value in prior_task_ids
+                ) or len(set(prior_task_ids)) != len(prior_task_ids):
+                    raise RuntimeError(
+                        "AutoDL enqueue recovery state has an invalid structure"
+                    )
+            else:
+                free_bytes = _remote_free_bytes(state)
+                if free_bytes < total_bytes:
+                    cloud["available_bytes"] = free_bytes
+                    _update_cloud(args.state, state, cloud, "failed")
+                    raise RuntimeError("AutoDL data disk does not have enough free space")
+                task_lists = _read_tasks(
+                    base=base,
+                    panel_token=panel_token,
+                    authorization=authorization,
+                    limit=file_count,
+                )
+                prior_task_ids = sorted(
+                    str(item.get("task_id") or "")
+                    for items in task_lists
+                    for item in items
+                )
+                if any(not value for value in prior_task_ids) or len(
+                    set(prior_task_ids)
+                ) != len(prior_task_ids):
+                    raise RuntimeError("AutoPanel task history has invalid identifiers")
+                cloud["preexisting_task_ids"] = prior_task_ids
+                cloud["post_requested"] = True
+                _update_cloud(args.state, state, cloud, "enqueueing")
+                should_post = True
 
-        task_id = cloud.get("task_id")
-        if not isinstance(task_id, str) or not task_id:
             download_body = {
                 "dst_path": "",
                 "fsid": fsid,
-                "src_path": source_path + "/",
+                "src_path": "/" + source_path + "/",
                 "file_id": _item_id(source),
                 "is_dir": True,
                 "download_url": str(source.get("download_url") or ""),
-                "file_size": total_bytes,
+                "file_size": _item_size(source),
             }
             if binding_type == "AutoDL_AliPan":
                 download_body["drive_id"] = drive_id
-            download_data = _panel_request(
+            if (
+                cloud.get("status") != "enqueueing"
+                or cloud.get("post_requested") is not True
+                or "preexisting_task_ids" not in cloud
+            ):
+                raise RuntimeError("AutoDL cloud-drive enqueue state changed unexpectedly")
+            if should_post:
+                try:
+                    _panel_request(
+                        base=base,
+                        panel_token=panel_token,
+                        authorization=authorization,
+                        method="POST",
+                        path=PANEL_PATHS["download"],
+                        body=download_body,
+                    )
+                except RuntimeError:
+                    cloud.pop("preexisting_task_ids", None)
+                    cloud.pop("post_requested", None)
+                    _update_cloud(args.state, state, cloud, "failed")
+                    raise
+
+            if file_count == 0:
+                cloud.pop("preexisting_task_ids", None)
+                cloud.pop("post_requested", None)
+                _update_cloud(args.state, state, cloud, "verifying")
+                ready_to_finalize = True
+            else:
+                task_ids = _discover_download_task_ids(
+                    base=base,
+                    panel_token=panel_token,
+                    authorization=authorization,
+                    fsid=fsid,
+                    drive_id=drive_id,
+                    staging_path=staging_path,
+                    excluded_task_ids=set(prior_task_ids),
+                    expected_file_count=file_count,
+                    expected_total_bytes=total_bytes,
+                )
+                cloud["task_ids"] = task_ids
+                cloud.pop("preexisting_task_ids", None)
+                cloud.pop("post_requested", None)
+                _update_cloud(args.state, state, cloud, "downloading")
+
+        if not ready_to_finalize:
+            task_status = _poll_download(
                 base=base,
                 panel_token=panel_token,
                 authorization=authorization,
-                method="POST",
-                path=PANEL_PATHS["download"],
-                body=download_body,
+                task_ids=task_ids,
+                expected_file_count=file_count,
+                timeout_seconds=_timeout_seconds(),
             )
-            task_id = _task_id(download_data)
-            cloud["task_id"] = task_id
-            _update_cloud(args.state, state, cloud, "downloading")
+            if task_status == "timeout":
+                _update_cloud(args.state, state, cloud, "timed_out")
+                raise RuntimeError("AutoPanel cloud-drive download timed out")
+            if task_status == "failed":
+                cloud.pop("task_ids", None)
+                _update_cloud(args.state, state, cloud, "failed")
+                raise RuntimeError("AutoPanel cloud-drive download task failed")
 
-        task_status = _poll_download(
-            base=base,
-            panel_token=panel_token,
-            authorization=authorization,
-            task_id=task_id,
-            timeout_seconds=_timeout_seconds(),
-        )
-        if task_status == "timeout":
-            _update_cloud(args.state, state, cloud, "timed_out")
-            raise RuntimeError("AutoPanel cloud-drive download timed out")
-        if task_status == "failed":
-            cloud.pop("task_id", None)
-            _update_cloud(args.state, state, cloud, "failed")
-            raise RuntimeError("AutoPanel cloud-drive download task failed")
-
-        cloud.pop("task_id", None)
-        _update_cloud(args.state, state, cloud, "verifying")
+            cloud.pop("task_ids", None)
+            _update_cloud(args.state, state, cloud, "verifying")
     staging_inventory = _remote_inventory(state, staging_path)
     if staging_inventory != (file_count, total_bytes):
         _update_cloud(args.state, state, cloud, "failed")

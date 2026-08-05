@@ -86,9 +86,9 @@ if [[ "$command" == *"df -PB1"* ]]; then
     printf 'Filesystem 1-blocks Used Available Capacity Mounted\n/dev/test 100000 0 100000 0%% /root/autodl-tmp\n'
 elif [[ "$command" == *"mv --"* ]]; then
     touch "$MEDAI_TEST_MATERIALIZED"
-elif [[ "$command" == *"python3 -c"*"/root/autodl-tmp/medai/mimic-iv"* ]]; then
+elif [[ "$command" == *"medai-inventory"*"/root/autodl-tmp/medai/mimic-iv"* ]]; then
     if [[ -f "$MEDAI_TEST_MATERIALIZED" ]]; then printf '2 30\n'; else printf 'missing\n'; fi
-elif [[ "$command" == *"python3 -c"*"/root/autodl-tmp/mimic-iv"* ]]; then
+elif [[ "$command" == *"medai-inventory"*"/root/autodl-tmp/mimic-iv"* ]]; then
     printf '2 30\n'
 fi
 """,
@@ -490,6 +490,40 @@ def test_autodl_create_allows_only_one_replacement_per_manifest_resume(tmp_path:
     assert "already created for this manual resume" in completed.stderr
 
 
+def _cloud_task(task_id: str, name: str, size: int, status: str) -> dict[str, object]:
+    return {
+        "task_id": task_id,
+        "task_type": 2,
+        "status": status,
+        "fsid": "ali-fs",
+        "drive_id": "backup-drive",
+        "dst_path": "/root/autodl-tmp/mimic-iv",
+        "file_name": name,
+        "file_size": size,
+    }
+
+
+def _task_response(
+    *,
+    pre: list[dict[str, object]] | None = None,
+    doing: list[dict[str, object]] | None = None,
+    done: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    pre = pre or []
+    doing = doing or []
+    done = done or []
+    return {
+        "code": "success",
+        "data": {
+            "task_pre": pre,
+            "task_doing": doing,
+            "task_done": done,
+            "task_success": sum(item.get("status") == "success" for item in done),
+            "task_total": len(pre) + len(doing) + len(done),
+        },
+    }
+
+
 def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
     directory_pages = [
         {
@@ -514,6 +548,7 @@ def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
                             "name": "mimic-iv",
                             "file_id": "dir-dataset",
                             "is_dir": True,
+                            "size": 0,
                         }
                     ],
                 },
@@ -585,17 +620,24 @@ def _cloud_api_responses(task_responses: list[dict[str, object]] | None = None):
         ("GET", "/autopanel/v1/netdisk/file"): directory_pages * 2,
         ("POST", "/autopanel/v1/netdisk/download"): {
             "code": "success",
-            "data": {"task_id": "task-1"},
+            "data": None,
         },
         ("GET", "/autopanel/v1/netdisk/task"): task_responses
-        or {
-            "code": "success",
-            "data": {
-                "task_pre": [],
-                "task_doing": [],
-                "task_done": [{"task_id": "task-1", "status": "success"}],
-            },
-        },
+        or [
+            _task_response(),
+            _task_response(
+                pre=[
+                    _cloud_task("task-1", "one.csv", 10, "pre"),
+                    _cloud_task("task-2", "two.csv", 20, "pre"),
+                ]
+            ),
+            _task_response(
+                done=[
+                    _cloud_task("task-1", "one.csv", 10, "success"),
+                    _cloud_task("task-2", "two.csv", 20, "success"),
+                ]
+            ),
+        ],
     }
 
 
@@ -669,7 +711,10 @@ def test_autodl_cloud_pull_materializes_and_records_only_nonsecret_state(tmp_pat
     assert file_requests
     assert all("driver_id=backup-drive" in path for path in file_requests)
     download = next(body for _, path, body in requests if path == "/autopanel/v1/netdisk/download")
-    assert json.loads(download)["drive_id"] == "backup-drive"
+    download_body = json.loads(download)
+    assert download_body["drive_id"] == "backup-drive"
+    assert download_body["src_path"] == "/medai/mimic-iv/"
+    assert download_body["file_size"] == 0
 
 
 def test_autodl_cloud_pull_timeout_reuses_active_task(tmp_path: Path):
@@ -687,22 +732,25 @@ def test_autodl_cloud_pull_timeout_reuses_active_task(tmp_path: Path):
     )
     environment, _ = fake_cloud_ssh_environment(tmp_path)
     task_responses = [
-        {
-            "code": "success",
-            "data": {
-                "task_pre": [{"task_id": "task-1"}],
-                "task_doing": [],
-                "task_done": [],
-            },
-        },
-        {
-            "code": "success",
-            "data": {
-                "task_pre": [],
-                "task_doing": [],
-                "task_done": [{"task_id": "task-1", "status": "success"}],
-            },
-        },
+        _task_response(),
+        _task_response(
+            pre=[
+                _cloud_task("task-1", "one.csv", 10, "pre"),
+                _cloud_task("task-2", "two.csv", 20, "pre"),
+            ]
+        ),
+        _task_response(
+            pre=[
+                _cloud_task("task-1", "one.csv", 10, "pre"),
+                _cloud_task("task-2", "two.csv", 20, "pre"),
+            ]
+        ),
+        _task_response(
+            done=[
+                _cloud_task("task-1", "one.csv", 10, "success"),
+                _cloud_task("task-2", "two.csv", 20, "success"),
+            ]
+        ),
     ]
     responses = _cloud_api_responses(task_responses)
     with autodl_api(responses) as (base_url, requests):

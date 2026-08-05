@@ -70,7 +70,11 @@ directory. Traverse all pages and subdirectories to compute the remote regular
 file count and total bytes. Check `/root/autodl-tmp` free bytes before starting
 the task. Fail on insufficient space; do not reduce or sample the dataset.
 
-Poll the exact download task until AutoPanel explicitly reports success. The
+AutoPanel expands one directory request into a batch of file-download tasks and
+does not return a batch identifier. Snapshot the existing task identifiers
+before enqueueing, then accept only the new batch whose file count, aggregate
+bytes, binding, drive, and staging-tree paths match the Aliyun inventory. Poll
+every exact task identifier until AutoPanel explicitly reports success. The
 default timeout is 1800 seconds and may be changed only with
 `AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS`. A timeout exits nonzero even if the task is
 still active. A later retry must continue polling that active task rather than
@@ -88,7 +92,7 @@ logs, reports, and final experiment evidence may be retrieved.
 
 The command records only non-sensitive data under
 `provider_state.cloud_drive`: provider, dataset, source/staging/target paths,
-ownership marker, status and timestamps, task identifier, remote/local file
+ownership marker, status and timestamps, task identifiers, remote/local file
 counts, and remote/local total bytes.
 
 Reuse a completed target on the same instance only after its full file count
