@@ -11,7 +11,7 @@ ROOT = Path(__file__).parents[1]
 AUTODL_SCRIPT = (
     ROOT / "templates" / "skills" / "computation_provider" / "scripts" / "autodl.py"
 )
-AUTODL_LIST_SCRIPT = ROOT / "scripts" / "list_autodl_pro_instances.py"
+AUTODL_INSTANCES_SCRIPT = ROOT / "scripts" / "autodl_pro_instances.py"
 
 
 @contextmanager
@@ -154,7 +154,7 @@ def test_autodl_create_uses_query_status_and_retains_state_after_poll_failure(
     assert requests[1][2] == ""
 
 
-def test_list_autodl_pro_instances_reads_local_dotenv(tmp_path: Path):
+def test_autodl_pro_instances_lists_from_local_dotenv(tmp_path: Path):
     expected = {
         "code": "Success",
         "data": {"list": [{"uuid": "pro-test", "status": "shutdown"}]},
@@ -168,7 +168,13 @@ def test_list_autodl_pro_instances_reads_local_dotenv(tmp_path: Path):
             encoding="utf-8",
         )
         completed = subprocess.run(
-            [sys.executable, str(AUTODL_LIST_SCRIPT), "--env-file", str(env_file)],
+            [
+                sys.executable,
+                str(AUTODL_INSTANCES_SCRIPT),
+                "--env-file",
+                str(env_file),
+                "list",
+            ],
             capture_output=True,
             text=True,
         )
@@ -182,3 +188,47 @@ def test_list_autodl_pro_instances_reads_local_dotenv(tmp_path: Path):
             '{"page_index": 1, "page_size": 100}',
         )
     ]
+
+
+def test_autodl_pro_instances_operates_on_explicit_uuid(tmp_path: Path):
+    instance_uuid = "pro-test"
+    with autodl_api(
+        {
+            ("POST", "/api/v1/dev/instance/pro/power_on"): {"code": "Success"},
+            ("POST", "/api/v1/dev/instance/pro/power_off"): {"code": "Success"},
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "Success",
+                "data": "shutdown",
+            },
+            ("POST", "/api/v1/dev/instance/pro/release"): {"code": "Success"},
+        }
+    ) as (base_url, requests):
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            f"AUTODL_TOKEN=test-token\nAUTODL_API_BASE_URL={base_url}\n",
+            encoding="utf-8",
+        )
+        for command in ("power-on", "power-off", "release"):
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(AUTODL_INSTANCES_SCRIPT),
+                    "--env-file",
+                    str(env_file),
+                    command,
+                    instance_uuid,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            assert completed.returncode == 0
+
+    assert [(method, path) for method, path, _ in requests] == [
+        ("POST", "/api/v1/dev/instance/pro/power_on"),
+        ("POST", "/api/v1/dev/instance/pro/power_off"),
+        ("GET", f"/api/v1/dev/instance/pro/status?instance_uuid={instance_uuid}"),
+        ("POST", "/api/v1/dev/instance/pro/release"),
+    ]
+    assert json.loads(requests[0][2])["instance_uuid"] == instance_uuid
+    assert json.loads(requests[1][2])["instance_uuid"] == instance_uuid
+    assert json.loads(requests[3][2])["instance_uuid"] == instance_uuid

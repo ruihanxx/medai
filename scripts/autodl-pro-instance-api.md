@@ -10,50 +10,11 @@ That workflow must only operate on instances recorded in the current run's
 
 Run commands from the repository root. The project `.env` must contain
 `AUTODL_TOKEN`; `AUTODL_API_BASE_URL` is optional and defaults to the public API
-origin. Do not print or commit the token.
+origin. The helper reads these values directly, so do not print or commit the
+token.
 
 ```bash
-set -a
-. ./.env
-set +a
-
-: "${AUTODL_TOKEN:?AUTODL_TOKEN is required}"
-AUTODL_API_BASE_URL="${AUTODL_API_BASE_URL:-https://api.autodl.com}"
-INSTANCE_UUID="pro-..."
-```
-
-Replace `pro-...` with the exact UUID selected from the instance list or the
-run-owned state file. Confirm the target in the AutoDL console before a power
-or release operation.
-
-Define this helper once for the current shell. It reads the token only from the
-environment and never places it in a command argument or output. `POST` sends
-JSON; `GET` encodes its payload as URL query parameters.
-
-```bash
-autodl_api() {
-  AUTODL_METHOD="$1" AUTODL_PATH="$2" AUTODL_PAYLOAD="$3" python - <<'PY'
-import json
-import os
-import urllib.parse
-import urllib.request
-
-method = os.environ["AUTODL_METHOD"]
-path = os.environ["AUTODL_PATH"]
-payload = json.loads(os.environ["AUTODL_PAYLOAD"])
-base_url = os.environ["AUTODL_API_BASE_URL"].rstrip("/")
-url = base_url + path
-data = json.dumps(payload).encode("utf-8")
-headers = {"Authorization": os.environ["AUTODL_TOKEN"], "Content-Type": "application/json"}
-if method == "GET":
-    url += "?" + urllib.parse.urlencode(payload)
-    data = None
-    headers.pop("Content-Type")
-request = urllib.request.Request(url, data=data, method=method, headers=headers)
-with urllib.request.urlopen(request, timeout=30) as response:
-    print(response.read().decode("utf-8"))
-PY
-}
+python3 scripts/autodl_pro_instances.py --help
 ```
 
 ## List existing Pro instances
@@ -61,35 +22,21 @@ PY
 The list endpoint is read-only. Its response contains each instance's `uuid`,
 `created_at`, and `status`.
 
-For normal use, run the included helper. It reads the repository-root `.env` by
-default and prints the complete API response:
+The `list` command reads the repository-root `.env` by default and prints the
+complete API response. It does not require an instance UUID:
 
 ```bash
-python3 scripts/list_autodl_pro_instances.py
+python3 scripts/autodl_pro_instances.py list
 ```
 
 Pass an alternate local dotenv file only when needed:
 
 ```bash
-python3 scripts/list_autodl_pro_instances.py --env-file /absolute/path/to/.env
+python3 scripts/autodl_pro_instances.py --env-file /absolute/path/to/.env list
 ```
 
-The equivalent raw API call is:
-
-```bash
-autodl_api POST /api/v1/dev/instance/pro/list '{"page_index":1,"page_size":100}'
-```
-
-To read one known instance's status, use a URL query parameter. Do not send a
-JSON request body with this GET request: the current API returns a parameter
-error for that form.
-
-```bash
-autodl_api GET /api/v1/dev/instance/pro/status "{\"instance_uuid\":\"$INSTANCE_UUID\"}"
-```
-
-`"code":"Success"` confirms the API operation succeeded. Typical lifecycle
-states include `running` and `shutdown`; wait for `shutdown` before releasing.
+The response includes `uuid`, `created_at`, and `status`. Copy the chosen UUID
+only after confirming the instance in the AutoDL console.
 
 ## Power on
 
@@ -97,12 +44,11 @@ Powering on allocates the recorded GPU resource and may start billing. Do not
 use it as an availability probe.
 
 ```bash
-autodl_api POST /api/v1/dev/instance/pro/power_on \
-  "{\"instance_uuid\":\"$INSTANCE_UUID\",\"payload\":\"gpu\",\"start_command\":\"sleep 1\"}"
+python3 scripts/autodl_pro_instances.py power-on pro-...
 ```
 
-Use the status command above until it reports `running` before connecting or
-starting work.
+Use `list` until the instance reports `running` before connecting or starting
+work.
 
 ## Power off
 
@@ -110,20 +56,19 @@ Powering off stops the instance but does not release it. Its data may remain
 available under AutoDL's retention rules.
 
 ```bash
-autodl_api POST /api/v1/dev/instance/pro/power_off \
-  "{\"instance_uuid\":\"$INSTANCE_UUID\"}"
+python3 scripts/autodl_pro_instances.py power-off pro-...
 ```
 
-Query status until it reports `shutdown`.
+Use `list` until the instance reports `shutdown`.
 
 ## Release
 
 Release is irreversible and destroys the instance's local data. First download
-all required outputs and evidence, then power off and confirm `shutdown`.
+all required outputs and evidence, then power off and confirm `shutdown`. The
+command independently checks for `shutdown` before it calls the release API.
 
 ```bash
-autodl_api POST /api/v1/dev/instance/pro/release \
-  "{\"instance_uuid\":\"$INSTANCE_UUID\"}"
+python3 scripts/autodl_pro_instances.py release pro-...
 ```
 
 For a MedAI run, after a successful release, update only through the AutoDL
