@@ -663,9 +663,8 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
 
     prompt = prompt_path.read_text(encoding="utf-8")
     assert "/skills/computation_provider/SKILL.md" in prompt
-    assert "/skills/autodl/SKILL.md" not in prompt
     assert str(tmp_path / "instance.json") in prompt
-    assert "autodl_instance.json" not in prompt
+    assert "autodl" not in prompt.lower()
 
 
 def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path: Path):

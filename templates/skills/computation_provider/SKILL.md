@@ -23,11 +23,10 @@ the available local environment cannot meet its full-scale execution needs.
 
 ## Supported Providers
 
-- `autodl`: read `references/autodl.md` after selecting this provider.
-
-Do not infer support for a provider that is not listed here. Stop explicitly if
-the required provider has no reference document or the required capability is
-not documented there.
+The provider references present under `references/` are the complete supported
+provider set. After selecting a configured provider, require its matching
+`references/<provider>.md`. Do not infer support for a provider with no matching
+reference, or for a capability that its reference does not document.
 
 ## Local Configs
 

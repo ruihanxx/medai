@@ -40,11 +40,12 @@ agent failure stops the run explicitly.
 A failed remote interaction starts bounded, safe recovery: the agent begins
 with the selected provider reference, may consult official provider
 documentation and use reasoned diagnostics, and must not blindly repeat a
-billable operation. When the selected AutoDL Pro GPU explicitly has no
-inventory and no read-only inventory API is available, the provider script may
-try one preselected stronger GPU; a second no-inventory result is terminal. If
-recovery remains unsuccessful, the invoking Codex agent exits nonzero. When
-codegen records a remote-compute plan, its instance state is
+billable operation. When the provider reference states that no read-only
+inventory query is available, the agent rents the selected resource directly.
+An explicit no-inventory response permits exactly one attempt with a stronger
+eligible GPU that preserves every original requirement; a failed retry is
+terminal. If recovery remains unsuccessful, the invoking Codex agent exits
+nonzero. When codegen records a remote-compute plan, its instance state is
 statically validated before the stage completes; a missing or invalid state
 terminates the run through the normal `failed` state and cleanup path. A
 successful procedure that conflicts with the skill reference is recorded in

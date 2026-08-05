@@ -86,25 +86,26 @@ JAX) rather than implementing the GPU-dependent work on CPU.
 
 {% if computation_provider %}
 When the explicit paper GPU requirement above is not met locally, or other
-paper-required GPU resources are unavailable or insufficient locally, use
-{{ computation_provider }} only through the GPU and image-selection procedure
-in `{{ skills_dir }}/computation_provider/SKILL.md`. It first verifies that the
+paper-required GPU resources are unavailable or insufficient locally, use the
+configured remote computation provider only through the resource- and
+image-selection procedure in
+`{{ skills_dir }}/computation_provider/SKILL.md`. It first verifies that the
 requested GPU is in the provider's supported pool; when the paper's exact GPU
 is absent, it selects the closest pool GPU whose VRAM is at least the paper
 requirement and records the divergence. For paper-stated software versions,
-select the closest official image UUID; otherwise use the configured default
-image UUID. After selecting the provider, read the provider reference required
-by that skill before performing any provider operation. Store the instance state at
+select the closest compatible provider image; otherwise use the configured
+default. After selecting the provider, read the provider reference required by
+that skill before performing any provider operation. Store the instance state at
 `{{ computation_provider_state_path }}`
-and leave it running for the plan and replication stages. AutoDL Pro has no
-read-only inventory endpoint, so do not block on a market or console lookup.
-Select one stronger eligible Pro GPU in advance and pass it to the provider
-script as `--fallback-gpu-spec` with the initial `--gpu-spec`. The script makes
-that one additional create request only if the initial response explicitly says
-the initial GPU has no inventory. A second no-inventory response or any other
-API error is terminal. Record both candidates and the selected GPU in the plan.
-If no eligible resource or compatible image exists, stop explicitly. Do not rent
-weaker hardware or reduce the experiment scale.
+and leave it running for the plan and replication stages. If the selected
+provider reference states that no read-only inventory query is available, rent
+the selected resource directly. If that request explicitly fails because the
+selected GPU has no inventory, follow the provider reference and try exactly
+once with a stronger eligible GPU that still satisfies every original
+requirement. If that retry fails, stop explicitly. Record both candidates and
+the selected GPU in the plan. If no eligible resource or compatible image
+exists, stop explicitly. Do not rent weaker hardware or reduce the experiment
+scale.
 {% else %}
 When the explicit paper GPU requirement above is not met locally, or other
 paper-required GPU resources are unavailable or insufficient locally, stop
@@ -127,8 +128,9 @@ blindly repeat a billable operation. If the interaction remains unsuccessful aft
 those attempts, immediately make the Codex agent CLI exit nonzero. Do not
 continue with local work or a later workflow phase.
 
-The preselected AutoDL `--fallback-gpu-spec` is the only permitted second
-billable create request. Do not make further resource substitutions.
+The single stronger-GPU retry described by the selected provider reference is
+the only permitted second billable create request. Do not make further resource
+substitutions.
 
 If a successful, evidence-based procedure conflicts with the selected skill
 reference, do not edit the repository skill. Append one reviewable correction

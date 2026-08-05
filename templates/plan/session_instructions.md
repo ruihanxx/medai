@@ -152,12 +152,12 @@ If replication requires remote compute, add this top-level object alongside
 ```json
 {
     "remote_compute": {
-        "provider": "autodl",
+        "provider": "<selected-provider>",
         "state_path": "{{ computation_provider_state_path }}",
-        "remote_working_directory": "/root/autodl-tmp/<experiment_id>",
+        "remote_working_directory": "<provider-reference-defined-run-directory>",
         "setup_hints": [
-            "Use the AutoDL provider script with the local state at {{ computation_provider_state_path }} to resolve the current SSH connection and connect to the remote server.",
-            "Upload the code from {{ codebase_dir }}/ to /root/autodl-tmp/<experiment_id>/code and the experiment's required input data to /root/autodl-tmp/<experiment_id>/data."
+            "Use the selected provider reference and the local state at {{ computation_provider_state_path }} to resolve the current connection and connect to the remote server.",
+            "Upload the code from {{ codebase_dir }}/ and the experiment's required input data to the run-owned locations defined by the selected provider reference."
         ]
     }
 }

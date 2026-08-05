@@ -1,5 +1,14 @@
 # Agent and Skill Boundary Contract
 
+- Every workflow-stage prompt, shared orchestration contract, and generic
+  example must remain provider- and dataset-agnostic. They may refer only to
+  the selected provider reference and supplied dataset metadata. Concrete
+  provider names, API identifiers, commands, paths, configuration variables,
+  dataset names, schemas, cohort rules, and file layouts must live only in the
+  corresponding skill reference or script, or in dataset-specific
+  documentation or adapters. Prompt examples must use placeholders. A new
+  provider or dataset must never require hard-coding its identity or details
+  into a workflow prompt.
 - Replicate prompts live under `templates/<stage>/`; Auto Research prompts live
   under `templates/autoresearch/<stage>/`; runtime skills live under
   `templates/skills/`. None is stored under `src/`.
@@ -40,25 +49,23 @@
   handling, and related configuration only. It must repair the evidenced root
   cause and update the corresponding ambiguity; it may not alter models,
   training, evaluation, or result artifacts to chase paper values.
-- Remote compute access is exposed through the `computation-provider` skill;
-  its first supported provider is AutoDL. Only instances created by the current
-  run may be automatically powered off or released. After replication finishes
-  and required outputs are transferred, the replicate stage must release them;
-  host cleanup retries release on failure paths. The generic
-  `remote_compute/instance.json` records the selected provider and common
-  lifecycle state; each provider reference defines its provider-specific state.
-- Before an AutoDL instance is created, the skill must verify that its GPU
-  specification belongs to the current Pro pool. If the paper GPU is absent,
-  it may use only the closest documented pool GPU with at least the paper VRAM,
-  recording the hardware divergence. Paper-stated software versions require the
-  closest compatible official image UUID; without stated versions, the
-  configured default image UUID is used. The provider state records the
-  selected non-secret GPU and image identifiers.
-- When AutoDL Pro inventory cannot be queried read-only, codegen preselects one
-  stronger eligible GPU and supplies it as the provider script's
-  `--fallback-gpu-spec`. The script retries creation only after an explicit
-  no-inventory response; a second no-inventory response or any other API error
-  is terminal.
+- Remote compute access is exposed through the `computation-provider` skill.
+  Only instances created by the current run may be automatically powered off or
+  released. After replication finishes and required outputs are transferred,
+  the replicate stage must release them; host cleanup retries release on
+  failure paths. The generic `remote_compute/instance.json` records the
+  selected provider and common lifecycle state; each provider reference defines
+  its provider-specific selection procedure, operations, and state.
+- Before an instance is created, the selected provider reference must validate
+  the requested resource and image against that provider's supported pool. If
+  the paper's exact GPU is absent, selection may use only the closest documented
+  eligible GPU with at least the required VRAM and must record the divergence.
+  Provider state records the selected non-secret resource and image identifiers.
+- If the selected provider reference states that no read-only inventory query
+  is available, codegen rents the selected resource directly. Only when that
+  request explicitly fails because the selected GPU has no inventory may the
+  provider procedure try exactly once with a stronger eligible GPU that still
+  satisfies every original requirement. A failed retry is terminal.
 - When a paper explicitly reports GPU hardware for its full experiment,
   codegen treats its GPU count and per-GPU VRAM as a required capacity floor.
   If local capacity is below that floor, codegen must use configured remote
