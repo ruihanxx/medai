@@ -9,10 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from medai.computation_providers import migrate_legacy_provider_inputs
 from medai.config import AutoResearchConfig, RunConfig
 
-MANIFEST_VERSION = 2
-SUPPORTED_MANIFEST_VERSIONS = {1, MANIFEST_VERSION}
+MANIFEST_VERSION = 3
+SUPPORTED_MANIFEST_VERSIONS = {1, 2, MANIFEST_VERSION}
 
 
 def build_run_inputs(config: RunConfig) -> dict[str, Any]:
@@ -36,24 +37,13 @@ def build_run_inputs(config: RunConfig) -> dict[str, Any]:
         "clouddrive": config.clouddrive,
         "drive_provider": config.drive_provider,
         "cloud_dataset": config.cloud_dataset,
-        "cloud_source": (
-            f"medai/{config.cloud_dataset}" if config.cloud_dataset else None
-        ),
+        "cloud_source": config.cloud_source,
         "provider": config.provider,
         "codex_model": config.codex_model,
         "codex_reasoning_effort": config.codex_reasoning_effort,
         "smart_replicate": config.smart_replicate,
-        "computation_provider": (
-            "autodl"
-            if config.clouddrive
-            or (os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID"))
-            else None
-        ),
-        "autodl_image_uuid": (
-            os.environ.get("AUTODL_IMAGE_UUID")
-            if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
-            else None
-        ),
+        "computation_provider": config.computation_provider,
+        "computation_provider_config": config.computation_provider_config,
     }
     if config.siliconflow_config is not None:
         from medai.siliconflow_adapter import SiliconFlowConfig
@@ -87,16 +77,8 @@ def build_autoresearch_inputs(config: AutoResearchConfig) -> dict[str, Any]:
         "codex_reasoning_effort": config.codex_reasoning_effort,
         "max_iter": config.max_iter,
         "assessment_threshold": config.assessment_threshold,
-        "computation_provider": (
-            "autodl"
-            if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
-            else None
-        ),
-        "autodl_image_uuid": (
-            os.environ.get("AUTODL_IMAGE_UUID")
-            if os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID")
-            else None
-        ),
+        "computation_provider": config.computation_provider,
+        "computation_provider_config": config.computation_provider_config,
     }
     if config.siliconflow_config is not None:
         from medai.siliconflow_adapter import SiliconFlowConfig
@@ -136,6 +118,10 @@ class PipelineState:
             self.state.get("stages"), dict
         ):
             raise RuntimeError(f"Pipeline state has an invalid structure: {self.path}")
+        if version != MANIFEST_VERSION:
+            self.state["inputs"] = migrate_legacy_provider_inputs(self.state["inputs"])
+            self.state["version"] = MANIFEST_VERSION
+            self._save()
 
     @classmethod
     def create(cls, output: Path, inputs: dict[str, Any]) -> "PipelineState":

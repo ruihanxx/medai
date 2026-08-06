@@ -107,6 +107,24 @@ def load_state(path: Path) -> dict[str, Any]:
     return state
 
 
+def validate_state(args: argparse.Namespace) -> dict[str, Any]:
+    state = load_state(args.state)
+    if not state.get("created_by_run"):
+        raise RuntimeError("AutoDL state lacks current-run ownership")
+    provider_state = state["provider_state"]
+    required = ("instance_uuid", "gpu_spec_uuid", "gpu_count", "image_uuid")
+    missing = [name for name in required if not provider_state.get(name)]
+    if missing:
+        raise RuntimeError(
+            "AutoDL state cannot recreate the recorded instance; missing: "
+            + ", ".join(missing)
+        )
+    gpu_count = provider_state["gpu_count"]
+    if isinstance(gpu_count, bool) or not isinstance(gpu_count, int) or not 1 <= gpu_count <= 4:
+        raise RuntimeError("AutoDL state has an invalid GPU count")
+    return state
+
+
 def snapshot(state: dict[str, Any]) -> dict[str, Any]:
     payload = request(
         "GET",
@@ -602,6 +620,7 @@ def _update_cloud(
     state_path: Path, state: dict[str, Any], cloud: dict[str, Any], status: str
 ) -> None:
     cloud["status"] = status
+    cloud["completed"] = status == "completed"
     cloud["updated_at_unix"] = int(time.time())
     state["provider_state"]["cloud_drive"] = cloud
     save_state(state_path, state)
@@ -871,7 +890,8 @@ def cloud_pull(args: argparse.Namespace) -> None:
     if prior is not None and not isinstance(prior, dict):
         raise RuntimeError("AutoDL cloud-drive state has an invalid structure")
     if prior and (
-        prior.get("provider") != "aliyun" or prior.get("dataset") != dataset
+        prior.get("drive", prior.get("provider")) != "aliyun"
+        or prior.get("dataset") != dataset
     ):
         raise RuntimeError("AutoDL instance state belongs to a different cloud dataset")
     is_new = not prior
@@ -885,6 +905,7 @@ def cloud_pull(args: argparse.Namespace) -> None:
     else:
         cloud = {
             "provider": "aliyun",
+            "drive": "aliyun",
             "dataset": dataset,
             "source_path": source_path,
             "staging_path": staging_path,
@@ -1242,7 +1263,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Paper-specific image UUID; overrides the AUTODL_IMAGE_UUID default.",
     )
     create.add_argument("--state", type=Path, required=True)
-    for name in ("status", "power-on", "power-off", "release", "reconcile"):
+    for name in (
+        "validate-state",
+        "status",
+        "power-on",
+        "power-off",
+        "release",
+        "reconcile",
+    ):
         command = subparsers.add_parser(name)
         command.add_argument("--state", type=Path, required=True)
     execute = subparsers.add_parser("exec")
@@ -1266,6 +1294,8 @@ def main() -> int:
     args = build_parser().parse_args()
     if args.action == "create":
         print(create_instance(args))
+    elif args.action == "validate-state":
+        validate_state(args)
     elif args.action == "status":
         print(instance_status(load_state(args.state)))
     elif args.action == "power-on":

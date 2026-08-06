@@ -33,8 +33,8 @@ sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend
 `--provider`, and `--data`; `--repo` is optional. Normally `--data` is an
 existing local directory mounted read-only. With `--clouddrive`, `--data` is
 instead one safe dataset directory name (for example `mimic-iv`), no host data
-directory is mounted, and the dataset is fully downloaded onto the AutoDL data
-disk before any remote inspection. Cloud-drive names reject slashes, absolute
+directory is mounted, and the dataset is fully materialized onto the selected
+remote provider target before any remote inspection. Cloud-drive names reject slashes, absolute
 paths, `.` and `..`. The CLI accepts a missing
 `--data` long enough to create the run manifest, then fails the started
 `preflight` stage explicitly so the failed run remains inspectable. Auto
@@ -91,13 +91,13 @@ The `codex` provider accepts `--codex-model` and
 `MEDAI_CODEX_MODEL` and `MEDAI_CODEX_REASONING_EFFORT` in the project `.env`.
 The resolved values are recorded in `manifest.json`.
 
-Cloud-drive configuration comes only from the environment. `MEDAI_DRIVE_PROVIDER`
-defaults to `aliyun`, which is currently the only accepted value;
-`AUTODL_AUTOPANEL_PASSWORD` is required. The password is never placed in the
-manifest, command arguments, prompts, or logs. `AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS`
-defaults to 3600, and `AUTODL_CLOUDDRIVE_GPU_SPEC` defaults to `v-32g-p` when
-the paper provides no GPU requirement. `AUTODL_TOKEN` and `AUTODL_IMAGE_UUID`
-remain required because cloud-drive mode always uses AutoDL.
+Remote-compute configuration comes only from the environment. Set
+`MEDAI_COMPUTATION_PROVIDER` and, for `--clouddrive`, `MEDAI_DRIVE_PROVIDER`.
+When these selectors are omitted, MedAI uses the recorded resume selection or
+exactly one fully configured adapter. The selected computation-provider skill
+metadata defines its required variables, defaults, supported drives, source
+mapping, action timeouts, and non-secret configuration fingerprint. Secrets are
+never placed in manifests, command arguments, prompts, or logs.
 
 Replicate failure cleanup powers off a run-created remote instance without
 releasing it. On explicit resume the CLI reconciles the canonical state once

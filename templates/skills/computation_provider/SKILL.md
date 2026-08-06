@@ -12,21 +12,22 @@ selection, resource discovery, instance lifecycle, SSH access, data movement,
 and remote execution as separate internal capabilities. Combine only the
 capabilities the task requires; their order below is not a mandatory workflow.
 
-After determining the provider, read `references/<provider>.md` before invoking
-any provider operation. Follow that reference for configuration names, supported
-operations, scripts, state fields, provider-specific connection resolution,
-safety checks, and failure handling.
+Discover supported adapters from `providers/*.json`. Select only metadata that
+matches the run's resolved provider. Read its `reference` before invoking any
+provider operation. For cloud-backed data, read the selected drive's `reference`
+from that same metadata before materialization or remote data access.
 
-When the run supplies cloud-backed data, also read the selected drive document
-directly from this skill. The only current drive document is
-`cloud/aliyun.md`; use it only with the AutoDL provider and an `aliyun` drive
-selection.
+Metadata is the contract between orchestration and an adapter. It declares the
+provider script, required local configuration, non-secret configuration
+fingerprint, supported drives, cloud-source mapping, action timeouts, and legacy
+manifest migration fields. Do not infer an adapter, drive, command, path, or
+environment variable outside its metadata and referenced documents.
 
 ## Capability Boundary
 
 Keep provider API calls, machine selection, instance lifecycle, connection
 metadata resolution, and provider-specific filesystem or image rules in the
-provider adapter and `references/<provider>.md`.
+provider adapter and its metadata-selected reference.
 
 Keep SSH authentication, command execution, upload, and download in the shared
 `scripts/ssh.py` helper. Treat this helper as an internal sub-capability, not as
@@ -35,12 +36,17 @@ a provider or a separately triggered skill. A provider adapter may expose
 provider connection metadata before delegating the actual SSH operation to the
 shared helper.
 
-## Supported Providers
+## Adapter protocol
 
-The provider references present under `references/` are the complete supported
-provider set. After selecting a configured provider, require its matching
-`references/<provider>.md`. Do not infer support for a provider with no matching
-reference, or for a capability that its reference does not document.
+Each adapter script must support these actions: `validate-state`, `status`,
+`power-on`, `power-off`, `reconcile`, `release`, `cloud-pull`, `exec`, `upload`,
+and `download`. The adapter owns provider-specific state validation. The shared
+orchestrator may check only the public envelope and the cloud fields `drive`,
+`dataset`, `completed`, and `target_path`.
+
+`providers/<provider>.json` is the complete supported provider set. Do not infer
+support for a provider, drive, or capability that metadata and its selected
+reference do not document.
 
 ## Local Configs
 
@@ -61,10 +67,8 @@ and connection metadata required to resume or clean up the current run.
 
 ### Determine the Provider
 
-Match configured providers against the experiment's required compute and the
-supported-provider list. Select a provider only after confirming that its local
-configuration is present. Read its reference document before taking any further
-provider action.
+Use the provider and drive already resolved in the run configuration. Read their
+metadata-selected reference documents before taking any further provider action.
 
 ### Query Machine Types
 

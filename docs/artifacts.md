@@ -122,25 +122,22 @@ current run's canonical remote-state path; provider-specific lifecycle
 validation remains a runtime provider-script responsibility.
 
 Replication manifest inputs distinguish local and cloud data. A cloud run sets
-`clouddrive: true`, `drive_provider`, `cloud_dataset`, and `cloud_source`, while
-both `data` and `data_source` remain null. These fields are part of the resume
-fingerprint. Local runs set the cloud fields to false/null and retain the
-existing `data` and `data_source` behavior. Secrets used to access AutoPanel or
-the drive are never persistent artifacts.
+`clouddrive: true`, `computation_provider`, `computation_provider_config`,
+`drive_provider`, `cloud_dataset`, and `cloud_source`, while both `data` and
+`data_source` remain null. These fields are part of the resume fingerprint.
+`computation_provider_config` contains only metadata-declared non-secret values.
+Local runs set the cloud fields to false/null and retain the existing `data` and
+`data_source` behavior. Secrets are never persistent artifacts.
 
-For AutoDL, `remote_compute/instance.json` stores current non-secret resource
-selection and lifecycle fields under `provider_state`, including the actual
-`gpu_spec_uuid`, `gpu_count`, `image_uuid`, an optional unused
-`fallback_gpu_spec_uuid`, and the replacement's `created_for_resume_count`.
-Power-off leaves top-level `released` false; only successful irreversible
-release changes it to true. Cloud runs additionally
-store `provider_state.cloud_drive` with provider, dataset, fixed source,
-staging, and target paths, ownership marker, status and timestamps, task ID,
-and remote/local file-count and byte-total aggregates. A released instance
-retained across an explicit resume moves these non-secret fields and its release
-time into `provider_state.instance_history` before one replacement becomes
-current. Passwords, password hashes, Jupyter or AutoPanel tokens, and drive
-credentials are never state fields.
+`remote_compute/instance.json` has a provider-owned `provider_state` whose
+schema is defined by the selected adapter. Its common envelope records the
+provider, current-run ownership, and release state. Cloud runs additionally
+store `provider_state.cloud_drive` with the public fields `drive`, `dataset`,
+`completed`, and `target_path`; adapters may store additional non-secret detail.
+Power-off leaves top-level `released` false; only successful irreversible release
+changes it to true. Provider-owned history and resource identifiers remain
+non-secret. Credentials, hashes, access tokens, and drive secrets are never
+state fields.
 
 Each replication rollback archive is immutable by convention: an existing
 `resume_<NNN>` target makes resume fail rather than overwrite history.
