@@ -230,8 +230,15 @@ class PipelineState:
         self.state["current_stage"] = None
         self._save()
 
-    def invalidate_stages(self, names: list[str], reason: str) -> None:
+    def invalidate_stages(
+        self,
+        names: list[str],
+        reason: str,
+        *,
+        checkpoint_overrides: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         changed = False
+        checkpoint_overrides = checkpoint_overrides or {}
         for name in names:
             stage = self.state["stages"].get(name)
             if stage is None:
@@ -241,7 +248,7 @@ class PipelineState:
                     "status": "invalidated",
                     "completed_at": None,
                     "success": None,
-                    "checkpoints": {},
+                    "checkpoints": dict(checkpoint_overrides.get(name, {})),
                     "outputs": [],
                     "invalidated_reason": reason,
                 }
@@ -259,6 +266,14 @@ class PipelineState:
         self.state["completed_at"] = _now()
         self.state["current_stage"] = None
         self.state.pop("error", None)
+        self._save()
+
+    def record_cleanup_warning(self, operation: str, error: str) -> None:
+        self.state["cleanup_warning"] = {
+            "recorded_at": _now(),
+            "operation": operation,
+            "error": error,
+        }
         self._save()
 
     def mark_ineligible(self, reason: str) -> None:

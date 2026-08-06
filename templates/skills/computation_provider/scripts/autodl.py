@@ -1108,7 +1108,11 @@ def _manifest_report_completed(state_path: Path) -> bool | None:
     if not isinstance(stages, dict):
         raise RuntimeError(f"Run manifest has invalid stages: {manifest_path}")
     report_stage = stages.get("report_agents")
-    return isinstance(report_stage, dict) and report_stage.get("status") == "completed"
+    return (
+        manifest.get("status") == "completed"
+        and isinstance(report_stage, dict)
+        and report_stage.get("status") == "completed"
+    )
 
 
 def release_instance(
@@ -1120,7 +1124,9 @@ def release_instance(
     if state.get("released") is True:
         return
     if not allow_before_report and _manifest_report_completed(args.state) is False:
-        raise RuntimeError("Refusing to release AutoDL instance before report completion")
+        raise RuntimeError(
+            "Refusing to release AutoDL instance before report and pipeline completion"
+        )
     power_off_instance(args)
     request(
         "POST",

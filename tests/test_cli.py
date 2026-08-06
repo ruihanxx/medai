@@ -224,14 +224,18 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
         siliconflow_config=None,
     )
     PipelineState.create(output, build_run_inputs(config))
-    invoked = []
+    events = []
 
     class FakeWorkflow:
         def invoke(self, state):
-            invoked.append(state["config"].output)
+            events.append(("invoke", state["config"].output))
             return {"report_path": str(output / "report.md")}
 
     monkeypatch.setattr("medai.cli.create_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr(
+        "medai.cli.prepare_replication_resume",
+        lambda config: events.append(("prepare", config.output)),
+    )
     monkeypatch.setattr("medai.cli.release_run_computation_instance", lambda config: None)
 
     result = runner.invoke(
@@ -249,7 +253,7 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
 
     assert result.exit_code == 0
     assert f"Resuming Replication run: {output}" in result.stdout
-    assert invoked == [output]
+    assert events == [("prepare", output), ("invoke", output)]
     assert PipelineState(output).state["resume_count"] == 1
 
 
@@ -320,6 +324,93 @@ def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, mon
     manifest = PipelineState(output).state
     assert manifest["stages"]["plan_agent"]["status"] == "failed"
     assert manifest["stages"]["plan_agent"]["error"] == "plan failed"
+
+
+def test_replicate_failure_powers_off_without_releasing(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    cleanup_calls = []
+
+    class FakeWorkflow:
+        def invoke(self, state):
+            raise RuntimeError("replicate failed")
+
+    monkeypatch.setattr("medai.cli.create_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr(
+        "medai.cli.power_off_run_computation_instance",
+        lambda config: cleanup_calls.append(("power-off", config.output)),
+    )
+    monkeypatch.setattr(
+        "medai.cli.release_run_computation_instance",
+        lambda config: cleanup_calls.append(("release", config.output)),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--replicate",
+            "--paper",
+            str(paper),
+            "--output",
+            str(output),
+            "--provider",
+            "codex",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert cleanup_calls == [("power-off", output)]
+
+
+def test_release_failure_keeps_completed_run_and_is_not_retried(
+    tmp_path: Path,
+    monkeypatch,
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    release_calls = []
+
+    class FakeWorkflow:
+        def invoke(self, state):
+            pipeline_state = PipelineState(state["config"].output)
+            if not pipeline_state.is_stage_completed("report_agents"):
+                pipeline_state.start_stage("report_agents")
+                pipeline_state.complete_stage("report_agents", ["report"])
+            pipeline_state.mark_completed()
+            return {"report_path": str(output / "report" / "reproduction_report.md")}
+
+    def fail_release(config):
+        release_calls.append(config.output)
+        raise RuntimeError("provider cleanup unavailable")
+
+    monkeypatch.setattr("medai.cli.create_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr("medai.cli.release_run_computation_instance", fail_release)
+
+    arguments = [
+        "--replicate",
+        "--paper",
+        str(paper),
+        "--output",
+        str(output),
+        "--provider",
+        "codex",
+    ]
+    first = runner.invoke(app, arguments)
+
+    assert first.exit_code == 0, first.stderr
+    assert "replication completed but release failed" in first.stderr
+    after_first = PipelineState(output).state
+    assert after_first["status"] == "completed"
+    assert after_first["cleanup_warning"]["operation"] == "release"
+    assert "provider cleanup unavailable" in after_first["cleanup_warning"]["error"]
+
+    second = runner.invoke(app, arguments)
+
+    assert second.exit_code == 0, second.stderr
+    assert release_calls == [output]
+    assert PipelineState(output).state["status"] == "completed"
 
 
 def test_autoresearch_cli_uses_base_output_and_inherited_provider(

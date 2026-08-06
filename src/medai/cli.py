@@ -12,7 +12,12 @@ from medai.pipeline_state import (
     build_autoresearch_inputs,
     build_run_inputs,
 )
-from medai.workflow import create_workflow, release_run_computation_instance
+from medai.workflow import (
+    create_workflow,
+    power_off_run_computation_instance,
+    prepare_replication_resume,
+    release_run_computation_instance,
+)
 
 app = typer.Typer(
     name="medai",
@@ -144,8 +149,14 @@ def run(
             workflow = create_autoresearch_workflow()
             completion_label = "Auto Research"
 
+        skip_release_retry = False
         if (config.output / "manifest.json").exists():
             pipeline_state = PipelineState(config.output)
+            skip_release_retry = bool(
+                replicate
+                and pipeline_state.is_stage_completed("report_agents")
+                and pipeline_state.state.get("cleanup_warning")
+            )
             pipeline_state.resume(inputs)
             typer.echo(f"Resuming {completion_label} run: {config.output}")
         else:
@@ -155,13 +166,32 @@ def run(
                 )
             pipeline_state = PipelineState.create(config.output, inputs)
         run_active = True
+        if replicate and pipeline_state.state.get("resume_count", 0) > 0:
+            prepare_replication_resume(config)
         result = workflow.invoke({"config": config})
-        release_run_computation_instance(config)
+        if replicate:
+            if not skip_release_retry:
+                try:
+                    release_run_computation_instance(config)
+                except Exception as cleanup_exc:
+                    PipelineState(config.output).record_cleanup_warning(
+                        "release",
+                        str(cleanup_exc),
+                    )
+                    typer.echo(
+                        f"WARNING: replication completed but release failed: {cleanup_exc}",
+                        err=True,
+                    )
+        else:
+            release_run_computation_instance(config)
     except Exception as exc:
         if "run_active" in locals() and (config.output / "manifest.json").is_file():
             cleanup_error = None
             try:
-                release_run_computation_instance(config)
+                if replicate:
+                    power_off_run_computation_instance(config)
+                else:
+                    release_run_computation_instance(config)
             except Exception as cleanup_exc:
                 cleanup_error = str(cleanup_exc)
             message = str(exc)

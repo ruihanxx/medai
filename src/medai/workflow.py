@@ -231,6 +231,325 @@ def validate_codegen_remote_compute(
     return cloud_drive
 
 
+def _load_computation_provider_state(state_path: Path) -> dict[str, Any]:
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Remote computation state is missing: {state_path}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"Remote computation state is unreadable or invalid: {state_path}"
+        ) from exc
+    if not isinstance(state, dict):
+        raise RuntimeError(f"Remote computation state is not a JSON object: {state_path}")
+    return state
+
+
+def _run_computation_provider_action(
+    state_path: Path,
+    action: str,
+    *,
+    arguments: list[str] | None = None,
+    timeout: int,
+) -> str:
+    state = _load_computation_provider_state(state_path)
+    provider = state.get("provider")
+    if provider != "autodl":
+        raise RuntimeError(f"Unsupported computation provider in state: {provider}")
+    script = skills_dir() / "computation_provider" / "scripts" / f"{provider}.py"
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            action,
+            "--state",
+            str(state_path),
+            *(arguments or []),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout).strip()
+        raise RuntimeError(f"Could not {action} {provider} instance: {detail}")
+    return completed.stdout.strip()
+
+
+def reconcile_run_computation_instance(config: RunConfig) -> dict[str, Any]:
+    state_path = config.output / "remote_compute" / "instance.json"
+    output = _run_computation_provider_action(
+        state_path,
+        "reconcile",
+        timeout=720,
+    )
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Computation-provider reconcile returned invalid JSON") from exc
+    if (
+        not isinstance(result, dict)
+        or not isinstance(result.get("replaced"), bool)
+        or result.get("status") != "running"
+    ):
+        raise RuntimeError("Computation-provider reconcile returned an invalid result")
+    return result
+
+
+def power_off_run_computation_instance(config: RunConfig) -> None:
+    state_path = config.output / "remote_compute" / "instance.json"
+    if not state_path.is_file():
+        return
+    state = _load_computation_provider_state(state_path)
+    if not state.get("created_by_run") or state.get("released") is True:
+        return
+    _run_computation_provider_action(state_path, "power-off", timeout=120)
+
+
+def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> None:
+    state_path = config.output / "remote_compute" / "instance.json"
+    if not state_path.is_file():
+        return
+    state = _load_computation_provider_state(state_path)
+    if not state.get("created_by_run") or state.get("released") is True:
+        return
+    _run_computation_provider_action(state_path, "release", timeout=120)
+
+
+def _cloud_pull(config: RunConfig) -> None:
+    if not config.clouddrive:
+        return
+    if config.cloud_dataset is None:
+        raise RuntimeError("Cloud-drive mode is missing its dataset name")
+    state_path = config.output / "remote_compute" / "instance.json"
+    _run_computation_provider_action(
+        state_path,
+        "cloud-pull",
+        arguments=["--dataset", config.cloud_dataset],
+        timeout=1920,
+    )
+
+
+def _run_has_remote_plan(config: RunConfig) -> bool:
+    candidates: tuple[tuple[Path, type[CodegenPlan] | type[ReplicationPlan]], ...] = (
+        (config.output / "plan" / "replicate_plan.json", ReplicationPlan),
+        (config.output / "codegen" / "codebase" / "codegen_plan.json", CodegenPlan),
+    )
+    for path, model_type in candidates:
+        if path.is_file() and load_model(path, model_type).remote_compute is not None:
+            return True
+    return False
+
+
+def _validate_recorded_remote_state(state_path: Path) -> None:
+    state = _load_computation_provider_state(state_path)
+    provider_state = state.get("provider_state")
+    if state.get("provider") != "autodl":
+        raise RuntimeError(
+            f"Unsupported computation provider in state: {state.get('provider')}"
+        )
+    if not state.get("created_by_run") or not isinstance(provider_state, dict):
+        raise RuntimeError("Remote computation state lacks current-run ownership")
+    required = ("instance_uuid", "gpu_spec_uuid", "gpu_count", "image_uuid")
+    missing = [name for name in required if not provider_state.get(name)]
+    if missing:
+        raise RuntimeError(
+            "Remote computation state cannot recreate the recorded instance; missing: "
+            + ", ".join(missing)
+        )
+    gpu_count = provider_state["gpu_count"]
+    if (
+        isinstance(gpu_count, bool)
+        or not isinstance(gpu_count, int)
+        or not 1 <= gpu_count <= 4
+    ):
+        raise RuntimeError("Remote computation state has an invalid GPU count")
+
+
+def _replication_attempt_started(pipeline_state: PipelineState) -> bool:
+    stages = pipeline_state.state["stages"]
+    return "replicate_agent" in stages or "report_agents" in stages
+
+
+def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
+    output = config.output
+    archive_root = output / "resume_history" / f"resume_{resume_count:03d}"
+    temporary_root = archive_root.with_name(f".{archive_root.name}.tmp")
+    if archive_root.exists() or temporary_root.exists():
+        raise RuntimeError(f"Resume archive target already exists: {archive_root}")
+
+    replication_dir = output / "replication"
+    report_dir = output / "report"
+    codebase_dir = output / "codegen" / "codebase"
+    prompt_paths = [output / "prompts" / "replicate.md"]
+    prompt_paths.extend(sorted((output / "prompts").glob("report_*.md")))
+    prompt_paths = [path for path in prompt_paths if path.is_file()]
+
+    mappings: list[dict[str, str]] = []
+    unresolved: list[str] = []
+    log_reference_error: str | None = None
+    replication_log_path = replication_dir / "replication_log.json"
+    if replication_log_path.is_file():
+        try:
+            payload = json.loads(replication_log_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            payload = {}
+            log_reference_error = str(exc)
+        outcomes = payload.get("step_outcomes") if isinstance(payload, dict) else None
+        if not isinstance(outcomes, list):
+            outcomes = []
+            log_reference_error = log_reference_error or "step_outcomes is not a list"
+        logged_outputs: list[str] = []
+        for outcome in outcomes:
+            output_files = outcome.get("output_files") if isinstance(outcome, dict) else None
+            if not isinstance(output_files, list) or not all(
+                isinstance(value, str) for value in output_files
+            ):
+                log_reference_error = (
+                    log_reference_error or "one or more output_files fields are invalid"
+                )
+                continue
+            logged_outputs.extend(output_files)
+        codebase_root = codebase_dir.resolve()
+        copied: dict[Path, Path] = {}
+        for logged_path in logged_outputs:
+            try:
+                resolved = resolve_replication_output(
+                    logged_path,
+                    codebase_dir,
+                    replication_dir,
+                )
+            except RuntimeError:
+                unresolved.append(logged_path)
+                continue
+            if not resolved.is_relative_to(codebase_root):
+                continue
+            relative = resolved.relative_to(codebase_root)
+            archived_path = archive_root / "referenced_codebase_outputs" / relative
+            if resolved not in copied:
+                temporary_path = temporary_root / "referenced_codebase_outputs" / relative
+                try:
+                    temporary_path.parent.mkdir(parents=True, exist_ok=True)
+                    if resolved.is_dir():
+                        shutil.copytree(resolved, temporary_path, dirs_exist_ok=True)
+                    else:
+                        shutil.copy2(resolved, temporary_path)
+                except Exception:
+                    if temporary_root.is_dir():
+                        shutil.rmtree(temporary_root)
+                    raise
+                copied[resolved] = archived_path
+            mappings.append(
+                {
+                    "logged_path": logged_path,
+                    "original_path": str(resolved),
+                    "archived_path": str(copied[resolved]),
+                }
+            )
+
+    try:
+        for name, source in (("replication", replication_dir), ("report", report_dir)):
+            destination = temporary_root / name
+            if source.is_symlink():
+                raise RuntimeError(f"Refusing to archive symlinked run directory: {source}")
+            if source.exists():
+                if not source.is_dir():
+                    raise RuntimeError(f"Run artifact path is not a directory: {source}")
+                shutil.copytree(source, destination)
+            else:
+                destination.mkdir(parents=True, exist_ok=True)
+        for prompt_path in prompt_paths:
+            destination = temporary_root / "prompts" / prompt_path.name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(prompt_path, destination)
+        write_json(
+            temporary_root / "path_mapping.json",
+            {
+                "resume_count": resume_count,
+                "referenced_codebase_outputs": mappings,
+                "unresolved_log_outputs": unresolved,
+                "log_reference_error": log_reference_error,
+            },
+        )
+        archive_root.parent.mkdir(parents=True, exist_ok=True)
+        temporary_root.replace(archive_root)
+    except Exception:
+        if temporary_root.is_dir():
+            shutil.rmtree(temporary_root)
+        raise
+
+    for directory in (replication_dir, report_dir):
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+    for prompt_path in prompt_paths:
+        prompt_path.unlink()
+    return archive_root
+
+
+def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
+    pipeline_state = PipelineState(config.output)
+    state_path = config.output / "remote_compute" / "instance.json"
+    report_completed = pipeline_state.is_stage_completed("report_agents")
+    remote_plan = (
+        _run_has_remote_plan(config)
+        if report_completed or not state_path.is_file()
+        else False
+    )
+    if report_completed:
+        if remote_plan:
+            _validate_recorded_remote_state(state_path)
+        return {"reconciled": False, "replaced": False, "rollback": None}
+
+    replicate_started = _replication_attempt_started(pipeline_state)
+    resume_count = int(pipeline_state.state.get("resume_count", 0))
+    if replicate_started:
+        archive_root = config.output / "resume_history" / f"resume_{resume_count:03d}"
+        temporary_root = archive_root.with_name(f".{archive_root.name}.tmp")
+        if archive_root.exists() or temporary_root.exists():
+            raise RuntimeError(f"Resume archive target already exists: {archive_root}")
+
+    reconciliation: dict[str, Any] = {"reconciled": False, "replaced": False}
+    if state_path.is_file():
+        reconciliation = {
+            "reconciled": True,
+            **reconcile_run_computation_instance(config),
+        }
+    elif remote_plan:
+        raise RuntimeError(f"Remote computation state is missing: {state_path}")
+
+    if replicate_started:
+        if config.clouddrive and reconciliation["replaced"]:
+            _cloud_pull(config)
+        archive_root = _archive_replicate_attempt(config, resume_count)
+        pipeline_state.invalidate_stages(
+            ["replicate_agent", "report_agents"],
+            f"Explicit resume restarted replication from its first step: {archive_root}",
+        )
+        return {**reconciliation, "rollback": "replicate", "archive": str(archive_root)}
+
+    if reconciliation["replaced"]:
+        codebase_dir = config.output / "codegen" / "codebase"
+        checkpoints = {
+            "source_prepared": codebase_dir.is_dir(),
+            "infrastructure_resume": True,
+        }
+        pipeline_state.invalidate_stages(
+            [
+                "codegen_agent",
+                "audit_agent",
+                "plan_agent",
+                "replicate_agent",
+                "report_agents",
+            ],
+            "Remote computation instance was replaced during explicit resume",
+            checkpoint_overrides={"codegen_agent": checkpoints},
+        )
+        return {**reconciliation, "rollback": "codegen"}
+
+    return {**reconciliation, "rollback": None}
+
+
 def preflight_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
@@ -426,27 +745,11 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         raise RuntimeError(
             f"Codegen audit feedback is not a FAIL report: {audit_feedback_path}"
         )
-    cloud_instance_released = False
-    if config.clouddrive and computation_provider_state_path.is_file():
-        try:
-            cloud_instance_released = (
-                json.loads(computation_provider_state_path.read_text(encoding="utf-8")).get(
-                    "released"
-                )
-                is True
-            )
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"Remote computation state is invalid: {computation_provider_state_path}"
-            ) from exc
     completed_run_validation = pipeline_state.is_stage_completed("report_agents")
-    cloud_replacement_required = (
-        config.clouddrive and cloud_instance_released and not completed_run_validation
-    )
+    infrastructure_resume = bool(codegen_checkpoints.get("infrastructure_resume"))
     if (
         pipeline_state.is_stage_completed("codegen_agent")
         and not audit_revision
-        and not cloud_replacement_required
     ):
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
@@ -527,7 +830,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         cloud_source=(
             f"medai/{config.cloud_dataset}" if config.cloud_dataset else None
         ),
-        cloud_replacement_required=cloud_replacement_required,
+        infrastructure_resume=infrastructure_resume,
         skills_dir=skills_dir(),
         codegen_plan_path=codegen_plan_path,
         dataset_patch_path=dataset_patch_path,
@@ -535,9 +838,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         computation_provider_state_path=computation_provider_state_path,
         gpu_info=resources["gpus"],
         computation_provider=computation_provider,
-        resuming=(
-            previous_status in {"running", "failed"} or cloud_replacement_required
-        ),
+        resuming=previous_status in {"running", "failed", "invalidated"},
         audit_feedback_path=audit_feedback_path,
     )
     run_agent(
@@ -787,6 +1088,8 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     pipeline_state = PipelineState(config.output)
     transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     plan = load_model(Path(state["replicate_plan_path"]), ReplicationPlan)
+    if not pipeline_state.is_stage_completed("replicate_agent"):
+        _cloud_pull(config)
     validate_codegen_remote_compute(
         plan,
         config.output / "remote_compute" / "instance.json",
@@ -846,6 +1149,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     )
 
     outputs = validate_replication_artifacts(state)
+    power_off_run_computation_instance(config)
     pipeline_state.complete_stage(
         "replicate_agent",
         [*outputs, str(transcript_path)],
@@ -1018,27 +1322,3 @@ def create_workflow():
     builder.add_edge("replicate_agent", "report_agents")
     builder.add_edge("report_agents", END)
     return builder.compile()
-
-
-def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> None:
-    state_path = config.output / "remote_compute" / "instance.json"
-    if not state_path.is_file():
-        return
-    state = json.loads(state_path.read_text(encoding="utf-8"))
-    if not state.get("created_by_run") or state.get("released"):
-        return
-    provider = state.get("provider")
-    if provider != "autodl":
-        raise RuntimeError(f"Unsupported computation provider in state: {provider}")
-    script = skills_dir() / "computation_provider" / "scripts" / f"{provider}.py"
-    completed = subprocess.run(
-        [sys.executable, str(script), "release", "--state", str(state_path)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"Could not release {provider} instance: "
-            f"{(completed.stderr or completed.stdout).strip()}"
-        )

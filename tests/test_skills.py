@@ -898,11 +898,16 @@ def test_autodl_reconcile_requires_recreation_fields_before_api_access(tmp_path:
     assert "missing: gpu_spec_uuid, gpu_count, image_uuid" in completed.stderr
 
 
-def test_autodl_release_refuses_incomplete_report(tmp_path: Path):
+def test_autodl_release_refuses_before_pipeline_completion(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
     state_path.parent.mkdir()
     (tmp_path / "manifest.json").write_text(
-        json.dumps({"stages": {"report_agents": {"status": "failed"}}}),
+        json.dumps(
+            {
+                "status": "running",
+                "stages": {"report_agents": {"status": "completed"}},
+            }
+        ),
         encoding="utf-8",
     )
     state_path.write_text(
@@ -934,7 +939,7 @@ def test_autodl_release_refuses_incomplete_report(tmp_path: Path):
     )
 
     assert completed.returncode != 0
-    assert "before report completion" in completed.stderr
+    assert "before report and pipeline completion" in completed.stderr
 
 
 def test_autodl_release_keeps_autoresearch_lifecycle_compatible(tmp_path: Path):

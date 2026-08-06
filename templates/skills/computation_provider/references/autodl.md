@@ -460,8 +460,8 @@ Then release:
 python <skill-dir>/scripts/autodl.py release --state <run-state-path>
 ```
 
-The normal CLI action refuses release while an adjacent run manifest exists and
-its report stage is incomplete. On success, confirm the state file contains
+The normal CLI action refuses release while an adjacent Replicate manifest is
+not completed or its report stage is incomplete. On success, confirm the state file contains
 `released: true`. Release destroys
 the instance and its local data. Power-off alone preserves instance data only
 temporarily; AutoDL currently documents automatic release after fifteen

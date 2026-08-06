@@ -69,3 +69,42 @@ def test_stage_retry_preserves_checkpoints_and_counts_attempts(tmp_path: Path):
         "completed_experiments": ["E1"]
     }
     assert resumed.state["stages"]["report_agents"]["attempts"] == 2
+
+
+def test_invalidation_can_preserve_explicit_infrastructure_checkpoints(
+    tmp_path: Path,
+):
+    state = PipelineState.create(tmp_path / "output", {"provider": "codex"})
+    state.start_stage("codegen_agent")
+    state.update_stage_checkpoints("codegen_agent", {"source_prepared": True})
+    state.complete_stage("codegen_agent", ["codebase"])
+
+    state.invalidate_stages(
+        ["codegen_agent"],
+        "replacement instance",
+        checkpoint_overrides={
+            "codegen_agent": {
+                "source_prepared": True,
+                "infrastructure_resume": True,
+            }
+        },
+    )
+
+    assert state.get_stage_status("codegen_agent") == "invalidated"
+    assert state.get_stage_checkpoints("codegen_agent") == {
+        "source_prepared": True,
+        "infrastructure_resume": True,
+    }
+
+
+def test_cleanup_warning_preserves_completed_status(tmp_path: Path):
+    state = PipelineState.create(tmp_path / "output", {"provider": "codex"})
+    state.mark_completed()
+
+    state.record_cleanup_warning("release", "provider unavailable")
+
+    manifest = PipelineState(state.output).state
+    assert manifest["status"] == "completed"
+    assert manifest["cleanup_warning"]["operation"] == "release"
+    assert manifest["cleanup_warning"]["error"] == "provider unavailable"
+    assert manifest["cleanup_warning"]["recorded_at"]

@@ -9,12 +9,99 @@ from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.workflow import (
     create_workflow,
+    power_off_run_computation_instance,
     preflight_node,
+    prepare_replication_resume,
     release_run_computation_instance,
     replicate_agent_node,
     resolve_replication_output,
     validate_codegen_remote_compute,
 )
+
+
+def _replicate_config(tmp_path: Path) -> RunConfig:
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    data = tmp_path / "data"
+    data.mkdir()
+    return RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data=data,
+        siliconflow_config=None,
+    )
+
+
+def _write_remote_state(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "old-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "gpu_count": 1,
+                    "image_uuid": "image",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_codegen_plan(path: Path, remote_state_path: Path | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    remote_compute = None
+    if remote_state_path is not None:
+        remote_compute = {
+            "state_path": str(remote_state_path),
+            "remote_working_dir": "/remote/run",
+            "remote_dataset_dir": "/remote/data",
+        }
+    path.write_text(
+        json.dumps(
+            {
+                "files": [{"path": "run.py", "responsibility": "Run"}],
+                "dependency_order": ["run.py"],
+                "entry_points": ["run.py"],
+                "shared_state": "None",
+                "ambiguities": [],
+                "remote_compute": remote_compute,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_replication_log(path: Path, output_file: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "step_outcomes": [
+                    {
+                        "step_id": 1,
+                        "description": "run",
+                        "command_executed": "python run.py",
+                        "exit_code": 0,
+                        "stdout": "ok",
+                        "stderr": "",
+                        "output_files": [output_file],
+                        "duration_seconds": 1,
+                        "fixes_applied": [],
+                        "code_modified": False,
+                        "notes": "",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_cloud_drive_preflight_accepts_remote_only_data(
@@ -672,6 +759,113 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
     assert "five adjustment rounds per experiment" in prompt
 
 
+def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    import medai.workflow as workflow
+
+    base = _replicate_config(tmp_path)
+    config = RunConfig(
+        paper=base.paper,
+        output=base.output,
+        provider=base.provider,
+        clouddrive=True,
+        drive_provider="aliyun",
+        cloud_dataset="mimic-iv",
+    )
+    PipelineState.create(config.output, {"provider": "codex"})
+    plan = workflow.ReplicationPlan.model_validate(
+        {
+            "environment": {
+                "language": "Python",
+                "key_dependencies": [],
+                "setup_hints": "remote",
+            },
+            "steps": [
+                {
+                    "id": step_id,
+                    "description": f"step {step_id}",
+                    "command_hint": "python run.py",
+                    "expected_outcome": "output",
+                    "verifies": [],
+                }
+                for step_id in (1, 2, 3)
+            ],
+        }
+    )
+    claims = workflow.ClaimsFile.model_validate(
+        {
+            "claims": [
+                {
+                    "claim_id": "C1",
+                    "statement": "Accuracy is reported.",
+                    "role": "final",
+                    "kind": "numeric",
+                    "paper_result": 0.9,
+                    "provenance": {
+                        "page": 1,
+                        "section": "Results",
+                        "quote": "Accuracy was 0.9.",
+                    },
+                }
+            ]
+        }
+    )
+    experiments = workflow.ExperimentTodo.model_validate(
+        {
+            "experiments": [
+                {
+                    "experiment_id": "E1",
+                    "description": "Train and evaluate.",
+                    "computational_demand": "GPU",
+                    "claims": ["C1"],
+                    "artifacts": [],
+                }
+            ]
+        }
+    )
+    models = {
+        workflow.ReplicationPlan: plan,
+        workflow.ClaimsFile: claims,
+        workflow.ExperimentTodo: experiments,
+    }
+    events = []
+
+    def fake_render(_template, destination, **_context):
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text("prompt", encoding="utf-8")
+        return destination
+
+    monkeypatch.setattr(workflow, "load_model", lambda _path, model: models[model])
+    monkeypatch.setattr(workflow, "validate_codegen_remote_compute", lambda *_a, **_k: None)
+    monkeypatch.setattr(workflow, "render_prompt", fake_render)
+    monkeypatch.setattr(workflow, "_cloud_pull", lambda _config: events.append("cloud-pull"))
+    monkeypatch.setattr(workflow, "run_agent", lambda **_kwargs: events.append("agent"))
+    monkeypatch.setattr(
+        workflow,
+        "validate_replication_artifacts",
+        lambda _state: events.append("validate-artifacts") or [],
+    )
+    monkeypatch.setattr(
+        workflow,
+        "power_off_run_computation_instance",
+        lambda _config: events.append("power-off"),
+    )
+
+    replicate_agent_node(
+        {
+            "config": config,
+            "claims_path": "claims.json",
+            "experiments_path": "experiments.json",
+            "replicate_plan_path": "replicate_plan.json",
+            "codebase_dir": str(config.output / "codegen" / "codebase"),
+        }
+    )
+
+    assert events == ["cloud-pull", "agent", "validate-artifacts", "power-off"]
+
+
 def test_graph_stops_after_a_stage_failure(monkeypatch):
     import medai.workflow as workflow
 
@@ -837,6 +1031,222 @@ def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path:
     assert "where that\nchoice is implemented" in prompt
 
 
+def test_resume_archives_interrupted_replicate_attempt_and_restarts_it(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _replicate_config(tmp_path)
+    state = PipelineState.create(config.output, {"provider": "codex"})
+    codebase = config.output / "codegen" / "codebase"
+    _write_codegen_plan(codebase / "codegen_plan.json")
+    referenced_output = codebase / "results" / "metrics.json"
+    referenced_output.parent.mkdir(parents=True)
+    referenced_output.write_text('{"score": 0.9}', encoding="utf-8")
+    _write_replication_log(
+        config.output / "replication" / "replication_log.json",
+        str(referenced_output),
+    )
+    (config.output / "replication" / "old.txt").write_text("old", encoding="utf-8")
+    (config.output / "report").mkdir(parents=True)
+    (config.output / "report" / "reproduction_report.md").write_text(
+        "old report", encoding="utf-8"
+    )
+    (config.output / "prompts").mkdir(parents=True)
+    (config.output / "prompts" / "replicate.md").write_text(
+        "old replicate prompt", encoding="utf-8"
+    )
+    (config.output / "prompts" / "report_E1.md").write_text(
+        "old report prompt", encoding="utf-8"
+    )
+    remote_state_path = config.output / "remote_compute" / "instance.json"
+    _write_remote_state(remote_state_path)
+    state.start_stage("replicate_agent")
+    state.complete_stage("replicate_agent", ["old"])
+    state.start_stage("report_agents")
+    state.fail("interrupted")
+    state.resume({"provider": "codex"})
+    monkeypatch.setattr(
+        "medai.workflow.reconcile_run_computation_instance",
+        lambda _config: {
+            "replaced": False,
+            "instance_uuid": "old-instance",
+            "status": "running",
+        },
+    )
+
+    result = prepare_replication_resume(config)
+
+    archive = config.output / "resume_history" / "resume_001"
+    assert result["rollback"] == "replicate"
+    assert result["archive"] == str(archive)
+    assert (archive / "replication" / "old.txt").read_text(encoding="utf-8") == "old"
+    assert (
+        archive / "report" / "reproduction_report.md"
+    ).read_text(encoding="utf-8") == "old report"
+    assert (archive / "prompts" / "replicate.md").is_file()
+    assert (archive / "prompts" / "report_E1.md").is_file()
+    copied_output = archive / "referenced_codebase_outputs" / "results" / "metrics.json"
+    assert copied_output.read_text(encoding="utf-8") == '{"score": 0.9}'
+    mapping = json.loads((archive / "path_mapping.json").read_text(encoding="utf-8"))
+    assert mapping["referenced_codebase_outputs"][0]["original_path"] == str(
+        referenced_output
+    )
+    assert mapping["referenced_codebase_outputs"][0]["archived_path"] == str(
+        copied_output
+    )
+    assert list((config.output / "replication").iterdir()) == []
+    assert list((config.output / "report").iterdir()) == []
+    assert not (config.output / "prompts" / "replicate.md").exists()
+    assert referenced_output.is_file()
+    resumed = PipelineState(config.output)
+    assert resumed.get_stage_status("replicate_agent") == "invalidated"
+    assert resumed.get_stage_status("report_agents") == "invalidated"
+
+
+def test_resume_replacement_before_replicate_invalidates_from_codegen(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _replicate_config(tmp_path)
+    state = PipelineState.create(config.output, {"provider": "codex"})
+    codebase = config.output / "codegen" / "codebase"
+    codebase.mkdir(parents=True)
+    (codebase / "run.py").write_text("print('preserved')", encoding="utf-8")
+    remote_state_path = config.output / "remote_compute" / "instance.json"
+    _write_remote_state(remote_state_path)
+    for stage_name in ("codegen_agent", "audit_agent", "plan_agent"):
+        state.start_stage(stage_name)
+        state.complete_stage(stage_name, [stage_name])
+    state.resume({"provider": "codex"})
+    monkeypatch.setattr(
+        "medai.workflow.reconcile_run_computation_instance",
+        lambda _config: {
+            "replaced": True,
+            "instance_uuid": "replacement",
+            "status": "running",
+        },
+    )
+
+    result = prepare_replication_resume(config)
+
+    assert result["rollback"] == "codegen"
+    resumed = PipelineState(config.output)
+    assert resumed.get_stage_status("codegen_agent") == "invalidated"
+    assert resumed.get_stage_checkpoints("codegen_agent") == {
+        "source_prepared": True,
+        "infrastructure_resume": True,
+    }
+    assert resumed.get_stage_status("audit_agent") == "invalidated"
+    assert resumed.get_stage_status("plan_agent") == "invalidated"
+    assert (codebase / "run.py").read_text(encoding="utf-8") == "print('preserved')"
+
+
+def test_resume_reuses_instance_without_rolling_back_earlier_stage(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _replicate_config(tmp_path)
+    state = PipelineState.create(config.output, {"provider": "codex"})
+    _write_remote_state(config.output / "remote_compute" / "instance.json")
+    state.start_stage("codegen_agent")
+    state.fail("agent interrupted")
+    state.resume({"provider": "codex"})
+    monkeypatch.setattr(
+        "medai.workflow.reconcile_run_computation_instance",
+        lambda _config: {
+            "replaced": False,
+            "instance_uuid": "old-instance",
+            "status": "running",
+        },
+    )
+
+    result = prepare_replication_resume(config)
+
+    assert result["rollback"] is None
+    assert PipelineState(config.output).get_stage_status("codegen_agent") == "failed"
+
+
+def test_resume_completed_report_does_not_reconcile_or_roll_back(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _replicate_config(tmp_path)
+    state = PipelineState.create(config.output, {"provider": "codex"})
+    state.start_stage("replicate_agent")
+    state.complete_stage("replicate_agent", ["replication"])
+    state.start_stage("report_agents")
+    state.complete_stage("report_agents", ["report"])
+    state.mark_completed()
+    state.resume({"provider": "codex"})
+
+    def must_not_reconcile(_config):
+        raise AssertionError("completed reports must not touch the instance")
+
+    monkeypatch.setattr(
+        "medai.workflow.reconcile_run_computation_instance",
+        must_not_reconcile,
+    )
+
+    result = prepare_replication_resume(config)
+
+    assert result == {"reconciled": False, "replaced": False, "rollback": None}
+    resumed = PipelineState(config.output)
+    assert resumed.get_stage_status("replicate_agent") == "completed"
+    assert resumed.get_stage_status("report_agents") == "completed"
+
+
+def test_resume_remote_plan_without_state_fails_before_graph(tmp_path: Path):
+    config = _replicate_config(tmp_path)
+    state = PipelineState.create(config.output, {"provider": "codex"})
+    state.start_stage("codegen_agent")
+    state.complete_stage("codegen_agent", ["codegen"])
+    missing_state = config.output / "remote_compute" / "instance.json"
+    _write_codegen_plan(
+        config.output / "codegen" / "codebase" / "codegen_plan.json",
+        missing_state,
+    )
+    state.resume({"provider": "codex"})
+
+    with pytest.raises(RuntimeError, match="Remote computation state is missing"):
+        prepare_replication_resume(config)
+
+
+def test_resume_cloud_replacement_materializes_before_archive(
+    tmp_path: Path,
+    monkeypatch,
+):
+    base = _replicate_config(tmp_path)
+    config = RunConfig(
+        paper=base.paper,
+        output=base.output,
+        provider=base.provider,
+        clouddrive=True,
+        drive_provider="aliyun",
+        cloud_dataset="mimic-iv",
+    )
+    state = PipelineState.create(config.output, {"provider": "codex"})
+    _write_remote_state(config.output / "remote_compute" / "instance.json")
+    (config.output / "replication").mkdir(parents=True)
+    (config.output / "report").mkdir(parents=True)
+    state.start_stage("replicate_agent")
+    state.fail("interrupted")
+    state.resume({"provider": "codex"})
+    calls = []
+    monkeypatch.setattr(
+        "medai.workflow.reconcile_run_computation_instance",
+        lambda _config: {
+            "replaced": True,
+            "instance_uuid": "replacement",
+            "status": "running",
+        },
+    )
+    monkeypatch.setattr("medai.workflow._cloud_pull", lambda _config: calls.append("pull"))
+
+    prepare_replication_resume(config)
+
+    assert calls == ["pull"]
+
+
 def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     tmp_path: Path,
     monkeypatch,
@@ -893,4 +1303,11 @@ def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     command, kwargs = calls[0]
     assert command[1].endswith("/computation_provider/scripts/autodl.py")
     assert command[2:] == ["release", "--state", str(state_path)]
+    assert kwargs["timeout"] == 120
+
+    calls.clear()
+    power_off_run_computation_instance(config)
+    assert len(calls) == 1
+    command, kwargs = calls[0]
+    assert command[2:] == ["power-off", "--state", str(state_path)]
     assert kwargs["timeout"] == 120
