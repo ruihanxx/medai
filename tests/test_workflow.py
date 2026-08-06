@@ -982,7 +982,7 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
         cloud_dataset="mimic-iv",
         drive_provider="aliyun",
         cloud_source="medai/mimic-iv",
-        cloud_replacement_required=True,
+        infrastructure_resume=True,
         skills_dir=Path("/skills"),
         codegen_plan_path=tmp_path / "codegen_plan.json",
         dataset_patch_path=tmp_path / "patch.json",
@@ -998,7 +998,9 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
     assert "Cloud-backed data makes remote computation mandatory" in prompt
     assert "Before inspecting dataset documentation, schema, metadata, or content" in prompt
     assert "mimic-iv" in prompt
-    assert "Create at most one replacement" in prompt
+    assert "infrastructure resume" in prompt
+    assert "replacement is already running" in prompt
+    assert "Do not create or release another" in prompt
     assert "Never copy\nraw cloud data into the local run" in prompt
 
 
@@ -1029,6 +1031,23 @@ def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path:
     assert "Widely accepted medical knowledge and standard medical-research methods" in prompt
     assert "do not leave a TODO,\nsilently apply a library default" in prompt
     assert "where that\nchoice is implemented" in prompt
+
+
+def test_remote_plan_and_replication_prompts_require_power_off_not_release():
+    templates = Path(__file__).parents[1] / "templates"
+    plan_prompt = (templates / "plan" / "session_instructions.md").read_text(
+        encoding="utf-8"
+    )
+    replicate_prompt = (
+        templates / "replication" / "session_instructions.md"
+    ).read_text(encoding="utf-8")
+
+    assert "provider adapter's reviewed power-off action" in plan_prompt
+    assert "must not release" in plan_prompt
+    assert "Every invocation of this stage is a complete replication attempt" in (
+        replicate_prompt
+    )
+    assert "Do not call release" in replicate_prompt
 
 
 def test_resume_archives_interrupted_replicate_attempt_and_restarts_it(
@@ -1172,6 +1191,12 @@ def test_resume_completed_report_does_not_reconcile_or_roll_back(
 ):
     config = _replicate_config(tmp_path)
     state = PipelineState.create(config.output, {"provider": "codex"})
+    remote_state_path = config.output / "remote_compute" / "instance.json"
+    _write_remote_state(remote_state_path)
+    _write_codegen_plan(
+        config.output / "codegen" / "codebase" / "codegen_plan.json",
+        remote_state_path,
+    )
     state.start_stage("replicate_agent")
     state.complete_stage("replicate_agent", ["replication"])
     state.start_stage("report_agents")

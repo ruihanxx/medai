@@ -99,12 +99,19 @@ defaults to 1800, and `AUTODL_CLOUDDRIVE_GPU_SPEC` defaults to `v-32g-p` when
 the paper provides no GPU requirement. `AUTODL_TOKEN` and `AUTODL_IMAGE_UUID`
 remain required because cloud-drive mode always uses AutoDL.
 
-Failure cleanup releases a run-created cloud instance. A later explicit resume
-may create one replacement only after the state confirms release; it preserves
-the old non-secret resource/cloud state in instance history and downloads the
-dataset again. An unreleased state or cleanup failure prevents another rental.
-Reopening an already completed cloud run validates its recorded released state
-without creating a replacement.
+Replicate failure cleanup powers off a run-created remote instance without
+releasing it. On explicit resume the CLI reconciles the canonical state once
+before entering LangGraph: it reuses a reachable instance or creates one bounded
+replacement from recorded actual specifications. Ambiguous provider failures or
+an unsuccessful old-instance release prevent a second rental. A replacement
+before replication invalidates codegen and downstream work as an infrastructure
+resume. Once replication has begun, every explicit resume restarts the whole
+replication attempt whether the instance was reused or replaced. Cloud data is
+materialized idempotently before every replication
+attempt. Normal release occurs only after the report is validated and the run is
+completed. A release failure is a persistent `cleanup_warning`, not a pipeline
+failure, and reopening that completed run does not retry it. Auto Research
+cleanup behavior is unchanged.
 
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a

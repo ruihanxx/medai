@@ -537,6 +537,72 @@ def test_autodl_create_allows_only_one_replacement_per_manifest_resume(tmp_path:
     assert "already created for this manual resume" in completed.stderr
 
 
+def test_autodl_reconcile_replaces_released_instance_from_recorded_spec(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": True,
+                "released_at_unix": 123,
+                "provider_state": {
+                    "instance_uuid": "released-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "gpu_count": 2,
+                    "image_uuid": "recorded-image",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with autodl_api(
+        {
+            ("POST", "/api/v1/dev/instance/pro/create"): {
+                "code": "Success",
+                "data": "replacement-instance",
+            },
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "Success",
+                "data": "running",
+            },
+        }
+    ) as (base_url, requests):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "reconcile",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": "test-token",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["replaced"] is True
+    create_body = json.loads(
+        next(
+            body
+            for method, path, body in requests
+            if method == "POST" and path == "/api/v1/dev/instance/pro/create"
+        )
+    )
+    assert create_body["gpu_spec_uuid"] == "v-32g-p"
+    assert create_body["req_gpu_amount"] == 2
+    assert create_body["image_uuid"] == "recorded-image"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["provider_state"]["instance_history"][0]["instance_uuid"] == (
+        "released-instance"
+    )
+
+
 def test_autodl_reconcile_powers_on_and_reuses_connectable_instance(tmp_path: Path):
     state_path = tmp_path / "instance.json"
     state_path.write_text(

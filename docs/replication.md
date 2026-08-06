@@ -76,13 +76,35 @@ stage checkpoints. On reuse of an output directory, version 1 manifests are
 migrated, the paper hash and output-affecting configuration must match, and
 only stages marked `completed` are skipped. Every skipped stage reloads and
 validates its canonical artifacts before downstream work proceeds. A `running`
-or `failed` stage starts another attempt while retaining its writable artifacts.
+or `failed` stage before replication starts another attempt while retaining its
+writable artifacts.
 Failure handling reloads the current manifest before recording the error so
 stage updates are not overwritten by stale state. Code generation records
-source preparation before invoking its agent; replication continues from the
-valid ordered prefix in its step log; report generation checkpoints every
-completed experiment. A completed run is therefore safe to invoke again and
-becomes a validation-only no-op.
+source preparation before invoking its agent; report generation checkpoints
+every completed experiment. A completed run is therefore safe to invoke again
+and becomes a validation-only no-op.
+
+An explicit Replicate resume performs one remote reconciliation after manifest
+resume and before LangGraph. A released instance is replaced from its recorded
+actual GPU specification/count and image. A shutdown instance is powered on; a
+running instance gets one harmless SSH probe. An SSH failure permits replacement
+only after the old instance is successfully powered off and released. A
+provider-confirmed missing instance may be replaced directly, while ambiguous
+API/network errors fail without a second rental. Replacement may try only the
+recorded, distinct stronger fallback after explicit no inventory, and each
+`resume_count` permits at most one replacement. Missing, corrupt, or incomplete
+remote state fails explicitly.
+
+If replication ever started and report is incomplete, the old replication and
+report attempt is not checkpointed. It is archived under
+`resume_history/resume_<NNN>/` together with its rendered prompts and copies of
+codebase outputs cited by its replication log; `path_mapping.json` records those
+copies. Canonical replication/report paths are recreated empty, both stages are
+invalidated, and replication restarts at plan step 1. If replacement occurs
+before replication starts, codegen and downstream stages are invalidated with
+an `infrastructure_resume` checkpoint while the prepared local codebase remains.
+A reused instance keeps the existing earlier-stage checkpoint. Cloud-drive runs
+invoke the idempotent `cloud-pull` before every replication attempt.
 
 The audit checkpoint records `audited_codegen_attempt`, `verdict`, `report_path`,
 and `rewrite_rounds_used`. A completed verdict for the current codegen attempt is
@@ -92,9 +114,13 @@ rewrite. A persisted fourth FAIL remains terminal on resume. When audit-driven
 codegen supersedes a legacy completed implementation, downstream plan,
 replication, and report stages are invalidated and rerun.
 
-Failure cleanup releases the current cloud instance. On an explicit resume,
-codegen creates at most one replacement only after the state proves the old
-instance was released, then rematerializes the dataset. The provider script
-archives non-secret selection, cloud state, and release time in instance
-history. An unreleased instance or failed cleanup blocks another rental. A
-completed run may validate its released final state without renting again.
+Replication plans end by downloading and validating required outputs and then
+powering off, not releasing, remote compute. Orchestration repeats that
+idempotent power-off after replication and on every pre-report failure. After
+all report artifacts validate and the pipeline is marked completed, the CLI
+releases the instance. A final release failure leaves the run completed and
+records `cleanup_warning` in the manifest; reopening that completed run does not
+retry release automatically. The only pre-report release is reconciliation of
+an SSH-unreachable old instance before its single replacement. Auto Research
+retains its existing lifecycle. Legacy stored plans are not rewritten; before
+resuming one, its old release step must be changed manually to power-off.

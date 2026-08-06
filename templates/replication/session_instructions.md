@@ -214,14 +214,12 @@ fix the issue before moving on.
 
 ### Resume an interrupted attempt
 
-If `{{ replication_dir }}/replication_log.json` already exists, treat it as a
-partial checkpoint, not as proof that the stage is complete. Validate the
-longest ordered prefix of logged plan steps against the current plan and verify
-that every cited output file still exists. Preserve successful steps in that
-valid prefix and continue from the first missing, failed, mismatched, or
-artifact-less result-producing step. Rerun that step and all later steps. Never
-skip work merely because an output filename exists, and never discard valid
-earlier evidence when continuing.
+Every invocation of this stage is a complete replication attempt. Begin with
+the first plan step and execute the entire plan even when the writable codebase
+still contains outputs from an older attempt. Orchestration has archived and
+cleared the prior canonical replication/report artifacts; do not treat any
+remaining codebase output as a checkpoint or skip work because a filename
+already exists.
 
 ## Evidence Collection
 
@@ -284,5 +282,16 @@ Routine setup (installing declared dependencies, activating a venv) does not nee
 The example shows the required core fields. Add any other environment metadata
 needed to make the run auditable, such as an R version, operating-system
 details, CPU/RAM capacity, CUDA details, or other relevant package versions.
+
+## Remote shutdown
+
+When the plan uses remote compute, download and locally validate every required
+result, log, exit-status record, and evidence artifact before its final step.
+Then execute the provider adapter's reviewed power-off action using
+`{{ computation_provider_state_path }}`. Do not call release: the instance must
+remain recoverable through report generation, and orchestration releases it
+only after the completed report has been validated. Before returning after a
+failed remote attempt, preserve available evidence and make the same bounded,
+idempotent power-off call; surface any shutdown failure.
 
 Begin execution now.

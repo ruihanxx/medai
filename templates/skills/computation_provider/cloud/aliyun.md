@@ -103,11 +103,12 @@ one complete new download. Never use a wildcard, an unresolved variable, or an
 unvalidated path for cleanup. If ownership or paths do not match the fixed
 mapping, fail without deleting anything.
 
-Every error exits nonzero so orchestration can release the current-run instance.
-Do not continue locally or rent a replacement until release is confirmed. On a
-later explicit resume, follow the AutoDL reference's instance-history rule.
-The provider script binds a replacement to the run manifest's current
-`resume_count` and refuses another replacement for that same manual resume.
+Every error exits nonzero so orchestration can power off the current-run
+instance. Do not continue locally or rent a replacement from this cloud-drive
+procedure. On a later explicit resume, orchestration follows the AutoDL
+reference's reconciliation and instance-history rules. The provider script
+binds a replacement to the run manifest's current `resume_count` and refuses
+another replacement for that same manual resume.
 
 ## Official Guarantees and Private Assumption
 

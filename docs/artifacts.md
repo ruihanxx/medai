@@ -28,6 +28,12 @@ runs/<run_id>/
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
 │   └── audit_attempt_001.md
+├── resume_history/resume_001/  # only after a replicate/report rollback
+│   ├── replication/
+│   ├── report/
+│   ├── prompts/
+│   ├── referenced_codebase_outputs/
+│   └── path_mapping.json
 ├── system_maintenance/dataset/patch.json
 ├── system_maintenance/skills/corrections.json
 └── remote_compute/instance.json
@@ -123,7 +129,11 @@ existing `data` and `data_source` behavior. Secrets used to access AutoPanel or
 the drive are never persistent artifacts.
 
 For AutoDL, `remote_compute/instance.json` stores current non-secret resource
-selection and lifecycle fields under `provider_state`. Cloud runs additionally
+selection and lifecycle fields under `provider_state`, including the actual
+`gpu_spec_uuid`, `gpu_count`, `image_uuid`, an optional unused
+`fallback_gpu_spec_uuid`, and the replacement's `created_for_resume_count`.
+Power-off leaves top-level `released` false; only successful irreversible
+release changes it to true. Cloud runs additionally
 store `provider_state.cloud_drive` with provider, dataset, fixed source,
 staging, and target paths, ownership marker, status and timestamps, task ID,
 and remote/local file-count and byte-total aggregates. A released instance
@@ -131,3 +141,15 @@ retained across an explicit resume moves these non-secret fields and its release
 time into `provider_state.instance_history` before one replacement becomes
 current. Passwords, password hashes, Jupyter or AutoPanel tokens, and drive
 credentials are never state fields.
+
+Each replication rollback archive is immutable by convention: an existing
+`resume_<NNN>` target makes resume fail rather than overwrite history.
+`path_mapping.json` records the original logged codebase output, its resolved
+source, its archived copy, unresolved log references, and any partial-log parse
+error. The canonical `replication/` and `report/` directories are recreated
+empty for the new attempt; codebase and plan artifacts remain canonical.
+
+When final release fails, `manifest.json.cleanup_warning` records
+`recorded_at`, `operation`, and the non-secret error while overall status stays
+`completed`. The canonical instance state remains the input for a deliberate
+manual release; a later validation-only invocation does not retry it.

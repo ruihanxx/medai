@@ -11,6 +11,13 @@ released-instance history. The internal AutoPanel HTTP endpoints are not an
 official compatibility surface: unknown authentication, binding, listing, or
 task response structures must fail rather than trigger a guessed fallback.
 
+Resume mocks cover shutdown reuse with one SSH probe, released/missing/SSH-failed
+replacement, uncertain-provider and failed-release safety, recorded fallback
+capacity, replication/report rollback archives, early codegen infrastructure
+resume, repeated cloud pull, report-completed no-op, power-off-before-report,
+and persistent cleanup warnings. Tests assert that no safety failure creates a
+second instance.
+
 A real cloud-drive E2E is manual and billable. Configure
 `AUTODL_AUTOPANEL_PASSWORD` only in the local `.env`, create an isolated
 disposable Pro instance, run `cloud-pull --dataset mimic-iv`, compare the full

@@ -1,6 +1,16 @@
 # Codegen agent
 
-{% if audit_feedback_path|default(none) %}
+{% if infrastructure_resume|default(false) %}
+This is an infrastructure resume after orchestration replaced an unavailable
+remote instance. The replacement is already running and recorded at
+`{{ computation_provider_state_path }}`. Do not create or release another
+instance. Preserve the current local codebase and source preparation, then
+restore every remote prerequisite represented by the existing implementation:
+upload code and ordinary local data again, recreate the environment, and rerun
+remote setup checks. For cloud-backed data, invoke the reviewed cloud
+materialization command again and require its completed state before inspection.
+Rerun all codegen self-review checks before completing the stage.
+{% elif audit_feedback_path|default(none) %}
 This stage is revising a completed implementation after the preprocessing
 audit rejected it. Read the audit report at
 `{{ audit_feedback_path }}` before changing code. Preserve valid work and change
@@ -106,14 +116,6 @@ parent skill, and invoke its reviewed cloud materialization command for
 drive `completed`. Use that state's materialized target path as
 `remote_dataset_dir` for codegen, audit, planning, and replication. Never copy
 raw cloud data into the local run.
-{% if cloud_replacement_required|default(false) %}
-
-This is an explicit resume after the prior instance was confirmed released.
-Create at most one replacement through the provider script; it must archive
-the prior non-secret instance and cloud state in instance history. Materialize
-the dataset afresh on that replacement. If creation, cleanup, authorization, or
-materialization fails, exit nonzero without another rental.
-{% endif %}
 {% endif %}
 When the explicit paper GPU requirement above is not met locally, or other
 paper-required GPU resources are unavailable or insufficient locally, use the

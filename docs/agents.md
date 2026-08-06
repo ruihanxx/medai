@@ -60,12 +60,13 @@
   skill's shared SSH helper owns provider-independent key-first authentication,
   password fallback, command execution, and file transfer.
   Only instances created by the current run may be automatically powered off or
-  released. After replication finishes and required outputs are transferred,
-  the replicate stage must release them; host cleanup retries release on
-  failure paths. A provider's already-shut-down response to the release
-  power-off precondition is idempotent: cleanup waits for the provider to
-  report shutdown, then proceeds to release and writes `released` only after
-  that succeeds. The generic
+  released. After replication finishes and required outputs are transferred and
+  validated, its final plan step powers off the instance without releasing it;
+  host orchestration repeats the idempotent power-off after the stage and on
+  pre-report failures. Only after report validation and pipeline completion may
+  the CLI release it. An unreachable old instance may be released earlier only
+  during bounded resume reconciliation and only before creating its single
+  replacement. The generic
   `remote_compute/instance.json` records the selected provider and common
   lifecycle state; each provider reference defines its provider-specific
   selection procedure, operations, and state.
@@ -97,3 +98,9 @@
   conflicts with the reference is recorded for review in
   `system_maintenance/skills/corrections.json`; it does not edit repository
   skills during the run.
+- Explicit Replicate resume reconciliation is orchestration-owned, not an agent
+  action. Codegen receives `infrastructure_resume` only when a replacement before
+  replication requires re-upload and environment reconstruction. A resumed
+  replication/report attempt is archived and restarted from replication step 1;
+  agents must not reuse its old step log as a checkpoint. Auto Research agents
+  retain their existing behavior.

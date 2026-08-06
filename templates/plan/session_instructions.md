@@ -79,7 +79,8 @@ Explore the repository and generate a replication plan — a sequence of concret
 2. **Environment setup** — what to install, any system requirements
 3. **Running the code** — training scripts, experiments, evaluations
 4. **Collecting outputs** — what files / metrics each step produces
-5. **Remote server termination** (if required) - terminate instance to avoid additional charge.
+5. **Remote server shutdown** (if required) - after downloading and validating
+   every required local result, power off the instance without releasing it.
 
 For each step, provide:
 - A clear description of what to do
@@ -180,6 +181,8 @@ If replication requires remote compute, add this top-level object alongside
 ```
 Only `state_path`, `remote_working_dir`, and `remote_dataset_dir` are required
 and statically validated. Additional provider and execution fields are allowed.
-Also add a step in `"steps"` to terminate and release the instance.
+Make the final `"steps"` entry download and validate all required local outputs,
+then invoke the provider adapter's reviewed power-off action. It must not release
+the instance; orchestration releases only after the report is complete.
 
 Begin your analysis now.
