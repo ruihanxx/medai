@@ -95,7 +95,7 @@ Cloud-drive configuration comes only from the environment. `MEDAI_DRIVE_PROVIDER
 defaults to `aliyun`, which is currently the only accepted value;
 `AUTODL_AUTOPANEL_PASSWORD` is required. The password is never placed in the
 manifest, command arguments, prompts, or logs. `AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS`
-defaults to 1800, and `AUTODL_CLOUDDRIVE_GPU_SPEC` defaults to `v-32g-p` when
+defaults to 3600, and `AUTODL_CLOUDDRIVE_GPU_SPEC` defaults to `v-32g-p` when
 the paper provides no GPU requirement. `AUTODL_TOKEN` and `AUTODL_IMAGE_UUID`
 remain required because cloud-drive mode always uses AutoDL.
 

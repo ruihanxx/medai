@@ -64,7 +64,7 @@ class RunConfig:
                     + ", ".join(missing)
                 )
             timeout_value = _environment_value(
-                "AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS", "1800"
+                "AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS", "3600"
             )
             try:
                 timeout_seconds = int(timeout_value)
