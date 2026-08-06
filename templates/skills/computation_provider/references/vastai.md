@@ -119,3 +119,10 @@ adapter refuses normal release before report and pipeline completion. See
 <https://docs.vast.ai/api-reference/instances/manage-instance>,
 <https://docs.vast.ai/api-reference/instances/destroy-instance>, and
 <https://docs.vast.ai/guides/instances/storage/types>.
+
+## Google Drive
+
+For a cloud-backed run, also set `MEDAI_DRIVE_PROVIDER=google-drive`, configure
+`VASTAI_GOOGLE_DRIVE_CONNECTION_ID`, and read `../cloud/google-drive.md` before
+creating or inspecting a dataset. Invoke only the adapter's `cloud-pull`
+command; its completed target is the sole raw-data location for the remote plan.

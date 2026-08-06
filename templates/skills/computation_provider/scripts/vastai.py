@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -22,6 +23,59 @@ NO_INVENTORY_MARKERS = (
     "already rented",
     "offer is no longer available",
 )
+CLOUD_COPY_TIMEOUT_SECONDS = 3600
+INVENTORY_FILENAME = "cloud-inventory.v1.json"
+INVENTORY_PROGRAM = r'''
+import hashlib
+import json
+import os
+import stat
+import sys
+
+root = os.path.realpath(sys.argv[-2])
+dataset = sys.argv[-1]
+if not os.path.isdir(root):
+    raise SystemExit("inventory root is missing")
+files = []
+for current, directories, names in os.walk(root, followlinks=False):
+    directories.sort()
+    names.sort()
+    for directory in directories:
+        if os.path.islink(os.path.join(current, directory)):
+            raise SystemExit("inventory does not permit symlink directories")
+    for name in names:
+        path = os.path.join(current, name)
+        mode = os.lstat(path).st_mode
+        if not stat.S_ISREG(mode):
+            raise SystemExit("inventory permits regular files only")
+        digest = hashlib.sha256()
+        with open(path, "rb") as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+        files.append(
+            {
+                "path": os.path.relpath(path, root).replace(os.sep, "/"),
+                "size": os.path.getsize(path),
+                "sha256": digest.hexdigest(),
+            }
+        )
+if not files:
+    raise SystemExit("inventory does not permit an empty dataset")
+print(
+    json.dumps(
+        {
+            "version": 1,
+            "algorithm": "sha256",
+            "dataset": dataset,
+            "files": files,
+            "file_count": len(files),
+            "total_bytes": sum(item["size"] for item in files),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+)
+'''
 
 
 class VastApiError(RuntimeError):
@@ -481,6 +535,14 @@ def create_instance(args: argparse.Namespace) -> str:
         provider_state["instance_history"] = history
     if resume_count is not None:
         provider_state["created_for_resume_count"] = resume_count
+    if previous is not None:
+        prior_cloud = previous["provider_state"].get("cloud_drive")
+        if isinstance(prior_cloud, dict):
+            cloud = dict(prior_cloud)
+            cloud["completed"] = False
+            cloud["status"] = "replacement_pending"
+            cloud.pop("materialized", None)
+            provider_state["cloud_drive"] = cloud
     state = {
         "provider": "vastai",
         "created_by_run": True,
@@ -790,8 +852,307 @@ def reconcile_instance(args: argparse.Namespace) -> dict[str, Any]:
     return {"replaced": True, "instance_id": instance_id, "status": "running"}
 
 
+def _safe_dataset(value: str) -> str:
+    dataset = value.strip()
+    if (
+        not dataset
+        or dataset in {".", ".."}
+        or len(dataset) > 128
+        or not dataset[0].isalnum()
+        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for character in dataset)
+    ):
+        raise RuntimeError("cloud-pull requires one safe dataset directory name")
+    return dataset
+
+
+def _cloud_paths(state: dict[str, Any], dataset: str) -> tuple[str, str]:
+    run_token = _required_string(state["provider_state"], "run_token", "provider_state")
+    root = f"/workspace/medai/{run_token}"
+    return f"{root}/.staging/{dataset}", f"{root}/data/{dataset}"
+
+
+def _inventory_path(state_path: Path) -> Path:
+    return state_path.with_name(INVENTORY_FILENAME)
+
+
+def _inventory_digest(inventory: dict[str, Any]) -> str:
+    encoded = json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _valid_inventory_path(value: Any) -> bool:
+    if not isinstance(value, str) or not value or value.startswith("/") or "\\" in value:
+        return False
+    parts = value.split("/")
+    return all(part not in {"", ".", ".."} for part in parts)
+
+
+def _validate_inventory(value: Any, dataset: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise RuntimeError("Cloud inventory must be a JSON object")
+    if value.get("version") != 1 or value.get("algorithm") != "sha256" or value.get("dataset") != dataset:
+        raise RuntimeError("Cloud inventory has an unsupported identity")
+    files = value.get("files")
+    if not isinstance(files, list) or not files:
+        raise RuntimeError("Cloud inventory must contain at least one file")
+    normalized: list[dict[str, Any]] = []
+    paths: list[str] = []
+    total_bytes = 0
+    for item in files:
+        if not isinstance(item, dict) or not _valid_inventory_path(item.get("path")):
+            raise RuntimeError("Cloud inventory contains an invalid relative path")
+        size = item.get("size")
+        digest = item.get("sha256")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise RuntimeError("Cloud inventory contains an invalid size")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise RuntimeError("Cloud inventory contains an invalid SHA-256 digest")
+        path = item["path"]
+        paths.append(path)
+        total_bytes += size
+        normalized.append({"path": path, "size": size, "sha256": digest})
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        raise RuntimeError("Cloud inventory paths must be sorted and unique")
+    if value.get("file_count") != len(normalized) or value.get("total_bytes") != total_bytes:
+        raise RuntimeError("Cloud inventory totals do not match its files")
+    return {
+        "version": 1,
+        "algorithm": "sha256",
+        "dataset": dataset,
+        "files": normalized,
+        "file_count": len(normalized),
+        "total_bytes": total_bytes,
+    }
+
+
+def _load_inventory(path: Path, dataset: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"Cloud inventory is missing: {path}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Cloud inventory is unreadable or invalid: {path}") from exc
+    return _validate_inventory(value, dataset)
+
+
+def _write_inventory(path: Path, inventory: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(path)
+
+
+def _remote_inventory(state: dict[str, Any], path: str, dataset: str) -> dict[str, Any]:
+    output = remote_exec(
+        state,
+        ["python3", "-c", INVENTORY_PROGRAM, "medai-cloud-inventory", path, dataset],
+    )
+    try:
+        return _validate_inventory(json.loads(output), dataset)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Remote cloud inventory was not valid JSON") from exc
+
+
+def _drive_connection_id() -> str:
+    selected = _environment("VASTAI_GOOGLE_DRIVE_CONNECTION_ID")
+    payload = request("GET", "/api/v0/users/cloud_integrations")
+    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+        raise RuntimeError("Vast cloud-connection listing returned an unsupported response structure")
+    matches = [item for item in payload if str(item.get("id")) == selected]
+    if len(matches) != 1 or matches[0].get("cloud_type") != "drive":
+        raise RuntimeError("VASTAI_GOOGLE_DRIVE_CONNECTION_ID must identify exactly one Google Drive connection")
+    return selected
+
+
+def _update_cloud(state_path: Path, state: dict[str, Any], cloud: dict[str, Any], status: str) -> None:
+    cloud["status"] = status
+    cloud["completed"] = status == "completed"
+    cloud["updated_at_unix"] = int(time.time())
+    state["provider_state"]["cloud_drive"] = cloud
+    save_state(state_path, state)
+
+
+def _cloud_state(
+    state_path: Path, state: dict[str, Any], dataset: str, connection_id: str
+) -> dict[str, Any]:
+    source_path = f"medai/{dataset}"
+    staging_path, target_path = _cloud_paths(state, dataset)
+    prior = state["provider_state"].get("cloud_drive")
+    if prior is None:
+        cloud = {
+            "drive": "google-drive",
+            "dataset": dataset,
+            "source_path": source_path,
+            "connection_id": connection_id,
+            "staging_path": staging_path,
+            "target_path": target_path,
+            "owned_paths": True,
+            "inventory_path": INVENTORY_FILENAME,
+            "started_at_unix": int(time.time()),
+        }
+        _update_cloud(state_path, state, cloud, "new")
+        return cloud
+    if not isinstance(prior, dict):
+        raise RuntimeError("Vast cloud-drive state has an invalid structure")
+    expected = {
+        "drive": "google-drive",
+        "dataset": dataset,
+        "source_path": source_path,
+        "connection_id": connection_id,
+        "staging_path": staging_path,
+        "target_path": target_path,
+        "owned_paths": True,
+        "inventory_path": INVENTORY_FILENAME,
+    }
+    if any(prior.get(name) != value for name, value in expected.items()):
+        raise RuntimeError("Vast cloud-drive state is inconsistent with this run configuration")
+    if not isinstance(prior.get("completed"), bool) or not isinstance(prior.get("status"), str):
+        raise RuntimeError("Vast cloud-drive state has an invalid completion status")
+    return prior
+
+
+def _wait_for_cloud_copy(state: dict[str, Any], cloud: dict[str, Any]) -> str:
+    started_at = cloud.get("copy_started_at_unix")
+    if isinstance(started_at, bool) or not isinstance(started_at, int) or started_at <= 0:
+        raise RuntimeError("Vast cloud-copy state is missing its start time")
+    remaining = CLOUD_COPY_TIMEOUT_SECONDS - max(0, int(time.time()) - started_at)
+    deadline = time.monotonic() + max(0, remaining)
+    while time.monotonic() < deadline:
+        instance = show_instance(state)
+        message = instance.get("status_msg")
+        text = message.casefold() if isinstance(message, str) else ""
+        if "cloud copy operation finished" in text:
+            return "completed"
+        if any(marker in text for marker in ("error", "failed", "cancelled", "canceled")):
+            return "failed"
+        time.sleep(30)
+    return "timeout"
+
+
+def _cleanup_cloud_staging(state: dict[str, Any], cloud: dict[str, Any]) -> None:
+    dataset = cloud.get("dataset")
+    if not isinstance(dataset, str):
+        raise RuntimeError("Cloud-drive cleanup state is missing its dataset")
+    expected_staging, expected_target = _cloud_paths(state, dataset)
+    if (
+        cloud.get("owned_paths") is not True
+        or cloud.get("staging_path") != expected_staging
+        or cloud.get("target_path") != expected_target
+    ):
+        raise RuntimeError("Cloud-drive cleanup cannot prove ownership of its paths")
+    remote_exec(state, ["rm", "-rf", "--", expected_staging])
+
+
+def _cancel_cloud_copy(state: dict[str, Any], cloud: dict[str, Any]) -> None:
+    instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
+    _successful(request("DELETE", "/api/v0/commands/rclone/", {"dst_id": instance_id}))
+    cloud["cancel_confirmed"] = True
+    _cleanup_cloud_staging(state, cloud)
+
+
+def _start_cloud_copy(state_path: Path, state: dict[str, Any], cloud: dict[str, Any]) -> None:
+    cloud["copy_started_at_unix"] = int(time.time())
+    cloud["copy_requested"] = True
+    cloud.pop("materialized", None)
+    _update_cloud(state_path, state, cloud, "requesting")
+    instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
+    _successful(
+        request(
+            "POST",
+            "/api/v0/commands/rclone/",
+            {
+                "instance_id": instance_id,
+                "src": cloud["source_path"],
+                "dst": cloud["staging_path"],
+                "selected": cloud["connection_id"],
+                "transfer": "Cloud To Instance",
+                "flags": [],
+            },
+        )
+    )
+    _update_cloud(state_path, state, cloud, "copying")
+
+
+def _complete_cloud_pull(
+    state_path: Path, state: dict[str, Any], cloud: dict[str, Any], dataset: str
+) -> str:
+    inventory_path = _inventory_path(state_path)
+    expected_inventory = _load_inventory(inventory_path, dataset) if inventory_path.is_file() else None
+    staging_path = cloud["staging_path"]
+    target_path = cloud["target_path"]
+    if cloud.get("materialized") is True:
+        final_inventory = _remote_inventory(state, target_path, dataset)
+    else:
+        staging_inventory = _remote_inventory(state, staging_path, dataset)
+        if expected_inventory is not None and staging_inventory != expected_inventory:
+            _update_cloud(state_path, state, cloud, "failed")
+            raise RuntimeError("Google Drive dataset inventory changed from the run baseline")
+        remote_exec(state, ["mkdir", "-p", target_path.rsplit("/", 1)[0]])
+        remote_exec(state, ["test", "!", "-e", target_path])
+        remote_exec(state, ["mv", "--", staging_path, target_path])
+        cloud["materialized"] = True
+        _update_cloud(state_path, state, cloud, "verifying")
+        final_inventory = _remote_inventory(state, target_path, dataset)
+    if expected_inventory is not None and final_inventory != expected_inventory:
+        _update_cloud(state_path, state, cloud, "failed")
+        raise RuntimeError("Google Drive materialization changed from the run baseline")
+    remote_exec(state, ["chmod", "-R", "a-w", "--", target_path])
+    _write_inventory(inventory_path, final_inventory)
+    cloud["inventory_sha256"] = _inventory_digest(final_inventory)
+    cloud["file_count"] = final_inventory["file_count"]
+    cloud["total_bytes"] = final_inventory["total_bytes"]
+    cloud["completed_at_unix"] = int(time.time())
+    _update_cloud(state_path, state, cloud, "completed")
+    return target_path
+
+
 def cloud_pull(args: argparse.Namespace) -> None:
-    raise RuntimeError("Vast Google Drive support is not configured in this adapter revision")
+    dataset = _safe_dataset(args.dataset)
+    drive_provider = os.environ.get("MEDAI_DRIVE_PROVIDER", "google-drive").strip().strip("'\"").casefold()
+    if drive_provider != "google-drive":
+        raise RuntimeError("MEDAI_DRIVE_PROVIDER must be 'google-drive'")
+    state = load_state(args.state)
+    if state.get("released") is True:
+        raise RuntimeError("Vast instance has already been released")
+    connection_id = _drive_connection_id()
+    cloud = _cloud_state(args.state, state, dataset, connection_id)
+    inventory_path = _inventory_path(args.state)
+    if cloud["completed"]:
+        expected_inventory = _load_inventory(inventory_path, dataset)
+        if cloud.get("inventory_sha256") != _inventory_digest(expected_inventory):
+            raise RuntimeError("Vast cloud-drive state does not match its local inventory")
+        observed_inventory = _remote_inventory(state, cloud["target_path"], dataset)
+        if observed_inventory != expected_inventory:
+            _update_cloud(args.state, state, cloud, "failed")
+            raise RuntimeError("Google Drive materialization changed from the run baseline")
+        remote_exec(state, ["chmod", "-R", "a-w", "--", cloud["target_path"]])
+        print(cloud["target_path"])
+        return
+    if cloud.get("status") == "failed":
+        _cleanup_cloud_staging(state, cloud)
+        _start_cloud_copy(args.state, state, cloud)
+    elif cloud.get("status") in {"new", "replacement_pending"}:
+        remote_exec(state, ["test", "!", "-e", cloud["target_path"]])
+        _start_cloud_copy(args.state, state, cloud)
+    elif cloud.get("status") == "verifying":
+        print(_complete_cloud_pull(args.state, state, cloud, dataset))
+        return
+    elif cloud.get("status") not in {"requesting", "copying"}:
+        raise RuntimeError("Vast cloud-drive state has an unsupported status")
+    copy_status = _wait_for_cloud_copy(state, cloud)
+    if copy_status == "timeout":
+        _cancel_cloud_copy(state, cloud)
+        _update_cloud(args.state, state, cloud, "failed")
+        raise RuntimeError("Vast Google Drive cloud copy timed out and was cancelled")
+    if copy_status == "failed":
+        _update_cloud(args.state, state, cloud, "failed")
+        raise RuntimeError("Vast Google Drive cloud copy failed")
+    _update_cloud(args.state, state, cloud, "verifying")
+    print(_complete_cloud_pull(args.state, state, cloud, dataset))
 
 
 def build_parser() -> argparse.ArgumentParser:

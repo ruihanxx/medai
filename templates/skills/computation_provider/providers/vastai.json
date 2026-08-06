@@ -24,8 +24,17 @@
     "VASTAI_MIN_CPU_RAM_GB",
     "VASTAI_MIN_RELIABILITY"
   ],
-  "drives": {},
-  "default_drive": null,
+  "drives": {
+    "google-drive": {
+      "reference": "cloud/google-drive.md",
+      "source_template": "medai/{dataset}",
+      "environment": [
+        {"name": "VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "secret": false, "required": true}
+      ],
+      "configuration_fingerprint": ["VASTAI_GOOGLE_DRIVE_CONNECTION_ID"]
+    }
+  },
+  "default_drive": "google-drive",
   "actions": {
     "validate-state": 60,
     "status": 120,
