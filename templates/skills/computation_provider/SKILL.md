@@ -137,7 +137,11 @@ Treat creation as a billable side effect and release as irreversible. Never
 release an instance unless its state explicitly proves that the current run
 created it. Transfer all required results, logs, and evidence before release.
 
-During the `replicate` stage, release every current-run instance immediately
-after all remote experiments finish and their required outputs are transferred.
-Attempt release on failure paths as well. Release must be idempotent or guarded by
-persisted release state so cleanup never targets an already released instance.
+During the `replicate` stage, power off every current-run instance after all
+remote experiments finish and their required outputs are transferred. Attempt
+the same idempotent power-off on failure paths. Release only after the report
+artifacts have been validated and the pipeline is completed. The sole earlier
+release case is resume reconciliation: an instance that is still recorded by
+the provider but fails the one harmless SSH probe must be powered off and
+successfully released before one replacement may be created. Persisted lifecycle
+state must guard every release and replacement.

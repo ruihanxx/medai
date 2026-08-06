@@ -8,6 +8,8 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).parents[1]
 AUTODL_SCRIPT = (
     ROOT / "templates" / "skills" / "computation_provider" / "scripts" / "autodl.py"
@@ -201,6 +203,9 @@ def test_autodl_skill_help_does_not_call_api():
     )
     assert completed.returncode == 0
     assert "create" in completed.stdout
+    assert "power-on" in completed.stdout
+    assert "power-off" in completed.stdout
+    assert "reconcile" in completed.stdout
     assert "release" in completed.stdout
     create_help = subprocess.run(
         [
@@ -367,10 +372,52 @@ def test_autodl_create_tries_one_stronger_gpu_after_no_inventory(tmp_path: Path)
     assert completed.returncode == 0, completed.stderr
     state = json.loads((tmp_path / "instance.json").read_text(encoding="utf-8"))
     assert state["provider_state"]["gpu_spec_uuid"] == "v-48g"
+    assert "fallback_gpu_spec_uuid" not in state["provider_state"]
     assert [json.loads(body)["gpu_spec_uuid"] for _, _, body in requests[:2]] == [
         "v-32g-p",
         "v-48g",
     ]
+
+
+def test_autodl_create_records_unused_resume_fallback(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    with autodl_api(
+        {
+            ("POST", "/api/v1/dev/instance/pro/create"): {
+                "code": "Success",
+                "data": "primary-instance",
+            },
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "Success",
+                "data": "running",
+            },
+        }
+    ) as (base_url, _):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "create",
+                "--gpu-spec",
+                "v-32g-p",
+                "--fallback-gpu-spec",
+                "v-48g",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": "test-token",
+                "AUTODL_IMAGE_UUID": "base-image-test",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["provider_state"]["fallback_gpu_spec_uuid"] == "v-48g"
 
 
 def test_autodl_create_archives_released_instance_on_resume(tmp_path: Path):
@@ -488,6 +535,458 @@ def test_autodl_create_allows_only_one_replacement_per_manifest_resume(tmp_path:
 
     assert completed.returncode != 0
     assert "already created for this manual resume" in completed.stderr
+
+
+def test_autodl_reconcile_powers_on_and_reuses_connectable_instance(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "sleeping-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "fallback_gpu_spec_uuid": "v-48g",
+                    "gpu_count": 1,
+                    "image_uuid": "image",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment, _ = fake_ssh_environment(tmp_path, probe_exit=0)
+    with autodl_api(
+        {
+            ("GET", "/api/v1/dev/instance/pro/status"): [
+                {"code": "Success", "data": "shutdown"},
+                {"code": "Success", "data": "running"},
+            ],
+            ("POST", "/api/v1/dev/instance/pro/power_on"): {"code": "Success"},
+            ("GET", "/api/v1/dev/instance/pro/snapshot"): {
+                "code": "Success",
+                "data": {"proxy_host": "remote.example", "ssh_port": 2200},
+            },
+        }
+    ) as (base_url, requests):
+        environment.update(
+            {"AUTODL_TOKEN": "test-token", "AUTODL_API_BASE_URL": base_url}
+        )
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "reconcile",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["replaced"] is False
+    assert [(method, path.split("?", 1)[0]) for method, path, _ in requests] == [
+        ("GET", "/api/v1/dev/instance/pro/status"),
+        ("POST", "/api/v1/dev/instance/pro/power_on"),
+        ("GET", "/api/v1/dev/instance/pro/status"),
+        ("GET", "/api/v1/dev/instance/pro/snapshot"),
+    ]
+
+
+def test_autodl_reconcile_releases_unconnectable_instance_before_replacement(
+    tmp_path: Path,
+):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "broken-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "fallback_gpu_spec_uuid": "v-48g",
+                    "gpu_count": 2,
+                    "image_uuid": "image",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment, _ = fake_ssh_environment(tmp_path, probe_exit=255)
+    with autodl_api(
+        {
+            ("GET", "/api/v1/dev/instance/pro/status"): [
+                {"code": "Success", "data": "running"},
+                {"code": "Success", "data": "running"},
+                {"code": "Success", "data": "shutdown"},
+                {"code": "Success", "data": "running"},
+            ],
+            ("GET", "/api/v1/dev/instance/pro/snapshot"): {
+                "code": "Success",
+                "data": {"proxy_host": "remote.example", "ssh_port": 2200},
+            },
+            ("POST", "/api/v1/dev/instance/pro/power_off"): {"code": "Success"},
+            ("POST", "/api/v1/dev/instance/pro/release"): {"code": "Success"},
+            ("POST", "/api/v1/dev/instance/pro/create"): {
+                "code": "Success",
+                "data": "replacement-instance",
+            },
+        }
+    ) as (base_url, requests):
+        environment.update(
+            {"AUTODL_TOKEN": "test-token", "AUTODL_API_BASE_URL": base_url}
+        )
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "reconcile",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["replaced"] is True
+    request_paths = [(method, path.split("?", 1)[0]) for method, path, _ in requests]
+    assert request_paths.index(("POST", "/api/v1/dev/instance/pro/release")) < request_paths.index(
+        ("POST", "/api/v1/dev/instance/pro/create")
+    )
+    create_body = next(
+        json.loads(body)
+        for method, path, body in requests
+        if method == "POST" and path == "/api/v1/dev/instance/pro/create"
+    )
+    assert create_body["gpu_spec_uuid"] == "v-32g-p"
+    assert create_body["req_gpu_amount"] == 2
+    assert create_body["image_uuid"] == "image"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["provider_state"]["instance_uuid"] == "replacement-instance"
+    assert state["provider_state"]["fallback_gpu_spec_uuid"] == "v-48g"
+
+
+def test_autodl_reconcile_replaces_provider_confirmed_missing_instance(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "missing-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "gpu_count": 1,
+                    "image_uuid": "image",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with autodl_api(
+        {
+            ("GET", "/api/v1/dev/instance/pro/status"): [
+                {"code": "NotFound", "msg": "实例不存在"},
+                {"code": "Success", "data": "running"},
+            ],
+            ("POST", "/api/v1/dev/instance/pro/create"): {
+                "code": "Success",
+                "data": "replacement-instance",
+            },
+        }
+    ) as (base_url, requests):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "reconcile",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": "test-token",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["replaced"] is True
+    assert not [path for method, path, _ in requests if method == "POST" and "release" in path]
+
+
+def test_autodl_reconcile_does_not_replace_on_uncertain_provider_error(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "uncertain-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "gpu_count": 1,
+                    "image_uuid": "image",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with autodl_api(
+        {
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "ServiceUnavailable",
+                "msg": "temporary API timeout",
+            },
+        }
+    ) as (base_url, requests):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "reconcile",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": "test-token",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode != 0
+    assert [(method, path.split("?", 1)[0]) for method, path, _ in requests] == [
+        ("GET", "/api/v1/dev/instance/pro/status")
+    ]
+    assert json.loads(state_path.read_text(encoding="utf-8"))["released"] is False
+
+
+def test_autodl_reconcile_does_not_create_when_old_release_fails(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "instance_uuid": "broken-instance",
+                    "gpu_spec_uuid": "v-32g-p",
+                    "gpu_count": 1,
+                    "image_uuid": "image",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    environment, _ = fake_ssh_environment(tmp_path, probe_exit=255)
+    with autodl_api(
+        {
+            ("GET", "/api/v1/dev/instance/pro/status"): [
+                {"code": "Success", "data": "running"},
+                {"code": "Success", "data": "running"},
+                {"code": "Success", "data": "shutdown"},
+            ],
+            ("GET", "/api/v1/dev/instance/pro/snapshot"): {
+                "code": "Success",
+                "data": {"proxy_host": "remote.example", "ssh_port": 2200},
+            },
+            ("POST", "/api/v1/dev/instance/pro/power_off"): {"code": "Success"},
+            ("POST", "/api/v1/dev/instance/pro/release"): {
+                "code": "ReleaseFailed",
+                "msg": "still attached",
+            },
+        }
+    ) as (base_url, requests):
+        environment.update(
+            {"AUTODL_TOKEN": "test-token", "AUTODL_API_BASE_URL": base_url}
+        )
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "reconcile",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+
+    assert completed.returncode != 0
+    request_paths = [(method, path.split("?", 1)[0]) for method, path, _ in requests]
+    assert ("POST", "/api/v1/dev/instance/pro/release") in request_paths
+    assert ("POST", "/api/v1/dev/instance/pro/create") not in request_paths
+    assert json.loads(state_path.read_text(encoding="utf-8"))["released"] is False
+
+
+@pytest.mark.parametrize("state_text", ["{", "[]"])
+def test_autodl_reconcile_rejects_corrupt_state_before_api(
+    tmp_path: Path,
+    state_text: str,
+):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(state_text, encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AUTODL_SCRIPT),
+            "reconcile",
+            "--state",
+            str(state_path),
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "AUTODL_TOKEN": "test-token",
+            "AUTODL_API_BASE_URL": "http://127.0.0.1:1",
+        },
+    )
+
+    assert completed.returncode != 0
+    assert "state" in completed.stderr.casefold()
+
+
+def test_autodl_reconcile_requires_recreation_fields_before_api_access(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": True,
+                "provider_state": {"instance_uuid": "old-instance"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AUTODL_SCRIPT),
+            "reconcile",
+            "--state",
+            str(state_path),
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "AUTODL_TOKEN": "test-token",
+            "AUTODL_API_BASE_URL": "http://127.0.0.1:1",
+        },
+    )
+
+    assert completed.returncode != 0
+    assert "missing: gpu_spec_uuid, gpu_count, image_uuid" in completed.stderr
+
+
+def test_autodl_release_refuses_incomplete_report(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    state_path.parent.mkdir()
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"stages": {"report_agents": {"status": "failed"}}}),
+        encoding="utf-8",
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"instance_uuid": "instance"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(AUTODL_SCRIPT),
+            "release",
+            "--state",
+            str(state_path),
+        ],
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "AUTODL_TOKEN": "test-token",
+            "AUTODL_API_BASE_URL": "http://127.0.0.1:1",
+        },
+    )
+
+    assert completed.returncode != 0
+    assert "before report completion" in completed.stderr
+
+
+def test_autodl_release_keeps_autoresearch_lifecycle_compatible(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    state_path.parent.mkdir()
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "inputs": {"workflow": "autoresearch"},
+                "stages": {"report_agents": {"status": "failed"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "autodl",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"instance_uuid": "instance"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with autodl_api(
+        {
+            ("GET", "/api/v1/dev/instance/pro/status"): {
+                "code": "Success",
+                "data": "shutdown",
+            },
+            ("POST", "/api/v1/dev/instance/pro/release"): {"code": "Success"},
+        }
+    ) as (base_url, _):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(AUTODL_SCRIPT),
+                "release",
+                "--state",
+                str(state_path),
+            ],
+            capture_output=True,
+            text=True,
+            env={
+                **os.environ,
+                "AUTODL_TOKEN": "test-token",
+                "AUTODL_API_BASE_URL": base_url,
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def _cloud_task(task_id: str, name: str, size: int, status: str) -> dict[str, object]:

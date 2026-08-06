@@ -31,8 +31,10 @@ Instance Pro operations and the exact behavior of `../scripts/autodl.py`.
   a reduced experiment when the required resource is unavailable.
 - Transfer all required outputs, logs, exit-status evidence, and artifacts to
   persistent run output before releasing the instance.
-- In the `replicate` stage, attempt release after all remote experiments finish
-  and also on every failure path. Surface cleanup failures explicitly.
+- In the `replicate` stage, power off after all remote experiments finish and on
+  every failure path. Release only after the report is validated and the
+  pipeline manifest records report completion, except when resume reconciliation
+  must release an unreachable old instance before creating its replacement.
 
 ## Local Configuration
 
@@ -191,6 +193,7 @@ After successful creation, the script writes:
   "provider_state": {
     "instance_uuid": "<provider-instance-uuid>",
     "gpu_spec_uuid": "<selected-pro-specification-id>",
+    "fallback_gpu_spec_uuid": "<unused-preselected-stronger-specification-id>",
     "gpu_count": 1,
     "image_uuid": "<selected-image-uuid>"
   }
@@ -200,7 +203,10 @@ After successful creation, the script writes:
 The top-level fields form the generic orchestration envelope. The AutoDL script
 owns the exact `provider_state` format and requires `instance_uuid`. It also
 records the selected GPU specification/count and non-secret image UUID for
-auditability. The instance UUID is sufficient for the script to fetch current
+auditability. When the primary GPU succeeds, it retains the distinct, unused
+preselected fallback as `fallback_gpu_spec_uuid`; when the fallback itself is
+selected, no further fallback is retained. The instance UUID is sufficient for
+the script to fetch current
 SSH host, port, and password from the snapshot API immediately before each
 connection or transfer. Do not persist the returned password or Jupyter token.
 Record the selection rationale in the plan artifacts; do not hand-edit the
@@ -216,21 +222,28 @@ It uses these reviewed Pro API operations:
 | Create | `POST /api/v1/dev/instance/pro/create` |
 | Read status | `GET /api/v1/dev/instance/pro/status` |
 | Fetch current SSH details | `GET /api/v1/dev/instance/pro/snapshot` |
-| Power off during release | `POST /api/v1/dev/instance/pro/power_off` |
+| Power on | `POST /api/v1/dev/instance/pro/power_on` |
+| Power off | `POST /api/v1/dev/instance/pro/power_off` |
 | Release | `POST /api/v1/dev/instance/pro/release` |
 
 After successful release, the script changes `released` to `true` and adds the
 top-level `released_at_unix` timestamp. Treat that marker as a guard against
 duplicate release.
 
-An explicit resumed run may call `create` again only after the state proves the
-previous current-run instance was released. The script moves its non-secret
-resource selection, cloud-drive state, and release time into
+An explicit resumed run reconciles this state with `reconcile`. A released or
+provider-confirmed-missing instance is replaced using its recorded actual GPU
+specification, count, and image. A shutdown instance is powered on; a running
+instance receives one harmless SSH probe. If that probe fails, the old instance
+must be powered off and successfully released before replacement. Ambiguous API
+or network errors fail without creating a second instance. The script moves a
+replaced instance's non-secret resource selection, cloud-drive state, and release time into
 `provider_state.instance_history`, then records the one replacement as the
 current instance. The current manifest `resume_count` is recorded with the
 rental so the script refuses a second replacement during the same manual
 resume. It also refuses another rental while any current state is unreleased or
-cleanup did not complete.
+cleanup did not complete. Replacement may use only the recorded distinct
+`fallback_gpu_spec_uuid`, and only after the recorded actual specification gets
+an explicit no-inventory response.
 
 ## Create and Inspect an Instance
 
@@ -406,18 +419,32 @@ the instance while any required evidence exists only on AutoDL storage.
 ## Power and Release
 
 The official Pro API exposes separate `power_on`, `power_off`, and `release`
-operations, and requires power-off before release. The current script does not
-expose independent power-on or power-off actions. It supports:
+operations, and requires power-off before release. The script exposes:
 
 - `create`, which creates and starts an instance;
-- `status`, which reads lifecycle state; and
+- `status`, which reads lifecycle state;
+- `power-on`, which starts a shutdown instance and waits for `running`;
+- `power-off`, which stops a running instance and waits for `shutdown` without
+  changing `released`;
+- `reconcile`, which performs the bounded resume check and returns JSON stating
+  whether it created a replacement; and
 - `release`, which calls power-off, waits up to 90 seconds for the provider to
   report `shutdown`, and then calls release. If the provider reports that the
   instance is already shut down, it begins the same status check directly.
 
-If a workflow requires an independent stop/restart cycle, stop explicitly and
-request a script extension. Do not issue ad hoc lifecycle requests outside the
-reviewed script.
+Use only these reviewed actions; do not issue ad hoc lifecycle requests.
+
+Power off after replication outputs have been downloaded and validated:
+
+```bash
+python <skill-dir>/scripts/autodl.py power-off --state <run-state-path>
+```
+
+On an explicit resume before report completion, let orchestration call:
+
+```bash
+python <skill-dir>/scripts/autodl.py reconcile --state <run-state-path>
+```
 
 Before release, read the state and confirm all of the following:
 
@@ -433,7 +460,9 @@ Then release:
 python <skill-dir>/scripts/autodl.py release --state <run-state-path>
 ```
 
-On success, confirm the state file contains `released: true`. Release destroys
+The normal CLI action refuses release while an adjacent run manifest exists and
+its report stage is incomplete. On success, confirm the state file contains
+`released: true`. Release destroys
 the instance and its local data. Power-off alone preserves instance data only
 temporarily; AutoDL currently documents automatic release after fifteen
 consecutive powered-off days and warns that local instance disks are not a
@@ -449,22 +478,22 @@ durable backup.
   run locally or with another rental.
 - **Creation timeout or status-poll failure:** The current-run state is written
   as soon as AutoDL returns the instance UUID, before polling starts. Inspect
-  that state with `status`, then power off and release the recorded instance if
-  it cannot be used. Do not call `create` again while that state exists.
+  that state with `status`, then power off the recorded instance if it cannot be
+  used. Do not call `create` again while that state exists.
 - **SSH failure:** Recheck `status`; then validate the current snapshot host,
   port, credential availability, local `ssh`/`scp`/`sshpass`, network access,
   and host identity. Never disable host verification to force a connection.
 - **Transfer failure:** Inspect both endpoints before retrying. Remove or replace
   partial files only after confirming the exact run-owned paths.
 - **Remote command failure:** Preserve logs and the exit-status file, download
-  available evidence, mark the experiment failed, and continue to cleanup.
+  available evidence, mark the experiment failed, and power off.
 - **Release failure:** Preserve the state file and error. The script treats the
   provider's already-shut-down power-off response as idempotent, then polls for
   `shutdown` for up to 90 seconds before calling release; it writes `released`
-  only after that call succeeds. Do not set it manually. The host cleanup path
-  may retry; if the script cannot complete release, verify and release it
-  through the AutoDL console. Report the cleanup failure with the experiment
-  failure.
+  only after that call succeeds. Do not set it manually. After a completed run,
+  preserve the host-recorded cleanup warning and use the canonical state for a
+  deliberate manual retry; reopening the run does not retry release
+  automatically.
 
 ## Official Documentation
 

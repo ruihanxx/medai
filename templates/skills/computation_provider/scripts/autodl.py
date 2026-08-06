@@ -34,6 +34,14 @@ NO_INVENTORY_MARKERS = (
     "no inventory",
     "out of stock",
 )
+INSTANCE_MISSING_MARKERS = (
+    "实例不存在",
+    "实例已释放",
+    "资源不存在",
+    "not found",
+    "does not exist",
+    "already released",
+)
 PANEL_PATHS = {
     "sign_in": "/autopanel/v1/sign_in",
     "bindings": "/autopanel/v1/netdisk/list",
@@ -68,6 +76,8 @@ def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"AutoDL HTTP {exc.code}: {detail}") from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError(f"AutoDL request failed: {exc}") from exc
     if payload.get("code") != "Success":
         raise RuntimeError(f"AutoDL API error: {payload.get('msg') or payload}")
     return payload
@@ -75,7 +85,9 @@ def request(method: str, path: str, body: dict[str, Any]) -> dict[str, Any]:
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def load_state(path: Path) -> dict[str, Any]:
@@ -83,6 +95,10 @@ def load_state(path: Path) -> dict[str, Any]:
         state = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise RuntimeError(f"AutoDL state is missing: {path}") from exc
+    except (json.JSONDecodeError, OSError) as exc:
+        raise RuntimeError(f"AutoDL state is unreadable or invalid: {path}") from exc
+    if not isinstance(state, dict):
+        raise RuntimeError(f"AutoDL state is not a JSON object: {path}")
     if state.get("provider") != "autodl":
         raise RuntimeError("State does not belong to the AutoDL provider")
     provider_state = state.get("provider_state")
@@ -101,6 +117,32 @@ def snapshot(state: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(details, dict):
         raise RuntimeError("AutoDL snapshot returned an unsupported response structure")
     return details
+
+
+def instance_status(state: dict[str, Any]) -> str:
+    status = request(
+        "GET",
+        "/api/v1/dev/instance/pro/status",
+        {"instance_uuid": state["provider_state"]["instance_uuid"]},
+    ).get("data")
+    if not isinstance(status, str) or not status:
+        raise RuntimeError("AutoDL status returned an unsupported response structure")
+    return status
+
+
+def _wait_for_status(
+    state: dict[str, Any], expected: str, timeout_seconds: int, interval_seconds: int
+) -> str:
+    deadline = time.monotonic() + timeout_seconds
+    status = ""
+    while time.monotonic() < deadline:
+        status = instance_status(state)
+        if status == expected:
+            return status
+        time.sleep(interval_seconds)
+    raise RuntimeError(
+        f"AutoDL instance did not reach {expected}; last status={status}"
+    )
 
 
 def _manifest_resume_count(state_path: Path) -> int | None:
@@ -137,7 +179,14 @@ def _history_from_released_state(
         raise RuntimeError("AutoDL instance history has an invalid structure")
     archived = {
         name: provider_state[name]
-        for name in ("instance_uuid", "gpu_spec_uuid", "gpu_count", "image_uuid")
+        for name in (
+            "instance_uuid",
+            "gpu_spec_uuid",
+            "fallback_gpu_spec_uuid",
+            "gpu_count",
+            "image_uuid",
+            "unavailable_reason",
+        )
         if name in provider_state
     }
     if isinstance(provider_state.get("cloud_drive"), dict):
@@ -150,7 +199,7 @@ def _history_from_released_state(
     return [*history, archived], resume_count
 
 
-def create_instance(args: argparse.Namespace) -> None:
+def create_instance(args: argparse.Namespace) -> str:
     history: list[dict[str, Any]] = []
     resume_count = _manifest_resume_count(args.state)
     if args.state.exists():
@@ -203,6 +252,8 @@ def create_instance(args: argparse.Namespace) -> None:
         "gpu_count": args.gpu_count,
         "image_uuid": image_uuid,
     }
+    if args.fallback_gpu_spec and args.fallback_gpu_spec != selected_gpu_spec:
+        provider_state["fallback_gpu_spec_uuid"] = args.fallback_gpu_spec
     if history:
         provider_state["instance_history"] = history
     if resume_count is not None:
@@ -216,22 +267,9 @@ def create_instance(args: argparse.Namespace) -> None:
             "provider_state": provider_state,
         },
     )
-    deadline = time.monotonic() + 600
-    status = ""
-    while time.monotonic() < deadline:
-        status = str(
-            request(
-                "GET",
-                "/api/v1/dev/instance/pro/status",
-                {"instance_uuid": instance_uuid},
-            )["data"]
-        )
-        if status == "running":
-            break
-        time.sleep(10)
-    if status != "running":
-        raise RuntimeError(f"AutoDL instance did not start; last status={status}")
-    print(instance_uuid)
+    saved_state = load_state(args.state)
+    _wait_for_status(saved_state, "running", 600, 10)
+    return saved_state["provider_state"]["instance_uuid"]
 
 
 def _ssh_command(
@@ -1009,12 +1047,40 @@ def cloud_pull(args: argparse.Namespace) -> None:
     print(target_path)
 
 
-def release_instance(args: argparse.Namespace) -> None:
+def power_on_instance(
+    args: argparse.Namespace, *, known_status: str | None = None
+) -> str:
     state = load_state(args.state)
     if not state.get("created_by_run"):
-        raise RuntimeError("Refusing to release an instance not created by this run")
+        raise RuntimeError("Refusing to power on an instance not created by this run")
     if state.get("released") is True:
-        return
+        raise RuntimeError("AutoDL instance has already been released")
+    status = known_status or instance_status(state)
+    if status == "running":
+        return status
+    if status != "shutdown":
+        raise RuntimeError(f"Cannot power on AutoDL instance from status={status}")
+    request(
+        "POST",
+        "/api/v1/dev/instance/pro/power_on",
+        {
+            "instance_uuid": state["provider_state"]["instance_uuid"],
+            "payload": "gpu",
+            "start_command": "sleep 1",
+        },
+    )
+    return _wait_for_status(state, "running", 600, 10)
+
+
+def power_off_instance(args: argparse.Namespace) -> str:
+    state = load_state(args.state)
+    if not state.get("created_by_run"):
+        raise RuntimeError("Refusing to power off an instance not created by this run")
+    if state.get("released") is True:
+        return "released"
+    status = instance_status(state)
+    if status == "shutdown":
+        return status
     try:
         request(
             "POST",
@@ -1024,24 +1090,38 @@ def release_instance(args: argparse.Namespace) -> None:
     except RuntimeError as exc:
         if "当前实例已关机" not in str(exc):
             raise
-    deadline = time.monotonic() + 90
-    status = ""
-    while time.monotonic() < deadline:
-        status = str(
-            request(
-                "GET",
-                "/api/v1/dev/instance/pro/status",
-                {"instance_uuid": state["provider_state"]["instance_uuid"]},
-            )["data"]
-        )
-        if status == "shutdown":
-            break
-        time.sleep(5)
-    if status != "shutdown":
-        raise RuntimeError(
-            "AutoDL instance did not reach shutdown before release; "
-            f"last status={status}"
-        )
+    return _wait_for_status(state, "shutdown", 90, 5)
+
+
+def _manifest_report_completed(state_path: Path) -> bool | None:
+    manifest_path = state_path.parent.parent / "manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Run manifest is invalid: {manifest_path}") from exc
+    inputs = manifest.get("inputs")
+    if isinstance(inputs, dict) and inputs.get("workflow") == "autoresearch":
+        return None
+    stages = manifest.get("stages")
+    if not isinstance(stages, dict):
+        raise RuntimeError(f"Run manifest has invalid stages: {manifest_path}")
+    report_stage = stages.get("report_agents")
+    return isinstance(report_stage, dict) and report_stage.get("status") == "completed"
+
+
+def release_instance(
+    args: argparse.Namespace, *, allow_before_report: bool = False
+) -> None:
+    state = load_state(args.state)
+    if not state.get("created_by_run"):
+        raise RuntimeError("Refusing to release an instance not created by this run")
+    if state.get("released") is True:
+        return
+    if not allow_before_report and _manifest_report_completed(args.state) is False:
+        raise RuntimeError("Refusing to release AutoDL instance before report completion")
+    power_off_instance(args)
     request(
         "POST",
         "/api/v1/dev/instance/pro/release",
@@ -1050,6 +1130,95 @@ def release_instance(args: argparse.Namespace) -> None:
     state["released"] = True
     state["released_at_unix"] = int(time.time())
     save_state(args.state, state)
+
+
+def _replacement_args(state_path: Path, state: dict[str, Any]) -> argparse.Namespace:
+    provider_state = state.get("provider_state")
+    if not isinstance(provider_state, dict):
+        raise RuntimeError("AutoDL state is missing provider_state")
+    required = ("gpu_spec_uuid", "gpu_count", "image_uuid")
+    missing = [name for name in required if not provider_state.get(name)]
+    if missing:
+        raise RuntimeError(
+            "AutoDL state cannot recreate the prior instance; missing: "
+            + ", ".join(missing)
+        )
+    gpu_count = provider_state["gpu_count"]
+    if isinstance(gpu_count, bool) or not isinstance(gpu_count, int):
+        raise RuntimeError("AutoDL state has invalid provider_state.gpu_count")
+    gpu_spec = str(provider_state["gpu_spec_uuid"])
+    fallback = provider_state.get("fallback_gpu_spec_uuid")
+    fallback_gpu_spec = str(fallback) if fallback and str(fallback) != gpu_spec else None
+    return argparse.Namespace(
+        gpu_spec=gpu_spec,
+        fallback_gpu_spec=fallback_gpu_spec,
+        gpu_count=gpu_count,
+        image_uuid=str(provider_state["image_uuid"]),
+        state=state_path,
+    )
+
+
+def _provider_reports_missing(error: RuntimeError) -> bool:
+    message = str(error).casefold()
+    return any(marker.casefold() in message for marker in INSTANCE_MISSING_MARKERS)
+
+
+def _ensure_replacement_allowed(state_path: Path, state: dict[str, Any]) -> None:
+    resume_count = _manifest_resume_count(state_path)
+    if (
+        resume_count is not None
+        and state["provider_state"].get("created_for_resume_count") == resume_count
+    ):
+        raise RuntimeError(
+            "A replacement AutoDL instance was already created for this manual resume"
+        )
+
+
+def _mark_provider_missing(state_path: Path, state: dict[str, Any]) -> None:
+    state["released"] = True
+    state["released_at_unix"] = int(time.time())
+    state["provider_state"]["unavailable_reason"] = "provider_confirmed_missing"
+    save_state(state_path, state)
+
+
+def reconcile_instance(args: argparse.Namespace) -> dict[str, Any]:
+    state = load_state(args.state)
+    if not state.get("created_by_run"):
+        raise RuntimeError("Refusing to reconcile an instance not created by this run")
+    replacement_args = _replacement_args(args.state, state)
+    if state.get("released") is True:
+        instance_uuid = create_instance(replacement_args)
+        return {"replaced": True, "instance_uuid": instance_uuid, "status": "running"}
+
+    try:
+        status = instance_status(state)
+    except RuntimeError as exc:
+        if not _provider_reports_missing(exc):
+            raise
+        _ensure_replacement_allowed(args.state, state)
+        _mark_provider_missing(args.state, state)
+        instance_uuid = create_instance(replacement_args)
+        return {"replaced": True, "instance_uuid": instance_uuid, "status": "running"}
+
+    if status == "shutdown":
+        power_on_instance(args, known_status=status)
+    elif status != "running":
+        raise RuntimeError(f"Cannot reconcile AutoDL instance from status={status}")
+
+    state = load_state(args.state)
+    probe = _ssh_command(state, "exec", ["--", "true"])
+    if probe.returncode == 0:
+        return {
+            "replaced": False,
+            "instance_uuid": state["provider_state"]["instance_uuid"],
+            "status": "running",
+        }
+
+    _ensure_replacement_allowed(args.state, state)
+    release_instance(args, allow_before_report=True)
+    released_state = load_state(args.state)
+    instance_uuid = create_instance(_replacement_args(args.state, released_state))
+    return {"replaced": True, "instance_uuid": instance_uuid, "status": "running"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1067,7 +1236,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Paper-specific image UUID; overrides the AUTODL_IMAGE_UUID default.",
     )
     create.add_argument("--state", type=Path, required=True)
-    for name in ("status", "release"):
+    for name in ("status", "power-on", "power-off", "release", "reconcile"):
         command = subparsers.add_parser(name)
         command.add_argument("--state", type=Path, required=True)
     execute = subparsers.add_parser("exec")
@@ -1090,18 +1259,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
     if args.action == "create":
-        create_instance(args)
+        print(create_instance(args))
     elif args.action == "status":
-        state = load_state(args.state)
-        print(
-            request(
-                "GET",
-                "/api/v1/dev/instance/pro/status",
-                {"instance_uuid": state["provider_state"]["instance_uuid"]},
-            )["data"]
-        )
+        print(instance_status(load_state(args.state)))
+    elif args.action == "power-on":
+        print(power_on_instance(args))
+    elif args.action == "power-off":
+        print(power_off_instance(args))
     elif args.action == "release":
         release_instance(args)
+    elif args.action == "reconcile":
+        print(json.dumps(reconcile_instance(args), sort_keys=True))
     elif args.action == "cloud-pull":
         cloud_pull(args)
     else:
