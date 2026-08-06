@@ -20,6 +20,8 @@ This retry does not represent another scientific codegen rewrite.
 - Completed remote dataset (read-only): `{{ remote_dataset_dir }}`
 - Codegen remote working directory: `{{ remote_working_dir }}`
 - Independent remote audit directory: `{{ remote_audit_dir }}`
+- Selected provider reference: `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
+- Selected drive reference: `{{ drive_reference|default("<selected-drive-reference>") }}`
 {% else %}
 - Local input data (read-only): `{{ data_dir }}`
 {% endif %}

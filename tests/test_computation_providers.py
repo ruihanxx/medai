@@ -2,9 +2,10 @@ import json
 from pathlib import Path
 
 import pytest
+
 from medai.computation_providers import get_provider_adapter, load_provider_adapters
 from medai.config import RunConfig
-from medai.pipeline_state import PipelineState
+from medai.pipeline_state import PipelineState, build_run_inputs
 
 
 def _write_provider_skill(
@@ -105,6 +106,74 @@ def test_fake_provider_is_discovered_and_configured_without_main_flow_changes(
     assert "secret" not in json.dumps(config.computation_provider_config)
     assert "drive-secret" not in json.dumps(config.computation_provider_config)
     assert get_provider_adapter("fake").script.name == "fake.py"
+    inputs = build_run_inputs(config)
+    PipelineState.create(config.output, inputs)
+    persisted = (config.output / "manifest.json").read_text(encoding="utf-8")
+    assert "secret" not in persisted
+    assert "drive-secret" not in persisted
+
+
+def test_unique_configured_provider_is_selected_without_an_environment_selector(
+    tmp_path: Path, monkeypatch
+):
+    skills = tmp_path / "skills"
+    _write_provider_skill(skills)
+    monkeypatch.setenv("MEDAI_SKILLS_DIR", str(skills))
+    monkeypatch.setenv("FAKE_TOKEN", "secret")
+    monkeypatch.setenv("FAKE_IMAGE", "image-1")
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+
+    config = RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+
+    assert config.computation_provider == "fake"
+
+
+def test_resume_inherits_recorded_provider_selection(tmp_path: Path, monkeypatch):
+    skills = tmp_path / "skills"
+    _write_provider_skill(skills)
+    monkeypatch.setenv("MEDAI_SKILLS_DIR", str(skills))
+    monkeypatch.setenv("FAKE_TOKEN", "secret")
+    monkeypatch.setenv("FAKE_IMAGE", "image-1")
+    output = tmp_path / "output"
+    output.mkdir()
+    (output / "manifest.json").write_text(
+        json.dumps(
+            {
+                "version": 3,
+                "inputs": {
+                    "computation_provider": "fake",
+                    "computation_provider_config": {
+                        "provider": "fake",
+                        "drive": None,
+                        "values": {"FAKE_IMAGE": "image-1"},
+                    },
+                },
+                "stages": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+
+    assert config.computation_provider == "fake"
 
 
 def test_provider_loader_rejects_path_traversal(tmp_path: Path, monkeypatch):
@@ -142,13 +211,16 @@ def test_multiple_configured_providers_require_explicit_selection(tmp_path: Path
         )
 
 
-def test_v2_manifest_migrates_provider_specific_configuration(tmp_path: Path):
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_manifest_migrates_provider_specific_configuration(
+    tmp_path: Path, version: int
+):
     output = tmp_path / "output"
     output.mkdir()
     (output / "manifest.json").write_text(
         json.dumps(
             {
-                "version": 2,
+                "version": version,
                 "inputs": {
                     "computation_provider": "autodl",
                     "autodl_image_uuid": "image-1",

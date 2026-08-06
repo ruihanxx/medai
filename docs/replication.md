@@ -16,8 +16,8 @@ The LangGraph stages are:
    code-generation ambiguity, compare local GPU capacity with the paper's
    full-scale requirements, use the `computation-provider` skill to rent
    matching configured remote compute when needed, plan files, and write code.
-   Cloud-drive mode always selects AutoDL: codegen materializes the complete
-   dataset before any data inspection, then records the completed state's
+   Cloud-drive mode always selects the configured provider: codegen materializes
+   the complete dataset before any data inspection, then records the completed state's
    read-only target as `remote_dataset_dir`.
 5. `audit_agent`: run real-data preprocessing, compute paper-aware cohort and
    data-quality sanity statistics, and write a free-form audit report. Local

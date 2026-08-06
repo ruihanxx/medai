@@ -39,6 +39,8 @@ implementation of the paper's methodology.
 - Cloud dataset name: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`)
 - Cloud source descriptor: `{{ cloud_source }}`. Resolve its materialized remote
   path only through the computation-provider state; no local raw-data path exists.
+- Selected provider reference: `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
+- Selected drive reference: `{{ drive_reference|default("<selected-drive-reference>") }}`
 {% else %}
 - Data: `{{ data_dir or "not supplied" }}`
 {% endif %}
@@ -126,8 +128,9 @@ requested GPU is in the provider's supported pool; when the paper's exact GPU
 is absent, it selects the closest pool GPU whose VRAM is at least the paper
 requirement and records the divergence. For paper-stated software versions,
 select the closest compatible provider image; otherwise use the configured
-default. After selecting the provider, read the provider reference required by
-that skill before performing any provider operation. Store the instance state at
+default. Read the selected provider reference at
+`{{ computation_provider_reference|default("<selected-provider-reference>") }}` before performing any provider operation.
+For cloud data, also read `{{ drive_reference|default("<selected-drive-reference>") }}`. Store the instance state at
 `{{ computation_provider_state_path }}`
 and leave it running for the plan and replication stages. If the selected
 provider reference states that no read-only inventory query is available, rent

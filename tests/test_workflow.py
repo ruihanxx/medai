@@ -54,6 +54,13 @@ def _write_remote_state(path: Path) -> None:
     )
 
 
+def _mock_provider_state_validation(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "medai.workflow._validate_recorded_remote_state",
+        lambda _state_path, _config: None,
+    )
+
+
 def _write_codegen_plan(path: Path, remote_state_path: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     remote_compute = None
@@ -203,8 +210,8 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
         "provider_state": {
             "instance_uuid": "instance",
             "cloud_drive": {
-                "status": "completed",
-                "provider": "aliyun",
+                "completed": True,
+                "drive": "aliyun",
                 "dataset": "mimic-iv",
                 "target_path": target,
             },
@@ -220,7 +227,7 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
     )
     assert cloud is not None and cloud["target_path"] == target
 
-    envelope["provider_state"]["cloud_drive"]["status"] = "downloading"
+    envelope["provider_state"]["cloud_drive"]["completed"] = False
     state_path.write_text(json.dumps(envelope), encoding="utf-8")
     with pytest.raises(RuntimeError, match="incomplete or inconsistent"):
         validate_codegen_remote_compute(
@@ -230,7 +237,7 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
             drive_provider="aliyun",
         )
 
-    envelope["provider_state"]["cloud_drive"]["status"] = "completed"
+    envelope["provider_state"]["cloud_drive"]["completed"] = True
     envelope["released"] = True
     state_path.write_text(json.dumps(envelope), encoding="utf-8")
     with pytest.raises(RuntimeError, match="already released"):
@@ -1054,6 +1061,7 @@ def test_resume_archives_interrupted_replicate_attempt_and_restarts_it(
     tmp_path: Path,
     monkeypatch,
 ):
+    _mock_provider_state_validation(monkeypatch)
     config = _replicate_config(tmp_path)
     state = PipelineState.create(config.output, {"provider": "codex"})
     codebase = config.output / "codegen" / "codebase"
@@ -1126,6 +1134,7 @@ def test_resume_replacement_before_replicate_invalidates_from_codegen(
     tmp_path: Path,
     monkeypatch,
 ):
+    _mock_provider_state_validation(monkeypatch)
     config = _replicate_config(tmp_path)
     state = PipelineState.create(config.output, {"provider": "codex"})
     codebase = config.output / "codegen" / "codebase"
@@ -1164,6 +1173,7 @@ def test_resume_reuses_instance_without_rolling_back_earlier_stage(
     tmp_path: Path,
     monkeypatch,
 ):
+    _mock_provider_state_validation(monkeypatch)
     config = _replicate_config(tmp_path)
     state = PipelineState.create(config.output, {"provider": "codex"})
     _write_remote_state(config.output / "remote_compute" / "instance.json")
@@ -1189,6 +1199,7 @@ def test_resume_completed_report_does_not_reconcile_or_roll_back(
     tmp_path: Path,
     monkeypatch,
 ):
+    _mock_provider_state_validation(monkeypatch)
     config = _replicate_config(tmp_path)
     state = PipelineState.create(config.output, {"provider": "codex"})
     remote_state_path = config.output / "remote_compute" / "instance.json"
@@ -1240,6 +1251,7 @@ def test_resume_cloud_replacement_materializes_before_archive(
     tmp_path: Path,
     monkeypatch,
 ):
+    _mock_provider_state_validation(monkeypatch)
     base = _replicate_config(tmp_path)
     config = RunConfig(
         paper=base.paper,
@@ -1336,3 +1348,75 @@ def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     command, kwargs = calls[0]
     assert command[2:] == ["power-off", "--state", str(state_path)]
     assert kwargs["timeout"] == 120
+
+
+def test_computation_cleanup_dispatches_fake_provider_metadata(tmp_path: Path, monkeypatch):
+    skill = tmp_path / "skills" / "computation_provider"
+    (skill / "providers").mkdir(parents=True)
+    (skill / "references").mkdir()
+    (skill / "scripts").mkdir()
+    (skill / "references" / "fake.md").write_text("reference\n", encoding="utf-8")
+    adapter = skill / "scripts" / "fake.py"
+    adapter.write_text("print('fake')\n", encoding="utf-8")
+    actions = {
+        action: 7
+        for action in (
+            "validate-state",
+            "status",
+            "power-on",
+            "power-off",
+            "reconcile",
+            "release",
+            "cloud-pull",
+            "exec",
+            "upload",
+            "download",
+        )
+    }
+    (skill / "providers" / "fake.json").write_text(
+        json.dumps(
+            {
+                "adapter_version": 1,
+                "provider": "fake",
+                "reference": "references/fake.md",
+                "script": "scripts/fake.py",
+                "environment": [],
+                "configuration_fingerprint": [],
+                "drives": {},
+                "default_drive": None,
+                "actions": actions,
+                "legacy_manifest": {"configuration_fields": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MEDAI_SKILLS_DIR", str(tmp_path / "skills"))
+    state_path = tmp_path / "output" / "remote_compute" / "instance.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {"provider": "fake", "created_by_run": True, "released": False}
+        ),
+        encoding="utf-8",
+    )
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    config = RunConfig(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        computation_provider="fake",
+    )
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr("medai.workflow.subprocess.run", fake_run)
+
+    release_run_computation_instance(config)
+
+    assert calls[0][0][1] == str(adapter)
+    assert calls[0][0][2:] == ["release", "--state", str(state_path)]
+    assert calls[0][1]["timeout"] == 7

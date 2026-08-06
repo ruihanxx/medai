@@ -342,8 +342,8 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
                 "provider_state": {
                     "instance_uuid": "instance",
                     "cloud_drive": {
-                        "status": "completed",
-                        "provider": "aliyun",
+                        "completed": True,
+                        "drive": "aliyun",
                         "dataset": "mimic-iv",
                         "target_path": remote_dataset,
                     },

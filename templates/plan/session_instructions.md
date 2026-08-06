@@ -7,6 +7,8 @@ You are generating a step-by-step replication plan for testing whether a paper's
 {% if cloud_drive_enabled %}
 - Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
   already materialized at the read-only path in remote provider state.
+- Selected provider reference: `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
+- Selected drive reference: `{{ drive_reference|default("<selected-drive-reference>") }}`
 {% else %}
 - Data: `{{ data_dir or "not supplied" }}` (read-only)
 {% endif %}
@@ -25,8 +27,10 @@ a skill genuinely matches; many plans will not need any skill, and that
 is fine.
 
 If remote computation was selected, read
-`{{ skills_dir }}/computation_provider/SKILL.md` and then the selected
-provider reference named by that skill before planning remote operations.
+`{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected provider
+reference at `{{ computation_provider_reference|default("<selected-provider-reference>") }}` before planning remote operations.
+{% if cloud_drive_enabled %}Also read the selected drive reference at
+`{{ drive_reference|default("<selected-drive-reference>") }}` before planning cloud operations.{% endif %}
 {% if cloud_drive_enabled %}
 This cloud-backed run must keep using the existing remote instance and the
 completed materialized dataset. Read its target path from provider state and

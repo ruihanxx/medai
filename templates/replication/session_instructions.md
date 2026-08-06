@@ -36,6 +36,8 @@ Write only under the working directory and the output directory above. Other sub
 - **Cloud dataset:** `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`).
   Its only valid raw-data location is the completed read-only target in the
   remote-compute state; do not transfer or rematerialize it.
+- **Selected provider reference:** `{{ computation_provider_reference|default("<selected-provider-reference>") }}`.
+- **Selected drive reference:** `{{ drive_reference|default("<selected-drive-reference>") }}`.
 {% endif %}
 
 
@@ -117,14 +119,14 @@ After your initial environment check, run `ls {{ skills_dir }}/`
 and review the descriptions. Note any skills you may call on while
 running and debugging the codebase. Use a skill when its description
 matches the work in front of you. If the plan uses remote compute, read
-`{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected
-provider reference required by that skill and use the existing instance state
-at `{{ computation_provider_state_path }}`.
+`{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected provider
+reference at `{{ computation_provider_reference|default("<selected-provider-reference>") }}` and use the existing instance
+state at `{{ computation_provider_state_path }}`.
 {% if cloud_drive_enabled %}
-Verify that `provider_state.cloud_drive.status` remains `completed` and that its
-target equals the plan's `remote_dataset_dir` before execution. Reuse that same
-remote copy. Download only experiment outputs, aggregate evidence, and logs;
-never download raw or row-level dataset content.
+Read `{{ drive_reference|default("<selected-drive-reference>") }}`. Verify that `provider_state.cloud_drive.completed`
+remains true and that its target equals the plan's `remote_dataset_dir` before
+execution. Reuse that same remote copy. Download only experiment outputs,
+aggregate evidence, and logs; never download raw or row-level dataset content.
 {% endif %}
 
 ## Environment Setup

@@ -141,7 +141,7 @@ def test_cloud_drive_requires_supported_provider_and_password(tmp_path: Path, mo
     monkeypatch.setenv("AUTODL_IMAGE_UUID", "image")
     monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "other")
 
-    with pytest.raises(ValueError, match="must be 'aliyun'"):
+    with pytest.raises(ValueError, match="does not support drive"):
         RunConfig.create(
             paper=paper,
             output=tmp_path / "output",

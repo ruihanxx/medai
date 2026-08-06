@@ -54,7 +54,7 @@ def run(
     clouddrive: bool = typer.Option(
         False,
         "--clouddrive",
-        help="Materialize --data from the configured cloud drive on AutoDL",
+        help="Materialize --data from the configured provider cloud drive",
     ),
     siliconflow_config: Optional[Path] = typer.Option(
         None,

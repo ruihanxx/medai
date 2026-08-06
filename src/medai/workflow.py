@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -11,6 +10,8 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from medai.artifacts import load_model, write_json
+from medai.computation_providers import get_provider_adapter
+from medai.computation_providers import skills_dir as _skills_dir
 from medai.config import AutoResearchConfig, RunConfig
 from medai.models import (
     ClaimsFile,
@@ -52,13 +53,7 @@ class WorkflowState(TypedDict, total=False):
 
 
 def skills_dir() -> Path:
-    configured = os.environ.get("MEDAI_SKILLS_DIR")
-    if configured:
-        return Path(configured)
-    repository_skills = Path(__file__).resolve().parents[2] / "templates" / "skills"
-    if repository_skills.is_dir():
-        return repository_skills
-    return Path(__file__).parent / "templates" / "skills"
+    return _skills_dir()
 
 
 def resolve_replication_output(
@@ -187,6 +182,7 @@ def validate_codegen_remote_compute(
     *,
     cloud_dataset: str | None = None,
     drive_provider: str | None = None,
+    computation_provider: str | None = None,
     require_active: bool = True,
 ) -> dict[str, Any] | None:
     remote_compute = plan.remote_compute
@@ -209,15 +205,16 @@ def validate_codegen_remote_compute(
     cloud_drive = (
         provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
     )
-    if provider_envelope.get("provider") != "autodl" or not isinstance(
-        cloud_drive, dict
-    ):
-        raise RuntimeError("Cloud-drive mode requires completed AutoDL provider state")
+    provider = provider_envelope.get("provider")
+    if not isinstance(provider, str) or not provider or not isinstance(cloud_drive, dict):
+        raise RuntimeError("Cloud-drive mode requires completed provider state")
+    if computation_provider is not None and provider != computation_provider:
+        raise RuntimeError("Cloud-drive state provider does not match the run configuration")
     if require_active and provider_envelope.get("released") is True:
-        raise RuntimeError("Cloud-drive AutoDL instance was already released")
+        raise RuntimeError("Cloud-drive instance was already released")
     if (
-        cloud_drive.get("status") != "completed"
-        or cloud_drive.get("provider") != drive_provider
+        cloud_drive.get("completed") is not True
+        or cloud_drive.get("drive") != drive_provider
         or cloud_drive.get("dataset") != cloud_dataset
     ):
         raise RuntimeError("Cloud-drive materialization is incomplete or inconsistent")
@@ -250,17 +247,24 @@ def _run_computation_provider_action(
     action: str,
     *,
     arguments: list[str] | None = None,
-    timeout: int,
+    expected_provider: str | None = None,
 ) -> str:
     state = _load_computation_provider_state(state_path)
     provider = state.get("provider")
-    if provider != "autodl":
-        raise RuntimeError(f"Unsupported computation provider in state: {provider}")
-    script = skills_dir() / "computation_provider" / "scripts" / f"{provider}.py"
+    if not isinstance(provider, str):
+        raise RuntimeError("Remote computation state is missing its provider")
+    if expected_provider is not None and provider != expected_provider:
+        raise RuntimeError("Remote computation state provider does not match the run configuration")
+    try:
+        adapter = get_provider_adapter(provider)
+    except ValueError as exc:
+        raise RuntimeError(f"Unsupported computation provider in state: {provider}") from exc
+    if action not in adapter.action_timeouts:
+        raise RuntimeError(f"Computation provider does not support action: {action}")
     completed = subprocess.run(
         [
             sys.executable,
-            str(script),
+            str(adapter.script),
             action,
             "--state",
             str(state_path),
@@ -268,7 +272,7 @@ def _run_computation_provider_action(
         ],
         capture_output=True,
         text=True,
-        timeout=timeout,
+        timeout=adapter.action_timeouts[action],
     )
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout).strip()
@@ -281,7 +285,7 @@ def reconcile_run_computation_instance(config: RunConfig) -> dict[str, Any]:
     output = _run_computation_provider_action(
         state_path,
         "reconcile",
-        timeout=720,
+        expected_provider=config.computation_provider,
     )
     try:
         result = json.loads(output)
@@ -303,7 +307,11 @@ def power_off_run_computation_instance(config: RunConfig) -> None:
     state = _load_computation_provider_state(state_path)
     if not state.get("created_by_run") or state.get("released") is True:
         return
-    _run_computation_provider_action(state_path, "power-off", timeout=120)
+    _run_computation_provider_action(
+        state_path,
+        "power-off",
+        expected_provider=config.computation_provider,
+    )
 
 
 def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> None:
@@ -313,7 +321,11 @@ def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> 
     state = _load_computation_provider_state(state_path)
     if not state.get("created_by_run") or state.get("released") is True:
         return
-    _run_computation_provider_action(state_path, "release", timeout=120)
+    _run_computation_provider_action(
+        state_path,
+        "release",
+        expected_provider=config.computation_provider,
+    )
 
 
 def _cloud_pull(config: RunConfig) -> None:
@@ -326,7 +338,7 @@ def _cloud_pull(config: RunConfig) -> None:
         state_path,
         "cloud-pull",
         arguments=["--dataset", config.cloud_dataset],
-        timeout=1920,
+        expected_provider=config.computation_provider,
     )
 
 
@@ -341,29 +353,15 @@ def _run_has_remote_plan(config: RunConfig) -> bool:
     return False
 
 
-def _validate_recorded_remote_state(state_path: Path) -> None:
+def _validate_recorded_remote_state(state_path: Path, config: RunConfig) -> None:
     state = _load_computation_provider_state(state_path)
-    provider_state = state.get("provider_state")
-    if state.get("provider") != "autodl":
-        raise RuntimeError(
-            f"Unsupported computation provider in state: {state.get('provider')}"
-        )
-    if not state.get("created_by_run") or not isinstance(provider_state, dict):
+    if not state.get("created_by_run"):
         raise RuntimeError("Remote computation state lacks current-run ownership")
-    required = ("instance_uuid", "gpu_spec_uuid", "gpu_count", "image_uuid")
-    missing = [name for name in required if not provider_state.get(name)]
-    if missing:
-        raise RuntimeError(
-            "Remote computation state cannot recreate the recorded instance; missing: "
-            + ", ".join(missing)
-        )
-    gpu_count = provider_state["gpu_count"]
-    if (
-        isinstance(gpu_count, bool)
-        or not isinstance(gpu_count, int)
-        or not 1 <= gpu_count <= 4
-    ):
-        raise RuntimeError("Remote computation state has an invalid GPU count")
+    _run_computation_provider_action(
+        state_path,
+        "validate-state",
+        expected_provider=config.computation_provider,
+    )
 
 
 def _replication_attempt_started(pipeline_state: PipelineState) -> bool:
@@ -498,7 +496,7 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
     )
     if report_completed:
         if remote_plan:
-            _validate_recorded_remote_state(state_path)
+            _validate_recorded_remote_state(state_path, config)
         return {"reconciled": False, "replaced": False, "rollback": None}
 
     replicate_started = _replication_attempt_started(pipeline_state)
@@ -511,6 +509,7 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
 
     reconciliation: dict[str, Any] = {"reconciled": False, "replaced": False}
     if state_path.is_file():
+        _validate_recorded_remote_state(state_path, config)
         reconciliation = {
             "reconciled": True,
             **reconcile_run_computation_instance(config),
@@ -759,6 +758,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             computation_provider_state_path,
             cloud_dataset=config.cloud_dataset if config.clouddrive else None,
             drive_provider=config.drive_provider,
+            computation_provider=config.computation_provider,
             require_active=not completed_run_validation,
         )
         load_model(dataset_patch_path, DatasetPatchFile)
@@ -810,12 +810,6 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         )
 
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
-    computation_provider = (
-        "AutoDL"
-        if config.clouddrive
-        or (os.environ.get("AUTODL_TOKEN") and os.environ.get("AUTODL_IMAGE_UUID"))
-        else None
-    )
     prompt_path = render_prompt(
         "codegen/session_instructions.md",
         config.output / "prompts" / "codegen.md",
@@ -827,9 +821,9 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         cloud_drive_enabled=config.clouddrive,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
-        cloud_source=(
-            f"medai/{config.cloud_dataset}" if config.cloud_dataset else None
-        ),
+        cloud_source=config.cloud_source,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
         infrastructure_resume=infrastructure_resume,
         skills_dir=skills_dir(),
         codegen_plan_path=codegen_plan_path,
@@ -837,7 +831,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         skill_corrections_path=skill_corrections_path,
         computation_provider_state_path=computation_provider_state_path,
         gpu_info=resources["gpus"],
-        computation_provider=computation_provider,
+        computation_provider=config.computation_provider,
         resuming=previous_status in {"running", "failed", "invalidated"},
         audit_feedback_path=audit_feedback_path,
     )
@@ -856,6 +850,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         computation_provider_state_path,
         cloud_dataset=config.cloud_dataset if config.clouddrive else None,
         drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
     )
     load_model(dataset_patch_path, DatasetPatchFile)
     load_model(skill_corrections_path, SkillCorrectionsFile)
@@ -931,6 +926,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         config.output / "remote_compute" / "instance.json",
         cloud_dataset=config.cloud_dataset if config.clouddrive else None,
         drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
     )
     remote_working_dir = (
         codegen_plan.remote_compute.remote_working_dir
@@ -953,6 +949,8 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         cloud_drive_enabled=config.clouddrive,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
         remote_dataset_dir=(
             cloud_drive_state.get("target_path") if cloud_drive_state else None
         ),
@@ -1028,6 +1026,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
             config.output / "remote_compute" / "instance.json",
             cloud_dataset=config.cloud_dataset if config.clouddrive else None,
             drive_provider=config.drive_provider,
+            computation_provider=config.computation_provider,
             require_active=not pipeline_state.is_stage_completed("report_agents"),
         )
         if not transcript_path.is_file():
@@ -1047,6 +1046,9 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         cloud_drive_enabled=config.clouddrive,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
         skills_dir=skills_dir(),
@@ -1074,6 +1076,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         config.output / "remote_compute" / "instance.json",
         cloud_dataset=config.cloud_dataset if config.clouddrive else None,
         drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
         require_active=not pipeline_state.is_stage_completed("report_agents"),
     )
     pipeline_state.complete_stage(
@@ -1095,6 +1098,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         config.output / "remote_compute" / "instance.json",
         cloud_dataset=config.cloud_dataset if config.clouddrive else None,
         drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
         require_active=not pipeline_state.is_stage_completed("report_agents"),
     )
     if pipeline_state.is_stage_completed("replicate_agent"):
@@ -1122,6 +1126,9 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         cloud_drive_enabled=config.clouddrive,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
         smart=config.smart_replicate,
         smart_anchors=json.dumps(
             [
