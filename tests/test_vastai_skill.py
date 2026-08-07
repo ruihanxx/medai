@@ -275,6 +275,19 @@ def test_vastai_search_filters_and_stably_sorts_eligible_offers(tmp_path: Path):
         "verified": {"eq": True},
         "rentable": {"eq": True},
         "rented": {"eq": False},
+        "cpu_arch": {"in": ["amd64", "x86_64"]},
+        "num_gpus": {"gte": 1},
+        "gpu_ram": {"gte": 24 * 1024},
+        "cpu_ram": {"gte": 32 * 1024},
+        "dph_total": {"lte": 2.0},
+        "reliability": {"gte": 0.99},
+        "disk_space": {"gte": 64},
+        "allocated_storage": 64,
+        "order": [
+            ["dph_total", "asc"],
+            ["reliability", "desc"],
+            ["id", "asc"],
+        ],
     }
 
 

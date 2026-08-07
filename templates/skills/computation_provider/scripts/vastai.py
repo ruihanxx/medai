@@ -317,6 +317,19 @@ def search_offers(specification: dict[str, Any]) -> list[dict[str, Any]]:
             "verified": {"eq": True},
             "rentable": {"eq": True},
             "rented": {"eq": False},
+            "cpu_arch": {"in": ["amd64", "x86_64"]},
+            "num_gpus": {"gte": specification["gpu_count"]},
+            "gpu_ram": {"gte": specification["min_gpu_ram_gb"] * 1024},
+            "cpu_ram": {"gte": specification["min_cpu_ram_gb"] * 1024},
+            "dph_total": {"lte": specification["max_dph"]},
+            "reliability": {"gte": specification["min_reliability"]},
+            "disk_space": {"gte": specification["disk_gb"]},
+            "allocated_storage": specification["disk_gb"],
+            "order": [
+                ["dph_total", "asc"],
+                ["reliability", "desc"],
+                ["id", "asc"],
+            ],
         },
     )
     candidates = []
