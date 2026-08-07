@@ -330,7 +330,7 @@ def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path:
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "instance-1"
     selection = next(item for item in requests if item["path"] == "/api/v0/bundles")
-    assert selection["body"]["id"] == {"eq": 12345}
+    assert selection["body"]["ask_contract_id"] == {"eq": 12345}
     assert selection["body"]["limit"] == 1
     created = next(item for item in requests if item["path"] == "/api/v0/asks/12345/")
     assert created["body"]["disk"] == 64
