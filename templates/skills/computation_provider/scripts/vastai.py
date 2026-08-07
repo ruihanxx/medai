@@ -395,7 +395,7 @@ def search_offers(
         ],
     }
     if offer_id is not None:
-        body["id"] = {"eq": offer_id}
+        body["id"] = {"eq": int(offer_id) if offer_id.isdecimal() else offer_id}
     payload = request("POST", "/api/v0/bundles", body)
     candidates = []
     for raw in _offers_payload(payload):

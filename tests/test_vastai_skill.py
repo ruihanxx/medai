@@ -296,7 +296,7 @@ def test_vastai_search_filters_and_stably_sorts_eligible_offers(tmp_path: Path):
 
 def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
-    selected = offer("primary")
+    selected = offer("12345")
     identity = tmp_path / "ssh" / "medai-vast"
     identity.parent.mkdir()
     identity.write_text("local-private-secret", encoding="utf-8")
@@ -313,14 +313,14 @@ def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path:
                     "deleted_at": None,
                 }
             ],
-            ("PUT", "/api/v0/asks/primary/"): {"success": True, "new_contract": "instance-1"},
+            ("PUT", "/api/v0/asks/12345/"): {"success": True, "new_contract": "instance-1"},
             ("GET", "/api/v0/instances/instance-1/"): {
                 "instances": {"actual_status": "running", "ssh_host": "host", "ssh_port": 22}
             },
         }
     ) as (base_url, requests):
         completed = run_adapter(
-            ["create", "--state", str(state_path), "--offer-id", "primary"],
+            ["create", "--state", str(state_path), "--offer-id", "12345"],
             {
                 **adapter_environment(base_url),
                 "COMPUTATION_PROVIDER_SSH_IDENTITY_FILE": str(identity),
@@ -330,9 +330,9 @@ def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path:
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip() == "instance-1"
     selection = next(item for item in requests if item["path"] == "/api/v0/bundles")
-    assert selection["body"]["id"] == {"eq": "primary"}
+    assert selection["body"]["id"] == {"eq": 12345}
     assert selection["body"]["limit"] == 1
-    created = next(item for item in requests if item["path"] == "/api/v0/asks/primary/")
+    created = next(item for item in requests if item["path"] == "/api/v0/asks/12345/")
     assert created["body"]["disk"] == 64
     assert created["body"]["image"] == "registry.example/medai@sha256:image"
     assert created["body"]["runtype"] == "ssh"
