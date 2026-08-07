@@ -371,31 +371,32 @@ def _offers_payload(payload: Any) -> list[dict[str, Any]]:
     return values
 
 
-def search_offers(specification: dict[str, Any]) -> list[dict[str, Any]]:
-    payload = request(
-        "POST",
-        "/api/v0/bundles",
-        {
-            "limit": 100,
-            "type": "on-demand",
-            "verified": {"eq": True},
-            "rentable": {"eq": True},
-            "rented": {"eq": False},
-            "cpu_arch": {"in": ["amd64", "x86_64"]},
-            "num_gpus": {"gte": specification["gpu_count"]},
-            "gpu_ram": {"gte": specification["min_gpu_ram_gb"] * 1024},
-            "cpu_ram": {"gte": specification["min_cpu_ram_gb"] * 1024},
-            "dph_total": {"lte": specification["max_dph"]},
-            "reliability": {"gte": specification["min_reliability"]},
-            "disk_space": {"gte": specification["disk_gb"]},
-            "allocated_storage": specification["disk_gb"],
-            "order": [
-                ["dph_total", "asc"],
-                ["reliability", "desc"],
-                ["id", "asc"],
-            ],
-        },
-    )
+def search_offers(
+    specification: dict[str, Any], offer_id: str | None = None
+) -> list[dict[str, Any]]:
+    body = {
+        "limit": 1 if offer_id is not None else 100,
+        "type": "on-demand",
+        "verified": {"eq": True},
+        "rentable": {"eq": True},
+        "rented": {"eq": False},
+        "cpu_arch": {"in": ["amd64", "x86_64"]},
+        "num_gpus": {"gte": specification["gpu_count"]},
+        "gpu_ram": {"gte": specification["min_gpu_ram_gb"] * 1024},
+        "cpu_ram": {"gte": specification["min_cpu_ram_gb"] * 1024},
+        "dph_total": {"lte": specification["max_dph"]},
+        "reliability": {"gte": specification["min_reliability"]},
+        "disk_space": {"gte": specification["disk_gb"]},
+        "allocated_storage": specification["disk_gb"],
+        "order": [
+            ["dph_total", "asc"],
+            ["reliability", "desc"],
+            ["id", "asc"],
+        ],
+    }
+    if offer_id is not None:
+        body["id"] = {"eq": offer_id}
+    payload = request("POST", "/api/v0/bundles", body)
     candidates = []
     for raw in _offers_payload(payload):
         try:
@@ -441,7 +442,11 @@ def search(args: argparse.Namespace) -> None:
 
 
 def _selected_offer(offer_id: str, specification: dict[str, Any]) -> dict[str, Any]:
-    matches = [offer for offer in search_offers(specification) if offer["id"] == offer_id]
+    matches = [
+        offer
+        for offer in search_offers(specification, offer_id=offer_id)
+        if offer["id"] == offer_id
+    ]
     if len(matches) != 1:
         raise RuntimeError("Selected Vast offer is unavailable or no longer eligible")
     return matches[0]
