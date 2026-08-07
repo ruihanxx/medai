@@ -93,6 +93,9 @@ The adapter owns the state schema. Do not hand-edit it. It records a stable
 Before every SSH, upload, download, or execution operation, the adapter reads
 the current instance, prefers its direct SSH endpoint when present, otherwise
 uses its proxy endpoint, and delegates to the shared `scripts/ssh.py` helper.
+If direct public-key authentication fails during the helper's harmless probe,
+the adapter tries the proxy endpoint; it never retries an operation that may
+already have executed.
 Use `exec` for short checks and `upload` only for code and non-cloud inputs.
 Retrieve outputs, logs, and exit-status evidence before the replication plan
 powers the instance off.

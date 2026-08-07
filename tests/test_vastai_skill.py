@@ -126,6 +126,27 @@ def cloud_inventory(dataset: str, digest: str = "a" * 64) -> str:
     )
 
 
+def test_vastai_inventory_program_globally_sorts_nested_paths(tmp_path: Path):
+    root = tmp_path / "dataset"
+    (root / "0-dir").mkdir(parents=True)
+    (root / "z.txt").write_text("root", encoding="utf-8")
+    (root / "0-dir" / "nested.txt").write_text("nested", encoding="utf-8")
+    module = load_vastai_module()
+
+    completed = subprocess.run(
+        [sys.executable, "-c", module.INVENTORY_PROGRAM, "inventory", str(root), "dataset-a"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    inventory = json.loads(completed.stdout)
+    assert [item["path"] for item in inventory["files"]] == [
+        "0-dir/nested.txt",
+        "z.txt",
+    ]
+
+
 def vast_state(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -530,6 +551,66 @@ def test_vastai_reconcile_starts_a_stopped_instance_and_reuses_a_healthy_ssh_con
     assert [item["body"] for item in requests if item["method"] == "PUT"] == [{"state": "running"}]
 
 
+def test_vastai_power_off_accepts_exited_when_control_plane_is_stopped(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    vast_state(state_path)
+    states = iter(
+        [
+            {"actual_status": "running", "cur_state": "running"},
+            {"actual_status": "exited", "cur_state": "stopped"},
+        ]
+    )
+    with vast_api(
+        {
+            ("GET", "/api/v0/instances/instance-1/"): lambda _: {
+                "instances": next(states)
+            },
+            ("PUT", "/api/v0/instances/instance-1/"): {"success": True},
+        }
+    ) as (base_url, requests):
+        completed = run_adapter(
+            ["power-off", "--state", str(state_path)], adapter_environment(base_url)
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "stopped"
+    assert [item["body"] for item in requests if item["method"] == "PUT"] == [
+        {"state": "stopped"}
+    ]
+
+
+def test_vastai_power_on_waits_through_exited_when_control_plane_is_running(
+    tmp_path: Path, monkeypatch
+):
+    state_path = tmp_path / "instance.json"
+    vast_state(state_path)
+    states = iter(
+        [
+            {"actual_status": "exited", "cur_state": "stopped"},
+            {"actual_status": "exited", "cur_state": "running"},
+            {"actual_status": "running", "cur_state": "running"},
+        ]
+    )
+    with vast_api(
+        {
+            ("GET", "/api/v0/instances/instance-1/"): lambda _: {
+                "instances": next(states)
+            },
+            ("PUT", "/api/v0/instances/instance-1/"): {"success": True},
+        }
+    ) as (base_url, requests):
+        for name, value in adapter_environment(base_url).items():
+            monkeypatch.setenv(name, value)
+        module = load_vastai_module()
+        monkeypatch.setattr(module.time, "sleep", lambda _: None)
+        status = module.power_on_instance(argparse.Namespace(state=state_path))
+
+    assert status == "running"
+    assert [item["body"] for item in requests if item["method"] == "PUT"] == [
+        {"state": "running"}
+    ]
+
+
 def test_vastai_release_stops_then_confirms_irreversible_destroy(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
     vast_state(state_path)
@@ -622,6 +703,54 @@ def test_vastai_prefers_the_direct_ssh_endpoint(tmp_path: Path):
     assert "ssh1.vast.ai" not in command_text
 
 
+def test_vastai_falls_back_to_proxy_only_after_direct_authentication_failure(
+    tmp_path: Path,
+):
+    state_path = tmp_path / "instance.json"
+    vast_state(state_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    command_log = tmp_path / "ssh.log"
+    ssh = fake_bin / "ssh"
+    ssh.write_text(
+        """#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$MEDAI_TEST_SSH_LOG"
+if [[ "$*" == *"203.0.113.10"* ]]; then
+    exit 255
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    ssh.chmod(0o755)
+    with vast_api(
+        {
+            ("GET", "/api/v0/instances/instance-1/"): {
+                "instances": {
+                    "actual_status": "running",
+                    "ssh_host": "ssh1.vast.ai",
+                    "ssh_port": 10022,
+                    "public_ipaddr": "203.0.113.10",
+                    "machine_dir_ssh_port": 61999,
+                }
+            }
+        }
+    ) as (base_url, _):
+        completed = run_adapter(
+            ["exec", "--state", str(state_path), "--", "true"],
+            {
+                **adapter_environment(base_url),
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                "MEDAI_TEST_SSH_LOG": str(command_log),
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    command_text = command_log.read_text(encoding="utf-8")
+    assert command_text.count("203.0.113.10") == 1
+    assert command_text.count("ssh1.vast.ai") == 2
+
+
 def test_vastai_google_drive_metadata_is_selected_and_fingerprinted(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("MEDAI_COMPUTATION_PROVIDER", "vastai")
     monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "google-drive")
@@ -664,7 +793,7 @@ def test_vastai_cloud_pull_materializes_readonly_inventory_without_credentials(t
             ("GET", "/api/v0/instances/instance-1/"): {
                 "instances": {
                     "actual_status": "running",
-                    "status_msg": "Cloud Copy Operation Finished",
+                    "status_msg": "Cloud Copy Operation Complete",
                     "ssh_host": "host",
                     "ssh_port": 22,
                 }
@@ -704,6 +833,83 @@ def test_vastai_cloud_pull_materializes_readonly_inventory_without_credentials(t
     assert "vast-secret" not in state_text
     assert "result-secret" not in state_text
     assert "mv --" in command_log.read_text(encoding="utf-8")
+
+
+def test_vastai_cloud_pull_restarts_same_instance_when_staging_is_not_visible(
+    tmp_path: Path,
+):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    ssh_log = tmp_path / "ssh.log"
+    staging_probe = tmp_path / "staging-probed"
+    ssh = fake_bin / "ssh"
+    ssh.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+command="${!#}"
+printf '%s\n' "$command" >> "$MEDAI_TEST_SSH_LOG"
+if [[ "$command" == *"test -d"* ]] && [[ ! -e "$MEDAI_TEST_STAGING_PROBE" ]]; then
+    touch "$MEDAI_TEST_STAGING_PROBE"
+    exit 1
+fi
+if [[ "$command" == *"medai-cloud-inventory"* ]]; then
+    printf '%s\n' "$MEDAI_TEST_CLOUD_INVENTORY"
+fi
+""",
+        encoding="utf-8",
+    )
+    ssh.chmod(0o755)
+    show_count = 0
+
+    def show_instance(_):
+        nonlocal show_count
+        show_count += 1
+        if show_count in {5, 6}:
+            status = {"actual_status": "exited", "cur_state": "stopped"}
+        else:
+            status = {"actual_status": "running", "cur_state": "running"}
+        return {
+            "instances": {
+                **status,
+                "status_msg": "Cloud Copy Operation Complete",
+                "ssh_host": "host",
+                "ssh_port": 22,
+            }
+        }
+
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("POST", "/api/v0/commands/rclone/"): {"success": True},
+            ("GET", "/api/v0/instances/instance-1/"): show_instance,
+            ("PUT", "/api/v0/instances/instance-1/"): {"success": True},
+        }
+    ) as (base_url, requests):
+        completed = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a"],
+            {
+                **adapter_environment(base_url),
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                "MEDAI_TEST_CLOUD_INVENTORY": cloud_inventory("dataset-a"),
+                "MEDAI_TEST_SSH_LOG": str(ssh_log),
+                "MEDAI_TEST_STAGING_PROBE": str(staging_probe),
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert [item["body"] for item in requests if item["method"] == "PUT"] == [
+        {"state": "stopped"},
+        {"state": "running"},
+    ]
+    assert staging_probe.is_file()
+    assert json.loads(state_path.read_text(encoding="utf-8"))["provider_state"][
+        "cloud_drive"
+    ]["completed"] is True
 
 
 def test_vastai_cloud_pull_rejects_a_changed_inventory_on_repeat(tmp_path: Path):

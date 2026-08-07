@@ -58,6 +58,12 @@ atomically to:
 /workspace/medai/<run_token>/data/<dataset>
 ```
 
+After Vast reports Cloud Copy completion, the adapter probes the exact staging
+directory. If host-side copied data is not yet visible in the running Docker
+container, it stops and restarts that same instance once, then requires the
+staging path to become visible before generating the inventory. It never rents
+a replacement or starts a second Cloud Copy for this mount refresh.
+
 It then makes that target read-only, records its path and inventory digest in
 provider state, and prints the path. Use that exact completed `target_path` as
 every remote plan's `remote_dataset_dir`; never rematerialize or copy raw cloud

@@ -71,6 +71,7 @@ for current, directories, names in os.walk(root, followlinks=False):
                 "sha256": digest.hexdigest(),
             }
         )
+files.sort(key=lambda item: item["path"])
 if not files:
     raise SystemExit("inventory does not permit an empty dataset")
 print(
@@ -710,6 +711,12 @@ def instance_status(state: dict[str, Any]) -> str:
     if not isinstance(raw, str) or not raw:
         raise RuntimeError("Vast instance status is missing")
     normalized = raw.casefold()
+    control_state = instance.get("cur_state", instance.get("intended_status"))
+    if normalized == "exited" and isinstance(control_state, str):
+        if control_state.casefold() == "stopped":
+            return "stopped"
+        if control_state.casefold() == "running":
+            return "provisioning"
     if normalized == "running":
         return "running"
     if normalized == "stopped":
@@ -742,38 +749,55 @@ def _ssh_command(
     instance = show_instance(state)
     direct_host = instance.get("public_ipaddr")
     direct_port = instance.get("machine_dir_ssh_port")
+    proxy_host = instance.get("ssh_host")
+    proxy_port = instance.get("ssh_port")
+    endpoints: list[tuple[str, int | str]] = []
     if (
         isinstance(direct_host, str)
         and direct_host
         and not isinstance(direct_port, bool)
         and isinstance(direct_port, (int, str))
     ):
-        host = direct_host
-        port = direct_port
-    else:
-        host = instance.get("ssh_host")
-        port = instance.get("ssh_port")
-    if not isinstance(host, str) or not host or isinstance(port, bool) or not isinstance(port, (int, str)):
+        endpoints.append((direct_host, direct_port))
+    if (
+        isinstance(proxy_host, str)
+        and proxy_host
+        and not isinstance(proxy_port, bool)
+        and isinstance(proxy_port, (int, str))
+        and (proxy_host, str(proxy_port))
+        not in {(host, str(port)) for host, port in endpoints}
+    ):
+        endpoints.append((proxy_host, proxy_port))
+    if not endpoints:
         raise RuntimeError("Vast instance is missing SSH connection details")
     environment = os.environ.copy()
     environment.pop("COMPUTATION_PROVIDER_SSH_PASSWORD", None)
-    return subprocess.run(
-        [
-            sys.executable,
-            str(SSH_SCRIPT),
-            "--host",
-            host,
-            "--port",
-            str(port),
-            "--user",
-            "root",
-            action,
-            *arguments,
-        ],
-        capture_output=True,
-        text=True,
-        env=environment,
-    )
+    for index, (host, port) in enumerate(endpoints):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(SSH_SCRIPT),
+                "--host",
+                host,
+                "--port",
+                str(port),
+                "--user",
+                "root",
+                action,
+                *arguments,
+            ],
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        if (
+            completed.returncode == 0
+            or index == len(endpoints) - 1
+            or "SSH public-key authentication failed and no fallback password is available"
+            not in completed.stderr
+        ):
+            return completed
+    raise RuntimeError("Vast SSH endpoint selection failed")
 
 
 def remote_exec(state: dict[str, Any], command: list[str]) -> str:
@@ -1167,7 +1191,13 @@ def _wait_for_cloud_copy(state: dict[str, Any], cloud: dict[str, Any]) -> str:
         instance = show_instance(state)
         message = instance.get("status_msg")
         text = message.casefold() if isinstance(message, str) else ""
-        if "cloud copy operation finished" in text:
+        if any(
+            marker in text
+            for marker in (
+                "cloud copy operation finished",
+                "cloud copy operation complete",
+            )
+        ):
             return "completed"
         if any(marker in text for marker in ("error", "failed", "cancelled", "canceled")):
             return "failed"
@@ -1194,6 +1224,19 @@ def _cancel_cloud_copy(state: dict[str, Any], cloud: dict[str, Any]) -> None:
     _successful(request("DELETE", "/api/v0/commands/rclone/", {"dst_id": instance_id}))
     cloud["cancel_confirmed"] = True
     _cleanup_cloud_staging(state, cloud)
+
+
+def _ensure_cloud_staging_visible(
+    state_path: Path, state: dict[str, Any], cloud: dict[str, Any]
+) -> None:
+    command = ["--", "test", "-d", cloud["staging_path"]]
+    if _ssh_command(state, "exec", command).returncode == 0:
+        return
+    lifecycle_args = argparse.Namespace(state=state_path)
+    power_off_instance(lifecycle_args)
+    power_on_instance(lifecycle_args)
+    if _ssh_command(state, "exec", command).returncode != 0:
+        raise RuntimeError("Vast cloud-copy staging is not visible after instance restart")
 
 
 def _start_cloud_copy(state_path: Path, state: dict[str, Any], cloud: dict[str, Any]) -> None:
@@ -1281,6 +1324,8 @@ def cloud_pull(args: argparse.Namespace) -> None:
         remote_exec(state, ["test", "!", "-e", cloud["target_path"]])
         _start_cloud_copy(args.state, state, cloud)
     elif cloud.get("status") == "verifying":
+        if cloud.get("materialized") is not True:
+            _ensure_cloud_staging_visible(args.state, state, cloud)
         print(_complete_cloud_pull(args.state, state, cloud, dataset))
         return
     elif cloud.get("status") not in {"requesting", "copying"}:
@@ -1294,6 +1339,7 @@ def cloud_pull(args: argparse.Namespace) -> None:
         _update_cloud(args.state, state, cloud, "failed")
         raise RuntimeError("Vast Google Drive cloud copy failed")
     _update_cloud(args.state, state, cloud, "verifying")
+    _ensure_cloud_staging_visible(args.state, state, cloud)
     print(_complete_cloud_pull(args.state, state, cloud, dataset))
 
 
