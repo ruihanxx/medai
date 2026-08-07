@@ -33,7 +33,10 @@ categories at <https://docs.vast.ai/api-reference/authentication> and
 
 Add a public SSH key to the Vast account and keep the matching private key under
 the host `~/.ssh`. Set `COMPUTATION_PROVIDER_SSH_IDENTITY_FILE` only when the
-normal OpenSSH configuration cannot select the correct key. Vast does not use a
+normal OpenSSH configuration cannot select the correct key. When it is set, keep
+the matching public key at `<identity-file>.pub`; before renting, the adapter
+verifies that key against the Vast account and injects it through the instance
+`onstart` command without persisting it in run state. Vast does not use a
 password fallback.
 
 ## Select and Create
@@ -88,10 +91,11 @@ The adapter owns the state schema. Do not hand-edit it. It records a stable
 ```
 
 Before every SSH, upload, download, or execution operation, the adapter reads
-the current instance to obtain its SSH host and port, then delegates to the
-shared `scripts/ssh.py` helper. Use `exec` for short checks and `upload` only
-for code and non-cloud inputs. Retrieve outputs, logs, and exit-status evidence
-before the replication plan powers the instance off.
+the current instance, prefers its direct SSH endpoint when present, otherwise
+uses its proxy endpoint, and delegates to the shared `scripts/ssh.py` helper.
+Use `exec` for short checks and `upload` only for code and non-cloud inputs.
+Retrieve outputs, logs, and exit-status evidence before the replication plan
+powers the instance off.
 
 Use only these common commands after state exists:
 

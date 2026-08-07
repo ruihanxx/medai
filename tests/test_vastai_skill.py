@@ -101,12 +101,14 @@ def vast_api(routes: dict[tuple[str, str], Any]):
 
 
 def adapter_environment(base_url: str) -> dict[str, str]:
-    return {
+    environment = {
         **os.environ,
         "VAST_API_KEY": "vast-secret",
         "VASTAI_IMAGE": "registry.example/medai@sha256:image",
         "VASTAI_API_BASE_URL": base_url,
     }
+    environment.pop("COMPUTATION_PROVIDER_SSH_IDENTITY_FILE", None)
+    return environment
 
 
 def cloud_inventory(dataset: str, digest: str = "a" * 64) -> str:
@@ -175,6 +177,7 @@ def fake_cloud_ssh_environment(tmp_path: Path, inventory: str) -> tuple[dict[str
         """#!/usr/bin/env bash
 set -euo pipefail
 command="${!#}"
+printf 'ARGS %s\n' "$*" >> "$MEDAI_TEST_CLOUD_COMMAND_LOG"
 if [[ "$command" == "true" ]]; then
     exit 0
 fi
@@ -294,9 +297,22 @@ def test_vastai_search_filters_and_stably_sorts_eligible_offers(tmp_path: Path):
 def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
     selected = offer("primary")
+    identity = tmp_path / "ssh" / "medai-vast"
+    identity.parent.mkdir()
+    identity.write_text("local-private-secret", encoding="utf-8")
+    public_key = "ssh-ed25519 ZmFrZS1wdWJsaWMta2V5 medai-vast"
+    Path(f"{identity}.pub").write_text(public_key + "\n", encoding="utf-8")
     with vast_api(
         {
             ("POST", "/api/v0/bundles"): {"offers": [selected]},
+            ("GET", "/api/v0/ssh"): [
+                {
+                    "id": 7,
+                    "public_key": public_key,
+                    "private_key": "provider-private-secret",
+                    "deleted_at": None,
+                }
+            ],
             ("PUT", "/api/v0/asks/primary/"): {"success": True, "new_contract": "instance-1"},
             ("GET", "/api/v0/instances/instance-1/"): {
                 "instances": {"actual_status": "running", "ssh_host": "host", "ssh_port": 22}
@@ -305,7 +321,10 @@ def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path:
     ) as (base_url, requests):
         completed = run_adapter(
             ["create", "--state", str(state_path), "--offer-id", "primary"],
-            adapter_environment(base_url),
+            {
+                **adapter_environment(base_url),
+                "COMPUTATION_PROVIDER_SSH_IDENTITY_FILE": str(identity),
+            },
         )
 
     assert completed.returncode == 0, completed.stderr
@@ -315,12 +334,85 @@ def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path:
     assert created["body"]["image"] == "registry.example/medai@sha256:image"
     assert created["body"]["runtype"] == "ssh"
     assert created["body"]["target_state"] == "running"
+    assert "ssh-ed25519 ZmFrZS1wdWJsaWMta2V5" in created["body"]["onstart"]
+    assert "local-private-secret" not in json.dumps(requests)
+    assert "provider-private-secret" not in json.dumps(created)
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["provider"] == "vastai"
     assert state["provider_state"]["instance_id"] == "instance-1"
     assert state["provider_state"]["requested"]["min_gpu_ram_gb"] == 24
     assert "/workspace/medai/" in state["provider_state"]["remote_working_dir"]
     assert "vast-secret" not in state_path.read_text(encoding="utf-8")
+    assert "ZmFrZS1wdWJsaWMta2V5" not in state_path.read_text(encoding="utf-8")
+
+
+def test_vastai_create_waits_through_an_initial_null_status(tmp_path: Path, monkeypatch):
+    state_path = tmp_path / "instance.json"
+    statuses = iter([None, "loading", "running"])
+    with vast_api(
+        {
+            ("POST", "/api/v0/bundles"): {"offers": [offer("primary")]},
+            ("PUT", "/api/v0/asks/primary/"): {"success": True, "new_contract": "instance-1"},
+            ("GET", "/api/v0/instances/instance-1/"): lambda _: {
+                "instances": {"actual_status": next(statuses)}
+            },
+        }
+    ) as (base_url, _):
+        for name, value in adapter_environment(base_url).items():
+            monkeypatch.setenv(name, value)
+        module = load_vastai_module()
+        monkeypatch.setattr(module.time, "sleep", lambda _: None)
+        instance_id = module.create_instance(
+            argparse.Namespace(
+                state=state_path,
+                offer_id="primary",
+                fallback_offer_id=None,
+                gpu_name=None,
+                gpu_count=None,
+                min_gpu_ram_gb=None,
+                min_cpu_ram_gb=None,
+                max_dph=None,
+                min_reliability=None,
+                disk_gb=None,
+                image=None,
+            )
+        )
+
+    assert instance_id == "instance-1"
+
+
+def test_vastai_refuses_rental_when_explicit_ssh_key_is_not_registered(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    identity = tmp_path / "medai-vast"
+    identity.write_text("local-private-secret", encoding="utf-8")
+    Path(f"{identity}.pub").write_text(
+        "ssh-ed25519 ZmFrZS1wdWJsaWMta2V5 medai-vast\n", encoding="utf-8"
+    )
+    with vast_api(
+        {
+            ("POST", "/api/v0/bundles"): {"offers": [offer("primary")]},
+            ("GET", "/api/v0/ssh"): [
+                {
+                    "id": 8,
+                    "public_key": "ssh-ed25519 ZGlmZmVyZW50LWtleQ== other",
+                    "deleted_at": None,
+                }
+            ],
+        }
+    ) as (base_url, requests):
+        completed = run_adapter(
+            ["create", "--state", str(state_path), "--offer-id", "primary"],
+            {
+                **adapter_environment(base_url),
+                "COMPUTATION_PROVIDER_SSH_IDENTITY_FILE": str(identity),
+            },
+        )
+
+    assert completed.returncode != 0
+    assert "not registered" in completed.stderr
+    assert not state_path.exists()
+    assert not any(item["method"] == "PUT" for item in requests)
+    assert "local-private-secret" not in completed.stderr
 
 
 def test_vastai_uses_one_fallback_only_after_explicit_primary_no_inventory(tmp_path: Path):
@@ -451,7 +543,7 @@ def test_vastai_release_stops_then_confirms_irreversible_destroy(tmp_path: Path)
         [
             {"instances": {"actual_status": "running"}},
             {"instances": {"actual_status": "stopped"}},
-            (404, {"msg": "not found"}),
+            {"instances": []},
         ]
     )
     with vast_api(
@@ -459,13 +551,72 @@ def test_vastai_release_stops_then_confirms_irreversible_destroy(tmp_path: Path)
             ("GET", "/api/v0/instances/instance-1/"): lambda _: next(responses),
             ("PUT", "/api/v0/instances/instance-1/"): {"success": True},
             ("DELETE", "/api/v0/instances/instance-1/"): {"success": True},
+            ("GET", "/api/v1/instances/"): {"instances": []},
         }
     ) as (base_url, requests):
         completed = run_adapter(["release", "--state", str(state_path)], adapter_environment(base_url))
 
     assert completed.returncode == 0, completed.stderr
     assert json.loads(state_path.read_text(encoding="utf-8"))["released"] is True
-    assert [item["method"] for item in requests] == ["GET", "PUT", "GET", "DELETE", "GET"]
+    assert [item["method"] for item in requests] == ["GET", "PUT", "GET", "DELETE", "GET", "GET"]
+
+
+def test_vastai_release_keeps_ownership_when_empty_show_conflicts_with_listing(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    vast_state(state_path)
+    responses = iter(
+        [
+            {"instances": {"actual_status": "running"}},
+            {"instances": {"actual_status": "stopped"}},
+            {"instances": []},
+        ]
+    )
+    with vast_api(
+        {
+            ("GET", "/api/v0/instances/instance-1/"): lambda _: next(responses),
+            ("PUT", "/api/v0/instances/instance-1/"): {"success": True},
+            ("DELETE", "/api/v0/instances/instance-1/"): {"success": True},
+            ("GET", "/api/v1/instances/"): {"instances": [{"id": "instance-1"}]},
+        }
+    ) as (base_url, _):
+        completed = run_adapter(
+            ["release", "--state", str(state_path)], adapter_environment(base_url)
+        )
+
+    assert completed.returncode != 0
+    assert "remains visible" in completed.stderr
+    assert json.loads(state_path.read_text(encoding="utf-8"))["released"] is False
+
+
+def test_vastai_prefers_the_direct_ssh_endpoint(tmp_path: Path):
+    state_path = tmp_path / "instance.json"
+    vast_state(state_path)
+    ssh_environment, command_log = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
+    with vast_api(
+        {
+            ("GET", "/api/v0/instances/instance-1/"): {
+                "instances": {
+                    "actual_status": "running",
+                    "ssh_host": "ssh1.vast.ai",
+                    "ssh_port": 10022,
+                    "public_ipaddr": "203.0.113.10",
+                    "machine_dir_ssh_port": 61999,
+                }
+            }
+        }
+    ) as (base_url, _):
+        completed = run_adapter(
+            ["exec", "--state", str(state_path), "--", "true"],
+            {**adapter_environment(base_url), **ssh_environment},
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    command_text = command_log.read_text(encoding="utf-8")
+    assert "203.0.113.10" in command_text
+    assert "61999" in command_text
+    assert "ssh1.vast.ai" not in command_text
 
 
 def test_vastai_google_drive_metadata_is_selected_and_fingerprinted(tmp_path: Path, monkeypatch):

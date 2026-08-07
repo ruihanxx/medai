@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -25,6 +28,15 @@ NO_INVENTORY_MARKERS = (
 )
 CLOUD_COPY_TIMEOUT_SECONDS = 3600
 INVENTORY_FILENAME = "cloud-inventory.v1.json"
+SSH_KEY_TYPES = {
+    "ecdsa-sha2-nistp256",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp521",
+    "sk-ecdsa-sha2-nistp256@openssh.com",
+    "sk-ssh-ed25519@openssh.com",
+    "ssh-ed25519",
+    "ssh-rsa",
+}
 INVENTORY_PROGRAM = r'''
 import hashlib
 import json
@@ -126,6 +138,58 @@ def _api_base_url() -> str:
 def _redact(value: str) -> str:
     token = os.environ.get("VAST_API_KEY", "").strip().strip("'\"")
     return value.replace(token, "<redacted>") if token else value
+
+
+def _public_key_identity(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.split()
+    if len(parts) < 2 or parts[0] not in SSH_KEY_TYPES:
+        return None
+    try:
+        decoded = base64.b64decode(parts[1], validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    return f"{parts[0]} {parts[1]}" if decoded else None
+
+
+def _configured_ssh_public_key() -> str | None:
+    raw_identity = (
+        os.environ.get("COMPUTATION_PROVIDER_SSH_IDENTITY_FILE", "")
+        .strip()
+        .strip("'\"")
+    )
+    if not raw_identity:
+        return None
+    public_key_path = Path(f"{Path(raw_identity).expanduser()}.pub")
+    try:
+        lines = [
+            line.strip()
+            for line in public_key_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except OSError as exc:
+        raise RuntimeError(f"Vast SSH public key is missing: {public_key_path}") from exc
+    if len(lines) != 1:
+        raise RuntimeError("Vast SSH public key file must contain exactly one key")
+    public_key = _public_key_identity(lines[0])
+    if public_key is None:
+        raise RuntimeError("Vast SSH public key is invalid or unsupported")
+    return public_key
+
+
+def _validate_account_ssh_key(public_key: str) -> None:
+    payload = request("GET", "/api/v0/ssh")
+    if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+        raise RuntimeError("Vast account SSH-key listing returned an unsupported response structure")
+    matches = [
+        item
+        for item in payload
+        if item.get("deleted_at") in {None, ""}
+        and _public_key_identity(item.get("public_key") or item.get("key")) == public_key
+    ]
+    if not matches:
+        raise RuntimeError("Configured SSH public key is not registered with the Vast account")
 
 
 def request(
@@ -487,19 +551,34 @@ def _is_explicit_no_inventory(error: VastApiError) -> bool:
     )
 
 
-def _create_offer(state_path: Path, state: dict[str, Any], offer: dict[str, Any]) -> str:
+def _create_offer(
+    state_path: Path,
+    state: dict[str, Any],
+    offer: dict[str, Any],
+    ssh_public_key: str | None,
+) -> str:
     provider_state = state["provider_state"]
     requested = provider_state["requested"]
+    body = {
+        "image": requested["image"],
+        "disk": requested["disk_gb"],
+        "runtype": "ssh",
+        "target_state": "running",
+        "label": provider_state["label"],
+    }
+    if ssh_public_key is not None:
+        quoted_key = shlex.quote(ssh_public_key)
+        body["onstart"] = (
+            "install -d -m 700 /root/.ssh && "
+            "touch /root/.ssh/authorized_keys && "
+            f"(grep -qxF {quoted_key} /root/.ssh/authorized_keys || "
+            f"printf '%s\\n' {quoted_key} >> /root/.ssh/authorized_keys) && "
+            "chmod 600 /root/.ssh/authorized_keys"
+        )
     payload = request(
         "PUT",
         f"/api/v0/asks/{offer['id']}/",
-        {
-            "image": requested["image"],
-            "disk": requested["disk_gb"],
-            "runtype": "ssh",
-            "target_state": "running",
-            "label": provider_state["label"],
-        },
+        body,
     )
     payload = _successful(payload)
     instance_id = _extract_created_instance(payload)
@@ -516,6 +595,9 @@ def _create_offer(state_path: Path, state: dict[str, Any], offer: dict[str, Any]
 def create_instance(args: argparse.Namespace) -> str:
     specification = _specification_from_args(args)
     primary = _selected_offer(str(args.offer_id), specification)
+    ssh_public_key = _configured_ssh_public_key()
+    if ssh_public_key is not None:
+        _validate_account_ssh_key(ssh_public_key)
     fallback = None
     if args.fallback_offer_id:
         if str(args.fallback_offer_id) == primary["id"]:
@@ -564,7 +646,7 @@ def create_instance(args: argparse.Namespace) -> str:
     }
     save_state(args.state, state)
     try:
-        instance_id = _create_offer(args.state, state, primary)
+        instance_id = _create_offer(args.state, state, primary, ssh_public_key)
     except VastApiError as exc:
         if not _is_explicit_no_inventory(exc):
             raise
@@ -582,7 +664,7 @@ def create_instance(args: argparse.Namespace) -> str:
             provider_state.pop("fallback_offer", None)
             save_state(args.state, state)
             try:
-                instance_id = _create_offer(args.state, state, fallback)
+                instance_id = _create_offer(args.state, state, fallback, ssh_public_key)
             except VastApiError as fallback_error:
                 if _is_explicit_no_inventory(fallback_error):
                     matches = _instances_by_label(provider_state["label"])
@@ -615,13 +697,15 @@ def show_instance(state: dict[str, Any]) -> dict[str, Any]:
 
 def instance_status(state: dict[str, Any]) -> str:
     instance = show_instance(state)
+    if "actual_status" in instance and instance.get("actual_status") is None:
+        return "provisioning"
     raw = instance.get("actual_status", instance.get("cur_state"))
     if not isinstance(raw, str) or not raw:
         raise RuntimeError("Vast instance status is missing")
     normalized = raw.casefold()
     if normalized == "running":
         return "running"
-    if normalized in {"stopped", "exited"}:
+    if normalized == "stopped":
         return "stopped"
     return normalized
 
@@ -635,6 +719,10 @@ def _wait_for_status(
         last_status = instance_status(state)
         if last_status == expected:
             return last_status
+        if last_status in {"exited", "offline", "unknown"}:
+            raise RuntimeError(
+                f"Vast instance entered terminal status={last_status} while waiting for {expected}"
+            )
         time.sleep(interval_seconds)
     raise RuntimeError(f"Vast instance did not reach {expected}; last status={last_status}")
 
@@ -645,8 +733,19 @@ def _ssh_command(
     if state.get("released") is True:
         raise RuntimeError("Vast instance has already been released")
     instance = show_instance(state)
-    host = instance.get("ssh_host")
-    port = instance.get("ssh_port")
+    direct_host = instance.get("public_ipaddr")
+    direct_port = instance.get("machine_dir_ssh_port")
+    if (
+        isinstance(direct_host, str)
+        and direct_host
+        and not isinstance(direct_port, bool)
+        and isinstance(direct_port, (int, str))
+    ):
+        host = direct_host
+        port = direct_port
+    else:
+        host = instance.get("ssh_host")
+        port = instance.get("ssh_port")
     if not isinstance(host, str) or not host or isinstance(port, bool) or not isinstance(port, (int, str)):
         raise RuntimeError("Vast instance is missing SSH connection details")
     environment = os.environ.copy()
@@ -759,6 +858,29 @@ def release_instance(args: argparse.Namespace, *, allow_before_report: bool = Fa
             _mark_released(args.state, state)
             return
         raise
+    except RuntimeError:
+        payload = request(
+            "GET",
+            "/api/v1/instances/",
+            query={
+                "limit": 25,
+                "select_filters": json.dumps(
+                    {"id": {"eq": int(instance_id) if instance_id.isdigit() else instance_id}}
+                ),
+            },
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("instances"), list):
+            raise RuntimeError("Vast instance listing returned an unsupported response structure")
+        if not all(isinstance(item, dict) for item in payload["instances"]):
+            raise RuntimeError("Vast instance listing returned an unsupported response structure")
+        matches = [
+            item
+            for item in payload["instances"]
+            if str(item.get("id")) == instance_id
+        ]
+        if not matches:
+            _mark_released(args.state, state)
+            return
     raise RuntimeError("Vast instance remains visible after destroy")
 
 
