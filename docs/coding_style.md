@@ -1,7 +1,11 @@
 Code style requirement: minimal abstraction.
 
 Write the simplest implementation that is clear and correct. Do not equate
-software quality with creating more functions.
+software quality with creating more functions. 
+
+Before writing new code, first inspect the existing codebase for relevant local 
+functions, utilities, and abstractions. Reuse or extend them whenever appropriate 
+instead of duplicating existing functionality.
 
 Use direct assignments for constants, paths, hyperparameters, column names,
 configuration values, and simple one-off expressions. Do not wrap these values

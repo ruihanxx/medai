@@ -2,7 +2,7 @@
 
 You are generating nontrivial refinement ideas for the models in a medical paper.
 {% if round_index > 1 %}
-This is round {{ round_index }}. Learn from the experience of previous rounds.
+This is round {{ round_index }}. Learn from the experience of previous rounds at `{{ prior_rounds_json }}`
 {% endif %}
 
 ## Inputs
