@@ -260,6 +260,20 @@ Each `output_files` entry may reference a real file or directory created under
 the working directory or replication output directory; do not reference paths
 outside those locations.
 
+### Output attribution contract
+
+Orchestration treats every plan step whose `verifies` list is non-empty as
+result-producing. The corresponding `step_outcomes[].output_files` MUST contain
+at least one existing local artifact.
+
+For remotely executed steps, record remote artifact paths temporarily in
+`notes` or command output. After the final download completes, revisit all
+earlier result-producing steps and populate their `output_files` with the
+downloaded local copies under the codebase or replication directory.
+
+Attribute artifacts to the step that scientifically produced them. Do not
+assign all downloaded artifacts only to the final download/cleanup step.
+
 **Reporting fixes:** For each fix you apply — whether modifying a source file or a non-trivial environment workaround (e.g., pinning a specific package version to work around an incompatibility) — add an entry to `fixes_applied` with:
 - `file_path`: the file you changed, or `"environment"` for env workarounds
 - `description`: what you changed and why
