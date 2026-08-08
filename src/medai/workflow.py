@@ -37,6 +37,7 @@ from medai.providers import run_agent
 from medai.resources import detect_resources
 
 MAX_AUDIT_REWRITES = 3
+MAX_REPLICATION_CONTINUATIONS = 2
 
 
 class WorkflowState(TypedDict, total=False):
@@ -138,6 +139,23 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
             )
             outputs.append(str(smart_log_path))
     return outputs
+
+
+def _replication_log_prefix_length(
+    plan: ReplicationPlan,
+    replication_log_path: Path,
+) -> int | None:
+    try:
+        replication_log = load_model(replication_log_path, ReplicationLog)
+    except (RuntimeError, ValueError):
+        return None
+    planned_ids = [step.id for step in plan.steps]
+    outcome_ids = [outcome.step_id for outcome in replication_log.step_outcomes]
+    if outcome_ids == planned_ids[: len(outcome_ids)] and len(outcome_ids) < len(
+        planned_ids
+    ):
+        return len(outcome_ids)
+    return None
 
 
 def validate_report_experiment(
@@ -380,6 +398,9 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
     report_dir = output / "report"
     codebase_dir = output / "codegen" / "codebase"
     prompt_paths = [output / "prompts" / "replicate.md"]
+    prompt_paths.extend(
+        sorted((output / "prompts").glob("replicate_continuation_*.md"))
+    )
     prompt_paths.extend(sorted((output / "prompts").glob("report_*.md")))
     prompt_paths = [path for path in prompt_paths if path.is_file()]
 
@@ -1145,17 +1166,61 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
             indent=2,
         ),
     )
-    run_agent(
-        provider=config.provider,
-        prompt_path=prompt_path,
-        working_dir=Path(state["codebase_dir"]),
-        transcript_path=transcript_path,
-        siliconflow_config_path=config.siliconflow_config,
-        codex_model=config.codex_model,
-        codex_reasoning_effort=config.codex_reasoning_effort,
-    )
+    agent_prompt_path = prompt_path
+    outputs: list[str] | None = None
+    replication_log_path = config.output / "replication" / "replication_log.json"
+    for continuation_index in range(MAX_REPLICATION_CONTINUATIONS + 1):
+        agent_error: RuntimeError | None = None
+        try:
+            run_agent(
+                provider=config.provider,
+                prompt_path=agent_prompt_path,
+                working_dir=Path(state["codebase_dir"]),
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+            )
+        except RuntimeError as exc:
+            agent_error = exc
 
-    outputs = validate_replication_artifacts(state)
+        try:
+            outputs = validate_replication_artifacts(state)
+        except (RuntimeError, ValueError) as validation_error:
+            prefix_length = _replication_log_prefix_length(plan, replication_log_path)
+            if (
+                prefix_length is None
+                or continuation_index == MAX_REPLICATION_CONTINUATIONS
+            ):
+                if agent_error is not None:
+                    raise agent_error from validation_error
+                raise
+            continuation_number = continuation_index + 1
+            completed_step_ids = [step.id for step in plan.steps[:prefix_length]]
+            first_missing_step_id = plan.steps[prefix_length].id
+            agent_prompt_path = render_prompt(
+                "replication/continuation_instructions.md",
+                config.output
+                / "prompts"
+                / f"replicate_continuation_{continuation_number:03d}.md",
+                initial_prompt_path=prompt_path,
+                replicate_plan_path=state["replicate_plan_path"],
+                replication_log_path=replication_log_path,
+                codebase_dir=state["codebase_dir"],
+                completed_step_ids=json.dumps(completed_step_ids),
+                first_missing_step_id=first_missing_step_id,
+            )
+            print(
+                "continue replicate agent: "
+                f"step log is a valid prefix ending before step {first_missing_step_id}"
+            )
+            continue
+
+        if agent_error is not None:
+            raise agent_error
+        break
+
+    assert outputs is not None
     power_off_run_computation_instance(config)
     pipeline_state.complete_stage(
         "replicate_agent",

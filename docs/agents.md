@@ -13,6 +13,11 @@
   under `templates/autoresearch/<stage>/`; runtime skills live under
   `templates/skills/`. None is stored under `src/`.
 - Prompts are rendered with Jinja2 and saved before invocation.
+- Replication continuations use `templates/replication/continuation_instructions.md`
+  and persist as `prompts/replicate_continuation_<NNN>.md`. They inherit the
+  original replication contract, continue only a statically verified step-log
+  prefix, and must keep long commands on one execution handle rather than
+  creating standalone sleep timers or overlapping probes.
 - The preprocessing agent records an evidence-bound, one-sentence
   `computational_demand` for every extracted experiment. It searches the paper
   for `nvidia`, `memory`, `gpu`, `cpu`, `GB`, and `rtx`, records paper-stated

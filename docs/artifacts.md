@@ -27,7 +27,8 @@ runs/<run_id>/
 ├── report/reproduction_report.md
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
-│   └── audit_attempt_001.md
+│   ├── audit_attempt_001.md
+│   └── replicate_continuation_001.md  # only after an incomplete agent turn
 ├── resume_history/resume_001/  # only after a replicate/report rollback
 │   ├── replication/
 │   ├── report/

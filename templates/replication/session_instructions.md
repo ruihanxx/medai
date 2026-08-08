@@ -214,6 +214,14 @@ Read `{{ replicate_plan_path }}` and execute every step in its listed order.
 Run commands from `{{ codebase_dir }}/`. If a step fails, try to
 fix the issue before moving on.
 
+### Long-running commands
+
+Keep each long-running command attached to one execution handle and wait on or
+poll that same handle until it reaches a terminal status. Do not create
+standalone `sleep` commands as timers, launch overlapping progress probes, or
+return while a plan command or tool call remains in progress. Keep progress
+checks sparse and bounded so repeated log output does not consume the session.
+
 ### Resume an interrupted attempt
 
 Every invocation of this stage is a complete replication attempt. Begin with
