@@ -15,8 +15,8 @@ Resume mocks cover shutdown reuse with one SSH probe, released/missing/SSH-faile
 replacement, uncertain-provider and failed-release safety, recorded fallback
 capacity, replication/report rollback archives, early codegen infrastructure
 resume, repeated cloud pull, report-completed no-op, power-off-before-report,
-bounded continuation of a strict replication-log prefix, and persistent cleanup
-warnings. Tests assert that no safety failure creates a second instance.
+and persistent cleanup warnings. Tests assert that no safety failure creates a
+second instance.
 
 A real cloud-drive E2E is manual and billable. Use an isolated disposable
 instance, run the selected adapter's `cloud-pull` for a disposable dataset,

@@ -84,14 +84,6 @@ source preparation before invoking its agent; report generation checkpoints
 every completed experiment. A completed run is therefore safe to invoke again
 and becomes a validation-only no-op.
 
-Within one replication-stage attempt, an agent invocation that returns with a
-valid strict prefix of the planned step log is continued from its first missing
-step without powering off remote compute or rerunning logged steps. At most two
-continuations are allowed. A missing, malformed, out-of-order, complete-but-
-invalid, or still-incomplete log after that bound fails normally. This internal
-continuation is distinct from an explicit Replicate resume, which still archives
-the old attempt and restarts at plan step 1.
-
 An explicit Replicate resume performs one remote reconciliation after manifest
 resume and before LangGraph. A released instance is replaced from its recorded
 actual GPU specification/count and image. A shutdown instance is powered on; a

@@ -766,62 +766,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
     assert "five adjustment rounds per experiment" in prompt
 
 
-def test_replication_continuation_requires_strict_log_prefix(tmp_path: Path):
-    import medai.workflow as workflow
-
-    plan = workflow.ReplicationPlan.model_validate(
-        {
-            "environment": {
-                "language": "Python",
-                "key_dependencies": [],
-                "setup_hints": "local",
-            },
-            "steps": [
-                {
-                    "id": step_id,
-                    "description": f"step {step_id}",
-                    "command_hint": "python run.py",
-                    "expected_outcome": "output",
-                    "verifies": [],
-                }
-                for step_id in (1, 2, 3)
-            ],
-        }
-    )
-    log_path = tmp_path / "replication_log.json"
-
-    def write_log(step_ids):
-        log_path.write_text(
-            json.dumps(
-                {
-                    "step_outcomes": [
-                        {
-                            "step_id": step_id,
-                            "description": "run",
-                            "command_executed": "python run.py",
-                            "exit_code": 0,
-                            "stdout": "done",
-                            "stderr": "",
-                            "output_files": [],
-                            "duration_seconds": 1,
-                            "fixes_applied": [],
-                            "code_modified": False,
-                            "notes": "",
-                        }
-                        for step_id in step_ids
-                    ]
-                }
-            ),
-            encoding="utf-8",
-        )
-
-    write_log((1, 2))
-    assert workflow._replication_log_prefix_length(plan, log_path) == 2
-    write_log((1, 3))
-    assert workflow._replication_log_prefix_length(plan, log_path) is None
-
-
-def test_cloud_replicate_continues_prefix_before_power_off(
+def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -896,29 +841,18 @@ def test_cloud_replicate_continues_prefix_before_power_off(
 
     def fake_render(_template, destination, **_context):
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(_template, encoding="utf-8")
+        destination.write_text("prompt", encoding="utf-8")
         return destination
-
-    def fake_validate(_state):
-        events.append("validate-artifacts")
-        if events.count("validate-artifacts") == 1:
-            raise ValueError("Replication log must cover plan steps in order")
-        return []
 
     monkeypatch.setattr(workflow, "load_model", lambda _path, model: models[model])
     monkeypatch.setattr(workflow, "validate_codegen_remote_compute", lambda *_a, **_k: None)
     monkeypatch.setattr(workflow, "render_prompt", fake_render)
     monkeypatch.setattr(workflow, "_cloud_pull", lambda _config: events.append("cloud-pull"))
-    monkeypatch.setattr(
-        workflow,
-        "run_agent",
-        lambda **kwargs: events.append(f"agent:{kwargs['prompt_path'].name}"),
-    )
-    monkeypatch.setattr(workflow, "_replication_log_prefix_length", lambda *_a: 1)
+    monkeypatch.setattr(workflow, "run_agent", lambda **_kwargs: events.append("agent"))
     monkeypatch.setattr(
         workflow,
         "validate_replication_artifacts",
-        fake_validate,
+        lambda _state: events.append("validate-artifacts") or [],
     )
     monkeypatch.setattr(
         workflow,
@@ -936,17 +870,7 @@ def test_cloud_replicate_continues_prefix_before_power_off(
         }
     )
 
-    assert events == [
-        "cloud-pull",
-        "agent:replicate.md",
-        "validate-artifacts",
-        "agent:replicate_continuation_001.md",
-        "validate-artifacts",
-        "power-off",
-    ]
-    assert (
-        config.output / "prompts" / "replicate_continuation_001.md"
-    ).read_text(encoding="utf-8") == "replication/continuation_instructions.md"
+    assert events == ["cloud-pull", "agent", "validate-artifacts", "power-off"]
 
 
 def test_graph_stops_after_a_stage_failure(monkeypatch):
