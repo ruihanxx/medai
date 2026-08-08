@@ -221,6 +221,10 @@ poll that same handle until it reaches a terminal status. Do not create
 standalone `sleep` commands as timers, launch overlapping progress probes, or
 return while a plan command or tool call remains in progress. Keep progress
 checks sparse and bounded so repeated log output does not consume the session.
+When using a remote server, any progress or phase-status message is non-terminal:
+after emitting it, continue waiting on the same execution handle. Do not end the
+agent turn until the remote command's terminal status has been observed and
+recorded.
 
 ### Resume an interrupted attempt
 
