@@ -1304,6 +1304,11 @@ def cloud_pull(args: argparse.Namespace) -> None:
     if state.get("released") is True:
         raise RuntimeError("Vast instance has already been released")
     connection_id = _drive_connection_id()
+    status = instance_status(state)
+    if status == "stopped":
+        raise RuntimeError("Cannot materialize Google Drive data on a stopped Vast instance")
+    if status != "running":
+        _wait_for_status(state, "running", 840, 10)
     cloud = _cloud_state(args.state, state, dataset, connection_id)
     inventory_path = _inventory_path(args.state)
     if cloud["completed"]:

@@ -866,7 +866,7 @@ fi
     def show_instance(_):
         nonlocal show_count
         show_count += 1
-        if show_count in {5, 6}:
+        if show_count in {6, 7}:
             status = {"actual_status": "exited", "cur_state": "stopped"}
         else:
             status = {"actual_status": "running", "cur_state": "running"}
