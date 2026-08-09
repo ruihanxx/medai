@@ -42,6 +42,7 @@ class DriveAdapter:
     source_template: str
     environment: tuple[EnvironmentVariable, ...]
     configuration_fingerprint: tuple[str, ...]
+    cloud_pull_handoff: bool
 
 
 @dataclass(frozen=True)
@@ -216,6 +217,9 @@ def _load_provider_adapter(path: Path, skill_root: Path) -> ProviderAdapter:
         if not isinstance(drive_payload, dict):
             raise ValueError(f"Provider metadata drive must be an object: {path}")
         drive_environment = _parse_environment(drive_payload.get("environment", []), path)
+        cloud_pull_handoff = drive_payload.get("cloud_pull_handoff", False)
+        if not isinstance(cloud_pull_handoff, bool):
+            raise ValueError(f"Provider metadata cloud_pull_handoff must be boolean: {path}")
         drives[normalized_drive] = DriveAdapter(
             name=normalized_drive,
             reference=_safe_relative_path(skill_root, drive_payload.get("reference"), path),
@@ -226,6 +230,7 @@ def _load_provider_adapter(path: Path, skill_root: Path) -> ProviderAdapter:
                 drive_environment,
                 path,
             ),
+            cloud_pull_handoff=cloud_pull_handoff,
         )
     default_drive = payload.get("default_drive")
     if default_drive is not None:

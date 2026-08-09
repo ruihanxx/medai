@@ -160,6 +160,7 @@ def vast_state(path: Path) -> None:
                     "run_token": "test-run",
                     "label": "medai-test-run",
                     "instance_id": "instance-1",
+                    "creation_uncertain": False,
                     "requested": {
                         "gpu_name": None,
                         "gpu_count": 1,
@@ -774,6 +775,255 @@ def test_vastai_google_drive_metadata_is_selected_and_fingerprinted(tmp_path: Pa
     assert config.cloud_source == "medai/dataset-a"
     assert config.computation_provider_config["values"]["VASTAI_GOOGLE_DRIVE_CONNECTION_ID"] == "drive-7"
     assert "vast-secret" not in json.dumps(config.computation_provider_config)
+    assert get_provider_adapter("vastai").drive("google-drive").cloud_pull_handoff is True
+
+
+def test_vastai_cloud_prepare_stops_only_after_ssh_and_path_preflight(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    ssh_environment, command_log = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
+    lifecycle = {"status": "running"}
+
+    def show_instance(_requests):
+        return {
+            "instances": {
+                "actual_status": lifecycle["status"],
+                "cur_state": lifecycle["status"],
+                "ssh_host": "host",
+                "ssh_port": 22,
+            }
+        }
+
+    def manage_instance(requests):
+        lifecycle["status"] = requests[-1]["body"]["state"]
+        return {"success": True}
+
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("GET", "/api/v0/instances/instance-1/"): show_instance,
+            ("PUT", "/api/v0/instances/instance-1/"): manage_instance,
+        }
+    ) as (base_url, requests):
+        prepared = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a", "--prepare"],
+            {
+                **adapter_environment(base_url),
+                **ssh_environment,
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+
+    assert prepared.returncode == 0, prepared.stderr
+    assert lifecycle["status"] == "stopped"
+    assert not [item for item in requests if item["method"] == "POST"]
+    assert [item["body"] for item in requests if item["method"] == "PUT"] == [
+        {"state": "stopped"}
+    ]
+    command_text = command_log.read_text(encoding="utf-8")
+    assert "medai-cloud-write-probe" in command_text
+    assert "/workspace/medai/test-run/data/dataset-a" in command_text
+    cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
+    assert cloud["handoff_ready"] is True
+    assert cloud["status"] == "new"
+
+
+def test_vastai_cloud_prepare_does_not_stop_when_ssh_initialization_fails(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    ssh = fake_bin / "ssh"
+    ssh.write_text("#!/usr/bin/env bash\nexit 255\n", encoding="utf-8")
+    ssh.chmod(0o755)
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("GET", "/api/v0/instances/instance-1/"): {
+                "instances": {"actual_status": "running", "ssh_host": "host", "ssh_port": 22}
+            },
+        }
+    ) as (base_url, requests):
+        prepared = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a", "--prepare"],
+            {
+                **adapter_environment(base_url),
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+
+    assert prepared.returncode != 0
+    assert not [item for item in requests if item["method"] == "PUT"]
+    cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
+    assert cloud["status"] == "new"
+    assert "handoff_ready" not in cloud
+
+
+def test_vastai_cloud_monitor_requires_prepared_stopped_instance(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("GET", "/api/v0/instances/instance-1/"): {
+                "instances": {"actual_status": "running", "ssh_host": "host", "ssh_port": 22}
+            },
+        }
+    ) as (base_url, _):
+        monitored = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a", "--monitor"],
+            {
+                **adapter_environment(base_url),
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+
+    assert monitored.returncode != 0
+    assert "requires a completed preparation" in monitored.stderr
+
+
+def test_vastai_cloud_monitor_restarts_then_materializes_after_offline_copy(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    ssh_environment, command_log = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
+    lifecycle = {"status": "running", "copy_requested": False}
+
+    def show_instance(_requests):
+        message = "Cloud Copy Operation Complete" if lifecycle["copy_requested"] else ""
+        return {
+            "instances": {
+                "actual_status": lifecycle["status"],
+                "cur_state": lifecycle["status"],
+                "status_msg": message,
+                "ssh_host": "host",
+                "ssh_port": 22,
+            }
+        }
+
+    def manage_instance(requests):
+        lifecycle["status"] = requests[-1]["body"]["state"]
+        return {"success": True}
+
+    def start_copy(_requests):
+        lifecycle["copy_requested"] = True
+        return {"success": True}
+
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("GET", "/api/v0/instances/instance-1/"): show_instance,
+            ("PUT", "/api/v0/instances/instance-1/"): manage_instance,
+            ("POST", "/api/v0/commands/rclone/"): start_copy,
+        }
+    ) as (base_url, requests):
+        prepared = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a", "--prepare"],
+            {
+                **adapter_environment(base_url),
+                **ssh_environment,
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+        monitored = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a", "--monitor"],
+            {
+                **adapter_environment(base_url),
+                **ssh_environment,
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+
+    assert prepared.returncode == 0, prepared.stderr
+    assert monitored.returncode == 0, monitored.stderr
+    assert lifecycle["status"] == "running"
+    assert [item["body"] for item in requests if item["method"] == "PUT"] == [
+        {"state": "stopped"},
+        {"state": "running"},
+    ]
+    assert "cloud-copy: Cloud Copy Operation Complete" in monitored.stdout
+    assert "medai-cloud-inventory" in command_log.read_text(encoding="utf-8")
+    cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
+    assert cloud["completed"] is True
+    assert "handoff_ready" not in cloud
+
+
+def test_vastai_cloud_monitor_restarts_before_reporting_copy_failure(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    ssh_environment, _ = fake_cloud_ssh_environment(tmp_path, cloud_inventory("dataset-a"))
+    lifecycle = {"status": "running", "copy_requested": False}
+
+    def show_instance(_requests):
+        message = "Cloud Copy Operation Failed" if lifecycle["copy_requested"] else ""
+        return {
+            "instances": {
+                "actual_status": lifecycle["status"],
+                "cur_state": lifecycle["status"],
+                "status_msg": message,
+                "ssh_host": "host",
+                "ssh_port": 22,
+            }
+        }
+
+    def manage_instance(requests):
+        lifecycle["status"] = requests[-1]["body"]["state"]
+        return {"success": True}
+
+    def start_copy(_requests):
+        lifecycle["copy_requested"] = True
+        return {"success": True}
+
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("GET", "/api/v0/instances/instance-1/"): show_instance,
+            ("PUT", "/api/v0/instances/instance-1/"): manage_instance,
+            ("POST", "/api/v0/commands/rclone/"): start_copy,
+        }
+    ) as (base_url, requests):
+        prepared = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a", "--prepare"],
+            {
+                **adapter_environment(base_url),
+                **ssh_environment,
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+        monitored = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-a", "--monitor"],
+            {
+                **adapter_environment(base_url),
+                **ssh_environment,
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+            },
+        )
+
+    assert prepared.returncode == 0, prepared.stderr
+    assert monitored.returncode != 0
+    assert "cloud copy failed" in monitored.stderr
+    assert lifecycle["status"] == "running"
+    assert [item["body"] for item in requests if item["method"] == "PUT"] == [
+        {"state": "stopped"},
+        {"state": "running"},
+    ]
+    cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
+    assert cloud["status"] == "failed"
+    assert cloud["completed"] is False
 
 
 def test_vastai_cloud_pull_materializes_readonly_inventory_without_credentials(tmp_path: Path):
@@ -812,7 +1062,8 @@ def test_vastai_cloud_pull_materializes_readonly_inventory_without_credentials(t
 
     assert completed.returncode == 0, completed.stderr
     target_path = "/workspace/medai/test-run/data/dataset-a"
-    assert completed.stdout.strip() == target_path
+    assert completed.stdout.splitlines()[-1] == target_path
+    assert "cloud-copy: Cloud Copy Operation Complete" in completed.stdout
     copy = next(item for item in requests if item["path"] == "/api/v0/commands/rclone/")
     assert copy["body"] == {
         "instance_id": "instance-1",
@@ -1093,6 +1344,72 @@ def test_vastai_cloud_timeout_cancels_before_exact_staging_cleanup(tmp_path: Pat
     cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
     assert cloud["cancel_confirmed"] is True
     assert cloud["completed"] is False
+
+
+def test_vastai_offline_monitor_timeout_restarts_before_exact_cleanup(
+    tmp_path: Path, monkeypatch
+):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    ssh_environment, command_log = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
+    lifecycle = {"status": "running"}
+
+    def show_instance(_requests):
+        return {
+            "instances": {
+                "actual_status": lifecycle["status"],
+                "cur_state": lifecycle["status"],
+                "ssh_host": "host",
+                "ssh_port": 22,
+            }
+        }
+
+    def manage_instance(requests):
+        lifecycle["status"] = requests[-1]["body"]["state"]
+        return {"success": True}
+
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("GET", "/api/v0/instances/instance-1/"): show_instance,
+            ("PUT", "/api/v0/instances/instance-1/"): manage_instance,
+            ("POST", "/api/v0/commands/rclone/"): {"success": True},
+            ("DELETE", "/api/v0/commands/rclone/"): {"success": True},
+        }
+    ) as (base_url, requests):
+        for name, value in {
+            **adapter_environment(base_url),
+            **ssh_environment,
+            "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+        }.items():
+            monkeypatch.setenv(name, value)
+        module = load_vastai_module()
+        module.CLOUD_COPY_TIMEOUT_SECONDS = 0
+        module.cloud_pull(
+            argparse.Namespace(state=state_path, dataset="dataset-a", prepare=True, monitor=False)
+        )
+        with pytest.raises(RuntimeError, match="timed out and was cancelled"):
+            module.cloud_pull(
+                argparse.Namespace(state=state_path, dataset="dataset-a", prepare=False, monitor=True)
+            )
+
+    assert lifecycle["status"] == "running"
+    assert [item["method"] for item in requests if item["path"] == "/api/v0/commands/rclone/"] == [
+        "POST",
+        "DELETE",
+    ]
+    assert [item["body"] for item in requests if item["method"] == "PUT"] == [
+        {"state": "stopped"},
+        {"state": "running"},
+    ]
+    assert "/workspace/medai/test-run/.staging/dataset-a" in command_log.read_text(encoding="utf-8")
+    cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
+    assert cloud["cancel_confirmed"] is True
+    assert cloud["status"] == "failed"
 
 
 def test_vastai_details_remain_outside_generic_flow_and_docs():

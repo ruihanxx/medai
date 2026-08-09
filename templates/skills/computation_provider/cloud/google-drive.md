@@ -27,7 +27,7 @@ exactly one `cloud_type=drive` entry. See
 ## Materialize a Dataset
 
 Store the source directory at `medai/<dataset>`. After the run-owned instance
-exists and before any remote data inspection, execute:
+exists and before any remote data inspection, the normal reviewed command is:
 
 ```bash
 python <skill-dir>/scripts/vastai.py cloud-pull \
@@ -35,12 +35,36 @@ python <skill-dir>/scripts/vastai.py cloud-pull \
   --dataset <safe-dataset-name>
 ```
 
-The adapter requests Vast Cloud Copy from that source to the exact run-owned
-staging path, records only non-secret progress data, and polls the instance
-status message. It proceeds only after the Cloud Copy completion marker. On a
-timeout it asks Vast to cancel sync, and cleans only its recorded exact staging
-path after the cancellation request is confirmed. It never persists the Cloud
-Copy `result_url` or signed URLs. Vast documents these endpoints at
+For an opted-in Codex command handoff, the active agent must first run:
+
+```bash
+python <skill-dir>/scripts/vastai.py cloud-pull \
+  --state <run-state-path> \
+  --dataset <safe-dataset-name> \
+  --prepare
+```
+
+`--prepare` requires an activated, initialized running instance. It proves SSH
+access, checks the exact owned staging and target parents, creates and removes
+write probes, then powers the instance off and records `handoff_ready=true`.
+Only after this command succeeds may the agent return this foreground local
+command and end its turn:
+
+```bash
+python <skill-dir>/scripts/vastai.py cloud-pull \
+  --state <run-state-path> \
+  --dataset <safe-dataset-name> \
+  --monitor
+```
+
+`--monitor` refuses a running or unprepared instance. It requests Vast Cloud
+Copy from the stopped instance into the exact run-owned staging path, records
+only non-secret progress data, and prints changed status messages while polling
+every 30 seconds. It never persists the Cloud Copy `result_url` or signed URLs.
+At every terminal result it starts the same instance and verifies SSH before
+returning control to the agent. On a timeout it cancels sync while stopped,
+then starts the instance and cleans only the recorded exact staging path after
+the cancellation request is confirmed. Vast documents these endpoints at
 <https://docs.vast.ai/api-reference/instances/cloud-copy> and
 <https://docs.vast.ai/api-reference/instances/cancel-sync>.
 

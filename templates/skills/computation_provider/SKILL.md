@@ -48,6 +48,12 @@ orchestrator may check only the public envelope and the cloud fields `drive`,
 support for a provider, drive, or capability that metadata and its selected
 reference do not document.
 
+A drive may set `cloud_pull_handoff: true` when its reference defines a safe
+two-step preparation and local-monitor procedure. Only a resumable Codex
+codegen session uses that opt-in: the agent completes the reference's active
+instance preparation and power-off step, then local orchestration runs the
+returned foreground monitor command before resuming that same session.
+
 ## Local Configs
 
 Store provider keys, API URLs, and other local provider configuration in the

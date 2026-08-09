@@ -35,6 +35,14 @@ The LangGraph stages are:
    claim/artifact comparisons, validation-anchor assessments, and a risk list
    derived from code-generation ambiguities.
 
+For a cloud drive whose metadata opts into handoff, direct Codex codegen first
+prepares and powers off the initialized SSH-ready instance, then returns one
+foreground local cloud-monitor command. Orchestration runs that command while
+the Codex process is absent and resumes the same session after its terminal
+result. A successful resume proceeds only from completed cloud state; an
+incomplete result returns to that session for bounded diagnostics and a fresh
+prepare/monitor handoff.
+
 For `provider=codex` only, replication uses an intra-invocation command handoff
 loop. Codex returns one schema-validated non-empty Bash command, orchestration
 runs it locally from the codebase while streaming and saving its combined log,

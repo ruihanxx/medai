@@ -11,6 +11,14 @@ released-instance history. Provider-private API response structures are not a
 generic compatibility surface: unknown authentication, binding, listing, or task
 responses must fail rather than trigger a guessed fallback.
 
+For a drive that opts into Codex cloud-pull handoff, mocks additionally cover
+active-instance initialization, SSH and write-path preparation before power-off,
+rejection of an unprepared monitor, stopped-instance polling, restart plus SSH
+probe before success or failure returns, cancellation before exact cleanup, and
+same-session Codex command/result recovery. The tests assert that no monitor
+starts before preparation, no uncertain Cloud Copy is posted twice, and no raw
+data reaches the local run.
+
 Resume mocks cover shutdown reuse with one SSH probe, released/missing/SSH-failed
 replacement, uncertain-provider and failed-release safety, recorded fallback
 capacity, replication/report rollback archives, early codegen infrastructure

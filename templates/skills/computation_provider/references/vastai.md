@@ -119,6 +119,14 @@ replaces after an ambiguous API response. A create response without an
 unambiguous instance ID remains `creation_uncertain`; a later resume may adopt
 exactly one instance found by its run label, otherwise it fails explicitly.
 
+For the selected Google Drive command handoff, never stop a merely provisioning
+instance. First complete the reviewed `cloud-pull --prepare` procedure in
+`../cloud/google-drive.md`; it proves an activated instance ID, onstart-backed
+SSH access, and writable run-owned paths before stopping the instance. The
+returned `cloud-pull --monitor` command runs locally while the Codex session is
+paused, then starts the same instance and verifies SSH before that session
+resumes.
+
 Power-off and release differ. Stopping retains the container disk and can still
 incur storage charges; destroying is irreversible and deletes that disk. The
 adapter refuses normal release before report and pipeline completion. See

@@ -1187,9 +1187,19 @@ def _wait_for_cloud_copy(state: dict[str, Any], cloud: dict[str, Any]) -> str:
         raise RuntimeError("Vast cloud-copy state is missing its start time")
     remaining = CLOUD_COPY_TIMEOUT_SECONDS - max(0, int(time.time()) - started_at)
     deadline = time.monotonic() + max(0, remaining)
+    previous_message: str | None = None
     while time.monotonic() < deadline:
         instance = show_instance(state)
         message = instance.get("status_msg")
+        if isinstance(message, str):
+            safe_message = " ".join(_redact(message).split())
+            safe_message = " ".join(
+                "<redacted-url>" if part.startswith(("http://", "https://")) else part
+                for part in safe_message.split()
+            )
+            if safe_message and safe_message != previous_message:
+                print(f"cloud-copy: {safe_message}", flush=True)
+                previous_message = safe_message
         text = message.casefold() if isinstance(message, str) else ""
         if any(
             marker in text
@@ -1223,7 +1233,6 @@ def _cancel_cloud_copy(state: dict[str, Any], cloud: dict[str, Any]) -> None:
     instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
     _successful(request("DELETE", "/api/v0/commands/rclone/", {"dst_id": instance_id}))
     cloud["cancel_confirmed"] = True
-    _cleanup_cloud_staging(state, cloud)
 
 
 def _ensure_cloud_staging_visible(
@@ -1242,6 +1251,8 @@ def _ensure_cloud_staging_visible(
 def _start_cloud_copy(state_path: Path, state: dict[str, Any], cloud: dict[str, Any]) -> None:
     cloud["copy_started_at_unix"] = int(time.time())
     cloud["copy_requested"] = True
+    cloud.pop("handoff_ready", None)
+    cloud.pop("prepared_at_unix", None)
     cloud.pop("materialized", None)
     _update_cloud(state_path, state, cloud, "requesting")
     instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
@@ -1295,33 +1306,143 @@ def _complete_cloud_pull(
     return target_path
 
 
-def cloud_pull(args: argparse.Namespace) -> None:
-    dataset = _safe_dataset(args.dataset)
-    drive_provider = os.environ.get("MEDAI_DRIVE_PROVIDER", "google-drive").strip().strip("'\"").casefold()
-    if drive_provider != "google-drive":
-        raise RuntimeError("MEDAI_DRIVE_PROVIDER must be 'google-drive'")
-    state = load_state(args.state)
-    if state.get("released") is True:
-        raise RuntimeError("Vast instance has already been released")
-    connection_id = _drive_connection_id()
+def _require_activated_instance(state: dict[str, Any]) -> None:
+    provider_state = state.get("provider_state")
+    if not isinstance(provider_state, dict) or provider_state.get("creation_uncertain") is not False:
+        raise RuntimeError("Vast cloud-pull requires an activated run-owned instance")
+    _required_string(provider_state, "instance_id", "provider_state")
+
+
+def _prepare_cloud_pull(
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    cloud: dict[str, Any],
+) -> None:
+    _require_activated_instance(state)
+    if instance_status(state) != "running":
+        raise RuntimeError("Vast cloud-pull preparation requires an initialized running instance")
+    remote_exec(state, ["true"])
+    status = cloud["status"]
+    if cloud.get("completed") is True:
+        raise RuntimeError("Vast cloud-drive materialization is already completed")
+    if status == "failed":
+        _cleanup_cloud_staging(state, cloud)
+        cloud.pop("cancel_confirmed", None)
+        cloud.pop("copy_requested", None)
+        cloud.pop("copy_started_at_unix", None)
+        cloud.pop("materialized", None)
+        _update_cloud(args.state, state, cloud, "new")
+        status = "new"
+    if status not in {"new", "replacement_pending", "requesting", "copying", "verifying"}:
+        raise RuntimeError("Vast cloud-drive state has an unsupported preparation status")
+
+    staging_parent = cloud["staging_path"].rsplit("/", 1)[0]
+    target_parent = cloud["target_path"].rsplit("/", 1)[0]
+    remote_exec(state, ["mkdir", "-p", staging_parent, target_parent])
+    for parent in (staging_parent, target_parent):
+        probe = f"{parent}/.medai-cloud-write-probe"
+        remote_exec(state, ["touch", "--", probe])
+        remote_exec(state, ["rm", "-f", "--", probe])
+    if cloud.get("materialized") is not True:
+        remote_exec(state, ["test", "!", "-e", cloud["target_path"]])
+    if status in {"new", "replacement_pending"}:
+        remote_exec(state, ["test", "!", "-e", cloud["staging_path"]])
+
+    power_off_instance(args)
+    cloud["handoff_ready"] = True
+    cloud["prepared_at_unix"] = int(time.time())
+    _update_cloud(args.state, state, cloud, status)
+
+
+def _restore_cloud_instance(args: argparse.Namespace, state: dict[str, Any]) -> None:
+    status = instance_status(state)
+    if status == "stopped":
+        power_on_instance(args, known_status=status)
+    elif status != "running":
+        raise RuntimeError(f"Cannot restore Vast instance from status={status}")
+    remote_exec(state, ["true"])
+
+
+def _monitor_cloud_pull(
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    cloud: dict[str, Any],
+    dataset: str,
+) -> None:
+    if cloud.get("handoff_ready") is not True:
+        raise RuntimeError("Vast cloud-pull monitor requires a completed preparation")
+    if instance_status(state) != "stopped":
+        raise RuntimeError("Vast cloud-pull monitor requires a stopped instance")
+    status = cloud["status"]
+    if status not in {"new", "replacement_pending", "requesting", "copying", "verifying"}:
+        raise RuntimeError("Vast cloud-drive state has an unsupported monitor status")
+    cloud.pop("handoff_ready", None)
+    _update_cloud(args.state, state, cloud, status)
+
+    try:
+        if status in {"new", "replacement_pending"}:
+            _start_cloud_copy(args.state, state, cloud)
+            status = "copying"
+        if status in {"requesting", "copying"}:
+            copy_status = _wait_for_cloud_copy(state, cloud)
+            if copy_status == "timeout":
+                _cancel_cloud_copy(state, cloud)
+                _update_cloud(args.state, state, cloud, status)
+                _restore_cloud_instance(args, state)
+                try:
+                    _cleanup_cloud_staging(state, cloud)
+                finally:
+                    _update_cloud(args.state, state, cloud, "failed")
+                raise RuntimeError("Vast Google Drive cloud copy timed out and was cancelled")
+            if copy_status == "failed":
+                _restore_cloud_instance(args, state)
+                _update_cloud(args.state, state, cloud, "failed")
+                raise RuntimeError("Vast Google Drive cloud copy failed")
+            _update_cloud(args.state, state, cloud, "verifying")
+        _restore_cloud_instance(args, state)
+        if cloud.get("materialized") is not True:
+            _ensure_cloud_staging_visible(args.state, state, cloud)
+        print(_complete_cloud_pull(args.state, state, cloud, dataset))
+    except Exception as exc:
+        try:
+            _restore_cloud_instance(args, state)
+        except Exception as restore_exc:
+            raise RuntimeError(
+                f"{exc}; additionally failed to restore the Vast instance: {restore_exc}"
+            ) from exc
+        raise
+
+
+def _verify_completed_cloud_pull(
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    cloud: dict[str, Any],
+    dataset: str,
+) -> None:
+    if instance_status(state) != "running":
+        raise RuntimeError("Vast completed cloud-drive verification requires a running instance")
+    expected_inventory = _load_inventory(_inventory_path(args.state), dataset)
+    if cloud.get("inventory_sha256") != _inventory_digest(expected_inventory):
+        raise RuntimeError("Vast cloud-drive state does not match its local inventory")
+    observed_inventory = _remote_inventory(state, cloud["target_path"], dataset)
+    if observed_inventory != expected_inventory:
+        _update_cloud(args.state, state, cloud, "failed")
+        raise RuntimeError("Google Drive materialization changed from the run baseline")
+    remote_exec(state, ["chmod", "-R", "a-w", "--", cloud["target_path"]])
+    print(cloud["target_path"])
+
+
+def _legacy_cloud_pull(
+    args: argparse.Namespace,
+    state: dict[str, Any],
+    cloud: dict[str, Any],
+    dataset: str,
+) -> None:
     status = instance_status(state)
     if status == "stopped":
         raise RuntimeError("Cannot materialize Google Drive data on a stopped Vast instance")
     if status != "running":
         _wait_for_status(state, "running", 840, 10)
-    cloud = _cloud_state(args.state, state, dataset, connection_id)
-    inventory_path = _inventory_path(args.state)
-    if cloud["completed"]:
-        expected_inventory = _load_inventory(inventory_path, dataset)
-        if cloud.get("inventory_sha256") != _inventory_digest(expected_inventory):
-            raise RuntimeError("Vast cloud-drive state does not match its local inventory")
-        observed_inventory = _remote_inventory(state, cloud["target_path"], dataset)
-        if observed_inventory != expected_inventory:
-            _update_cloud(args.state, state, cloud, "failed")
-            raise RuntimeError("Google Drive materialization changed from the run baseline")
-        remote_exec(state, ["chmod", "-R", "a-w", "--", cloud["target_path"]])
-        print(cloud["target_path"])
-        return
     if cloud.get("status") == "failed":
         _cleanup_cloud_staging(state, cloud)
         _start_cloud_copy(args.state, state, cloud)
@@ -1338,6 +1459,7 @@ def cloud_pull(args: argparse.Namespace) -> None:
     copy_status = _wait_for_cloud_copy(state, cloud)
     if copy_status == "timeout":
         _cancel_cloud_copy(state, cloud)
+        _cleanup_cloud_staging(state, cloud)
         _update_cloud(args.state, state, cloud, "failed")
         raise RuntimeError("Vast Google Drive cloud copy timed out and was cancelled")
     if copy_status == "failed":
@@ -1346,6 +1468,32 @@ def cloud_pull(args: argparse.Namespace) -> None:
     _update_cloud(args.state, state, cloud, "verifying")
     _ensure_cloud_staging_visible(args.state, state, cloud)
     print(_complete_cloud_pull(args.state, state, cloud, dataset))
+
+
+def cloud_pull(args: argparse.Namespace) -> None:
+    dataset = _safe_dataset(args.dataset)
+    drive_provider = os.environ.get("MEDAI_DRIVE_PROVIDER", "google-drive").strip().strip("'\"").casefold()
+    if drive_provider != "google-drive":
+        raise RuntimeError("MEDAI_DRIVE_PROVIDER must be 'google-drive'")
+    state = load_state(args.state)
+    if state.get("released") is True:
+        raise RuntimeError("Vast instance has already been released")
+    connection_id = _drive_connection_id()
+    cloud = _cloud_state(args.state, state, dataset, connection_id)
+    if cloud["completed"]:
+        _verify_completed_cloud_pull(args, state, cloud, dataset)
+        return
+    prepare = bool(getattr(args, "prepare", False))
+    monitor = bool(getattr(args, "monitor", False))
+    if prepare and monitor:
+        raise RuntimeError("Vast cloud-pull accepts only one of --prepare or --monitor")
+    if prepare:
+        _prepare_cloud_pull(args, state, cloud)
+        return
+    if monitor:
+        _monitor_cloud_pull(args, state, cloud, dataset)
+        return
+    _legacy_cloud_pull(args, state, cloud, dataset)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1382,6 +1530,9 @@ def build_parser() -> argparse.ArgumentParser:
     pull = subparsers.add_parser("cloud-pull")
     pull.add_argument("--state", type=Path, required=True)
     pull.add_argument("--dataset", required=True)
+    pull_mode = pull.add_mutually_exclusive_group()
+    pull_mode.add_argument("--prepare", action="store_true")
+    pull_mode.add_argument("--monitor", action="store_true")
     return parser
 
 

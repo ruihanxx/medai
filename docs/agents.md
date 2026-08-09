@@ -25,15 +25,18 @@
   existing transcript is preserved as `<name>.attempt-<N>.jsonl`. Transcript
   files are diagnostic records and are never used as the agent's structured
   result.
-- Codex replication is the one exception to the one-turn agent pattern. Its
-  initial turn and explicit-session resume turns append to one transcript and
-  use the sole structured response `{"command":"<non-empty bash command>"}`.
-  Orchestration runs the command, saves its log and result, validates artifacts,
-  and resumes only when validation is incomplete. The prompt permits file
-  inspection, code edits, and lightweight interaction in Codex; long-running
-  experiments, test suites, provider calls, and remote monitoring are handed
-  back as the foreground command. No `--last`, status field, or completion
-  sentinel is used.
+- Codex replication and opted-in cloud codegen are the exceptions to the
+  one-turn agent pattern. Their initial turns and explicit-session resume turns
+  append to one transcript and use the sole structured response
+  `{"command":"<non-empty bash command>"}`. Replication validates its canonical
+  artifacts after each local command. Cloud codegen first uses the active agent
+  to prepare and power off an initialized remote instance, then local
+  orchestration runs the returned monitor command and resumes the same session
+  after its terminal result. Its cloud data remains unavailable until provider
+  state is completed. The prompt permits file inspection, code edits, and
+  lightweight interaction in Codex; long-running experiments, test suites, and
+  remote monitoring are handed back as the foreground command. No `--last`,
+  status field, or completion sentinel is used.
 - Replication agents do not receive paper target values by default. Smart
   Replicate exposes only claim-level audited anchors and requires the baseline,
   comparisons, hypotheses, changes, commands, and actual round results in

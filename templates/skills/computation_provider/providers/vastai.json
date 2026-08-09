@@ -28,6 +28,7 @@
     "google-drive": {
       "reference": "cloud/google-drive.md",
       "source_template": "medai/{dataset}",
+      "cloud_pull_handoff": true,
       "environment": [
         {"name": "VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "secret": false, "required": true}
       ],
@@ -42,7 +43,7 @@
     "power-off": 300,
     "reconcile": 1800,
     "release": 300,
-    "cloud-pull": 4200,
+    "cloud-pull": 5400,
     "exec": 7200,
     "upload": 7200,
     "download": 7200

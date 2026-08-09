@@ -111,6 +111,7 @@ def test_fake_provider_is_discovered_and_configured_without_main_flow_changes(
     persisted = (config.output / "manifest.json").read_text(encoding="utf-8")
     assert "secret" not in persisted
     assert "drive-secret" not in persisted
+    assert get_provider_adapter("fake").drive("fake-drive").cloud_pull_handoff is False
 
 
 def test_unique_configured_provider_is_selected_without_an_environment_selector(

@@ -118,6 +118,30 @@ parent skill, and invoke its reviewed cloud materialization command for
 drive `completed`. Use that state's materialized target path as
 `remote_dataset_dir` for codegen, audit, planning, and replication. Never copy
 raw cloud data into the local run.
+{% if cloud_pull_handoff|default(false) %}
+
+### Cloud materialization handoff
+
+For this selected drive, local orchestration monitors the long-running cloud
+copy while this Codex session is paused. Before returning your final structured
+response for this turn, follow the selected drive reference's preparation
+procedure completely: create or safely resume the run-owned instance, wait for
+its initialized running state, verify SSH and the exact run-owned staging and
+target paths, verify write permission with the reviewed probe, and stop the
+instance. Do not return until that procedure confirms the instance is stopped.
+
+Then return exactly one non-empty foreground Bash command using the required
+output schema. It must be the selected drive reference's reviewed monitor
+command, not a detached/background command. Do not run or monitor that command
+in this turn. Local orchestration will run it while this Codex process exits,
+then resume this same session after the monitor reaches a terminal result.
+
+Do not inspect cloud data or continue code generation before that resumed turn
+confirms `provider_state.cloud_drive.completed`. If a later resumed turn reports
+an incomplete pull, diagnose safely, repeat the complete preparation and stop
+procedure, then return one next monitor command. If recovery is not possible,
+make the Codex CLI exit nonzero rather than continuing without data.
+{% endif %}
 {% endif %}
 When the explicit paper GPU requirement above is not met locally, or other
 paper-required GPU resources are unavailable or insufficient locally, use the

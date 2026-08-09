@@ -135,14 +135,14 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
     return outputs
 
 
-def _run_replication_command(
+def _run_agent_command(
     command: str,
     *,
     codebase_dir: Path,
     log_path: Path,
     result_path: Path,
 ) -> dict[str, Any]:
-    """Execute one Codex-requested replication command and retain its combined log."""
+    """Execute one Codex-requested foreground command and retain its combined log."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     try:
@@ -162,7 +162,7 @@ def _run_replication_command(
                 log.write(line)
         exit_code = process.wait()
     except OSError as exc:
-        raise RuntimeError(f"Could not execute replication command: {exc}") from exc
+        raise RuntimeError(f"Could not execute Codex command: {exc}") from exc
 
     result = {
         "command": command,
@@ -375,6 +375,150 @@ def _cloud_pull(config: RunConfig) -> None:
         "cloud-pull",
         arguments=["--dataset", config.cloud_dataset],
         expected_provider=config.computation_provider,
+    )
+
+
+def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
+    if (
+        config.provider != "codex"
+        or not config.clouddrive
+        or config.computation_provider is None
+        or config.drive_provider is None
+    ):
+        return False
+    return get_provider_adapter(config.computation_provider).drive(
+        config.drive_provider
+    ).cloud_pull_handoff
+
+
+def _cloud_drive_materialization_completed(config: RunConfig) -> bool:
+    if not config.clouddrive or config.cloud_dataset is None:
+        return False
+    state_path = config.output / "remote_compute" / "instance.json"
+    if not state_path.is_file():
+        return False
+    state = _load_computation_provider_state(state_path)
+    if state.get("provider") != config.computation_provider:
+        raise RuntimeError("Cloud-drive state provider does not match the run configuration")
+    if state.get("released") is True:
+        raise RuntimeError("Cloud-drive instance was already released")
+    provider_state = state.get("provider_state")
+    cloud_drive = provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
+    if cloud_drive is None:
+        return False
+    if not isinstance(cloud_drive, dict):
+        raise RuntimeError("Cloud-drive state is invalid")
+    if (
+        cloud_drive.get("drive") != config.drive_provider
+        or cloud_drive.get("dataset") != config.cloud_dataset
+    ):
+        raise RuntimeError("Cloud-drive state does not match the run configuration")
+    if cloud_drive.get("completed") is not True:
+        return False
+    target_path = cloud_drive.get("target_path")
+    if not isinstance(target_path, str) or not target_path:
+        raise RuntimeError("Cloud-drive state is missing its materialized target path")
+    return True
+
+
+def _next_command_index(command_dir: Path) -> int:
+    index = 1
+    while (command_dir / f"command_{index:03d}.json").exists():
+        index += 1
+    return index
+
+
+def _run_codegen_cloud_pull_handoff(
+    *,
+    config: RunConfig,
+    codebase_dir: Path,
+    prompt_path: Path,
+    transcript_path: Path,
+) -> None:
+    """Pause one Codex session while local orchestration monitors cloud materialization."""
+    command_dir = config.output / "codegen" / "cloud_pull" / "commands"
+    command_dir.mkdir(parents=True, exist_ok=True)
+    command_schema_path = config.output / "prompts" / "codegen_cloud_pull_command.schema.json"
+    write_json(command_schema_path, ReplicationCommand.model_json_schema())
+    session_id: str | None = None
+    resume_prompt_path: Path | None = None
+    command_index = _next_command_index(command_dir)
+    while True:
+        command_request_path = command_dir / f"command_{command_index:03d}.json"
+        if session_id is None:
+            session_id = run_agent(
+                provider=config.provider,
+                prompt_path=prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+            )
+            if session_id is None:
+                raise RuntimeError("Codex cloud-pull preparation turn did not return a session ID")
+        else:
+            assert resume_prompt_path is not None
+            run_agent(
+                provider=config.provider,
+                prompt_path=resume_prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+                resume_session_id=session_id,
+            )
+
+        command = load_model(command_request_path, ReplicationCommand).command
+        log_path = command_dir / f"command_{command_index:03d}.log"
+        result_path = command_dir / f"command_{command_index:03d}_result.json"
+        result = _run_agent_command(
+            command,
+            codebase_dir=codebase_dir,
+            log_path=log_path,
+            result_path=result_path,
+        )
+        try:
+            materialized = _cloud_drive_materialization_completed(config)
+            validation_error = "Cloud-drive materialization is incomplete"
+        except RuntimeError as exc:
+            materialized = False
+            validation_error = str(exc)
+        if materialized:
+            break
+        result["artifact_validation_error"] = validation_error
+        write_json(result_path, result)
+        resume_prompt_path = render_prompt(
+            "codegen/cloud_pull_result_instructions.md",
+            config.output / "prompts" / f"codegen_cloud_pull_resume_{command_index:03d}.md",
+            command_result_path=result_path,
+            command_log_path=log_path,
+            exit_code=result["exit_code"],
+            duration_seconds=result["duration_seconds"],
+            artifact_validation_error=result["artifact_validation_error"],
+            computation_provider_state_path=config.output / "remote_compute" / "instance.json",
+        )
+        command_index += 1
+
+    completion_prompt_path = render_prompt(
+        "codegen/cloud_pull_complete_instructions.md",
+        config.output / "prompts" / "codegen_cloud_pull_complete.md",
+        computation_provider_state_path=config.output / "remote_compute" / "instance.json",
+    )
+    run_agent(
+        provider=config.provider,
+        prompt_path=completion_prompt_path,
+        working_dir=codebase_dir,
+        transcript_path=transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+        resume_session_id=session_id,
     )
 
 
@@ -827,6 +971,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         )
 
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
+    cloud_pull_handoff = _cloud_pull_handoff_enabled(config)
     prompt_path = render_prompt(
         "codegen/session_instructions.md",
         config.output / "prompts" / "codegen.md",
@@ -839,6 +984,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
         cloud_source=config.cloud_source,
+        cloud_pull_handoff=cloud_pull_handoff,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
         infrastructure_resume=infrastructure_resume,
@@ -852,15 +998,23 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         resuming=previous_status in {"running", "failed", "invalidated"},
         audit_feedback_path=audit_feedback_path,
     )
-    run_agent(
-        provider=config.provider,
-        prompt_path=prompt_path,
-        working_dir=codebase_dir,
-        transcript_path=transcript_path,
-        siliconflow_config_path=config.siliconflow_config,
-        codex_model=config.codex_model,
-        codex_reasoning_effort=config.codex_reasoning_effort,
-    )
+    if cloud_pull_handoff and not _cloud_drive_materialization_completed(config):
+        _run_codegen_cloud_pull_handoff(
+            config=config,
+            codebase_dir=codebase_dir,
+            prompt_path=prompt_path,
+            transcript_path=transcript_path,
+        )
+    else:
+        run_agent(
+            provider=config.provider,
+            prompt_path=prompt_path,
+            working_dir=codebase_dir,
+            transcript_path=transcript_path,
+            siliconflow_config_path=config.siliconflow_config,
+            codex_model=config.codex_model,
+            codex_reasoning_effort=config.codex_reasoning_effort,
+        )
     codegen_plan = load_model(codegen_plan_path, CodegenPlan)
     validate_codegen_remote_compute(
         codegen_plan,
@@ -1189,7 +1343,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
             command = load_model(command_request_path, ReplicationCommand).command
             log_path = command_dir / f"command_{command_index:03d}.log"
             result_path = command_dir / f"command_{command_index:03d}_result.json"
-            result = _run_replication_command(
+            result = _run_agent_command(
                 command,
                 codebase_dir=Path(state["codebase_dir"]),
                 log_path=log_path,

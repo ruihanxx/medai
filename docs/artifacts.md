@@ -13,6 +13,10 @@ runs/<run_id>/
 ├── preprocessing/preprocessing_transcript.jsonl
 ├── codegen/codebase/codegen_plan.json
 ├── codegen/codegen_transcript.jsonl
+├── codegen/cloud_pull/commands/  # opted-in Codex cloud handoff only
+│   ├── command_001.json
+│   ├── command_001.log
+│   └── command_001_result.json
 ├── codegen/audit/attempt_001/
 │   ├── audit_report.md
 │   ├── audit_transcript.jsonl
@@ -32,6 +36,8 @@ runs/<run_id>/
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
 │   ├── audit_attempt_001.md
+│   ├── codegen_cloud_pull_command.schema.json  # opted-in cloud handoff only
+│   ├── codegen_cloud_pull_resume_001.md
 │   ├── replicate_command.schema.json
 │   └── replicate_resume_001.md
 ├── resume_history/resume_001/  # only after a replicate/report rollback
@@ -97,6 +103,14 @@ the artifact-validation error when another session turn is required. The
 initial and resumed Codex events share `replication_transcript.jsonl`; rendered
 resume prompts and the output schema are kept under `prompts/`. Replication
 rollback archives retain these prompts as well as the command artifacts.
+
+For an opted-in Codex cloud handoff, each
+`codegen/cloud_pull/commands/command_<NNN>.json` is the single requested
+foreground monitor command. Its `.log` contains merged local stdout/stderr and
+its `_result.json` records the command, exit code, duration, log path, and the
+cloud-state validation error when the same Codex session must prepare and hand
+off another monitor command. These command artifacts survive an explicit CLI
+resume, but the temporary Codex session ID does not.
 
 Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset

@@ -2,11 +2,13 @@ import json
 from pathlib import Path
 
 import pytest
+
 from medai.config import RunConfig
 from medai.models import CodegenPlan
 from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.workflow import (
+    codegen_agent_node,
     create_workflow,
     power_off_run_computation_instance,
     preflight_node,
@@ -1138,6 +1140,154 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
     assert "replacement is already running" in prompt
     assert "Do not create or release another" in prompt
     assert "Never copy\nraw cloud data into the local run" in prompt
+
+
+def test_codegen_cloud_handoff_resumes_same_codex_session_after_failed_monitor(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("MEDAI_COMPUTATION_PROVIDER", "vastai")
+    monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "google-drive")
+    monkeypatch.setenv("VAST_API_KEY", "secret")
+    monkeypatch.setenv("VASTAI_IMAGE", "registry.example/medai@sha256:image")
+    monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "drive-7")
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    config = RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data="dataset-a",
+        siliconflow_config=None,
+        clouddrive=True,
+    )
+    PipelineState.create(config.output, {"paper": str(paper), "provider": "codex"})
+    resources_path = config.output / "preflight" / "resources.json"
+    resources_path.parent.mkdir(parents=True)
+    resources_path.write_text('{"gpus": []}\n', encoding="utf-8")
+    paper_markdown = config.output / "preprocessing" / "paper.md"
+    paper_markdown.parent.mkdir()
+    paper_markdown.write_text("# Paper\n", encoding="utf-8")
+    claims_path = config.output / "preprocessing" / "claims.json"
+    claims_path.write_text("{}\n", encoding="utf-8")
+    experiments_path = config.output / "preprocessing" / "experiment_todo.json"
+    experiments_path.write_text("{}\n", encoding="utf-8")
+    for path in (
+        config.output / "system_maintenance" / "dataset" / "patch.json",
+        config.output / "system_maintenance" / "skills" / "corrections.json",
+    ):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("[]\n", encoding="utf-8")
+
+    state_path = config.output / "remote_compute" / "instance.json"
+    state_path.parent.mkdir(parents=True)
+    target_path = "/workspace/medai/token/data/dataset-a"
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "vastai",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "cloud_drive": {
+                        "drive": "google-drive",
+                        "dataset": "dataset-a",
+                        "completed": False,
+                        "status": "prepared",
+                        "target_path": target_path,
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    events: list[str] = []
+    agent_calls: list[dict[str, object]] = []
+    requested_commands = iter(["printf first-monitor", "printf second-monitor"])
+
+    def fake_agent(**kwargs):
+        agent_calls.append(kwargs)
+        if kwargs.get("output_schema_path") is not None:
+            kwargs["output_last_message_path"].write_text(
+                json.dumps({"command": next(requested_commands)}), encoding="utf-8"
+            )
+            events.append("agent-command")
+        else:
+            _write_codegen_plan_with_remote_target(
+                Path(kwargs["working_dir"]) / "codegen_plan.json", state_path, target_path
+            )
+            events.append("agent-complete")
+        mode = "a" if kwargs.get("resume_session_id") else "w"
+        with kwargs["transcript_path"].open(mode, encoding="utf-8") as transcript:
+            transcript.write('{"type":"done"}\n')
+        return "thread-123"
+
+    command_calls = 0
+
+    def fake_command(command, *, codebase_dir, log_path, result_path):
+        nonlocal command_calls
+        command_calls += 1
+        events.append(f"local-{command_calls}")
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(command + "\n", encoding="utf-8")
+        if command_calls == 2:
+            envelope = json.loads(state_path.read_text(encoding="utf-8"))
+            envelope["provider_state"]["cloud_drive"]["completed"] = True
+            state_path.write_text(json.dumps(envelope), encoding="utf-8")
+        result = {
+            "command": command,
+            "exit_code": 1 if command_calls == 1 else 0,
+            "duration_seconds": 1.0,
+            "log_path": str(log_path),
+            "artifact_validation_error": None,
+        }
+        result_path.write_text(json.dumps(result), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    monkeypatch.setattr("medai.workflow._run_agent_command", fake_command)
+    codegen_agent_node(
+        {
+            "config": config,
+            "paper_markdown": str(paper_markdown),
+            "resources_path": str(resources_path),
+            "claims_path": str(claims_path),
+            "experiments_path": str(experiments_path),
+        }
+    )
+
+    assert events == ["agent-command", "local-1", "agent-command", "local-2", "agent-complete"]
+    assert agent_calls[1]["resume_session_id"] == "thread-123"
+    assert agent_calls[2]["resume_session_id"] == "thread-123"
+    assert agent_calls[0]["output_schema_path"] == agent_calls[1]["output_schema_path"]
+    assert agent_calls[2].get("output_schema_path") is None
+    commands = config.output / "codegen" / "cloud_pull" / "commands"
+    first_result = json.loads((commands / "command_001_result.json").read_text())
+    assert first_result["exit_code"] == 1
+    assert first_result["artifact_validation_error"] == "Cloud-drive materialization is incomplete"
+    assert (commands / "command_002_result.json").is_file()
+    assert (config.output / "prompts" / "codegen_cloud_pull_resume_001.md").is_file()
+    assert (config.output / "prompts" / "codegen_cloud_pull_command.schema.json").is_file()
+
+
+def _write_codegen_plan_with_remote_target(path: Path, state_path: Path, target_path: str) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "files": [{"path": "run.py", "responsibility": "Run"}],
+                "dependency_order": ["run.py"],
+                "entry_points": ["run.py"],
+                "shared_state": "None",
+                "ambiguities": [],
+                "remote_compute": {
+                    "state_path": str(state_path),
+                    "remote_working_dir": "/workspace/medai/token/work",
+                    "remote_dataset_dir": target_path,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path: Path):

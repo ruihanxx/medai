@@ -2,6 +2,7 @@ import io
 from pathlib import Path
 
 import pytest
+
 from medai.models import ReplicationCommand
 from medai.providers import run_agent
 from medai.siliconflow_adapter import (

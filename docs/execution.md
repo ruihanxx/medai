@@ -37,8 +37,15 @@ directory is mounted, and the dataset is fully materialized onto the selected
 remote provider target before any remote inspection. Cloud-drive names reject slashes, absolute
 paths, `.` and `..`. The CLI accepts a missing
 `--data` long enough to create the run manifest, then fails the started
-`preflight` stage explicitly so the failed run remains inspectable. Auto
-Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 through
+`preflight` stage explicitly so the failed run remains inspectable.
+When selected drive metadata opts into cloud-pull handoff and the provider is
+direct Codex, codegen prepares and powers off an initialized SSH-ready instance,
+then returns one foreground local monitor command. Orchestration runs that
+command without an active Codex process and resumes the same session after its
+terminal result; codegen may inspect data only after provider state records
+completed materialization.
+
+Auto Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 through
 10 (default 1),
 accepts a non-negative `--assessment-threshold` for the weighted relative
 improvement score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
