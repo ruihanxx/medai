@@ -18,6 +18,12 @@ resume, repeated cloud pull, report-completed no-op, power-off-before-report,
 and persistent cleanup warnings. Tests assert that no safety failure creates a
 second instance.
 
+Codex replication mocks cover thread-ID extraction, explicit-session resume
+with the same output schema and appended transcript, rejection of blank or
+extra structured output, command/log/result persistence, nonzero command
+handoff for debugging, validation-driven continuation, final-only power-off,
+and unchanged one-turn behavior for other providers.
+
 A real cloud-drive E2E is manual and billable. Use an isolated disposable
 instance, run the selected adapter's `cloud-pull` for a disposable dataset,
 compare source and materialized file/byte aggregates, confirm that no raw data

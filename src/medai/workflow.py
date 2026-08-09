@@ -4,6 +4,7 @@ import json
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -20,6 +21,7 @@ from medai.models import (
     EvidenceSummary,
     Experiment,
     ExperimentTodo,
+    ReplicationCommand,
     ReplicationLog,
     ReplicationPlan,
     SkillCorrectionsFile,
@@ -70,9 +72,7 @@ def resolve_replication_output(
         ):
             for index in range(len(raw_path.parts) - len(marker) + 1):
                 if tuple(raw_path.parts[index : index + len(marker)]) == marker:
-                    candidates.append(
-                        destination.joinpath(*raw_path.parts[index + len(marker) :])
-                    )
+                    candidates.append(destination.joinpath(*raw_path.parts[index + len(marker) :]))
                     break
     else:
         candidates = [codebase_dir / raw_path, replication_dir / raw_path]
@@ -124,20 +124,55 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
         claims = load_model(Path(state["claims_path"]), ClaimsFile)
         claims_by_id = {claim.claim_id: claim for claim in claims.claims}
         for experiment in experiments.experiments:
-            smart_log_path = (
-                replication_dir / experiment.experiment_id / "smart_replicate_log.json"
-            )
+            smart_log_path = replication_dir / experiment.experiment_id / "smart_replicate_log.json"
             smart_log = load_model(smart_log_path, SmartReplicateLog)
             validate_smart_replicate_log(
                 experiment,
                 smart_log,
-                {
-                    claim_id: claims_by_id[claim_id].paper_result
-                    for claim_id in experiment.claims
-                },
+                {claim_id: claims_by_id[claim_id].paper_result for claim_id in experiment.claims},
             )
             outputs.append(str(smart_log_path))
     return outputs
+
+
+def _run_replication_command(
+    command: str,
+    *,
+    codebase_dir: Path,
+    log_path: Path,
+    result_path: Path,
+) -> dict[str, Any]:
+    """Execute one Codex-requested replication command and retain its combined log."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    try:
+        with log_path.open("w", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                ["/bin/bash", "-lc", command],
+                cwd=codebase_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+            )
+            assert process.stdout is not None
+            for line in iter(process.stdout.readline, ""):
+                print(line, end="")
+                log.write(line)
+        exit_code = process.wait()
+    except OSError as exc:
+        raise RuntimeError(f"Could not execute replication command: {exc}") from exc
+
+    result = {
+        "command": command,
+        "exit_code": exit_code,
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "log_path": str(log_path),
+        "artifact_validation_error": None,
+    }
+    write_json(result_path, result)
+    return result
 
 
 def validate_report_experiment(
@@ -165,10 +200,15 @@ def read_audit_verdict(report_path: Path) -> str:
     except FileNotFoundError as exc:
         raise RuntimeError(f"Audit agent did not write its report: {report_path}") from exc
     verdict_lines = [line for line in lines if line.startswith("Verdict:")]
-    if len(verdict_lines) != 1 or not lines or lines[-1] not in {
-        "Verdict: PASS",
-        "Verdict: FAIL",
-    }:
+    if (
+        len(verdict_lines) != 1
+        or not lines
+        or lines[-1]
+        not in {
+            "Verdict: PASS",
+            "Verdict: FAIL",
+        }
+    ):
         raise RuntimeError(
             "Audit report must contain exactly one verdict and end with "
             f"`Verdict: PASS` or `Verdict: FAIL`: {report_path}"
@@ -202,9 +242,7 @@ def validate_codegen_remote_compute(
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Cloud-drive state is missing or invalid: {state_path}") from exc
     provider_state = provider_envelope.get("provider_state")
-    cloud_drive = (
-        provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
-    )
+    cloud_drive = provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
     provider = provider_envelope.get("provider")
     if not isinstance(provider, str) or not provider or not isinstance(cloud_drive, dict):
         raise RuntimeError("Cloud-drive mode requires completed provider state")
@@ -222,9 +260,7 @@ def validate_codegen_remote_compute(
     if not isinstance(target_path, str) or not target_path:
         raise RuntimeError("Cloud-drive state is missing its materialized target path")
     if remote_compute.remote_dataset_dir != target_path:
-        raise RuntimeError(
-            "Remote plan dataset path does not match completed cloud-drive state"
-        )
+        raise RuntimeError("Remote plan dataset path does not match completed cloud-drive state")
     return cloud_drive
 
 
@@ -380,6 +416,8 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
     report_dir = output / "report"
     codebase_dir = output / "codegen" / "codebase"
     prompt_paths = [output / "prompts" / "replicate.md"]
+    prompt_paths.extend(sorted((output / "prompts").glob("replicate_resume_*.md")))
+    prompt_paths.extend(sorted((output / "prompts").glob("replicate_command*.json")))
     prompt_paths.extend(sorted((output / "prompts").glob("report_*.md")))
     prompt_paths = [path for path in prompt_paths if path.is_file()]
 
@@ -490,9 +528,7 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
     state_path = config.output / "remote_compute" / "instance.json"
     report_completed = pipeline_state.is_stage_completed("report_agents")
     remote_plan = (
-        _run_has_remote_plan(config)
-        if report_completed or not state_path.is_file()
-        else False
+        _run_has_remote_plan(config) if report_completed or not state_path.is_file() else False
     )
     if report_completed:
         if remote_plan:
@@ -563,7 +599,9 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         try:
             resources = json.loads(resources_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise RuntimeError(f"Completed preflight artifact is invalid: {resources_path}") from exc
+            raise RuntimeError(
+                f"Completed preflight artifact is invalid: {resources_path}"
+            ) from exc
         if not isinstance(resources, dict) or not isinstance(resources.get("gpus"), list):
             raise RuntimeError(f"Completed preflight artifact is invalid: {resources_path}")
         load_model(dataset_patch_path, DatasetPatchFile)
@@ -605,9 +643,7 @@ def preprocess_pdf_node(state: WorkflowState) -> dict[str, str]:
     paper_markdown = config.output / "preprocessing" / "paper.md"
     artifacts_dir = config.output / "preprocessing" / "artifacts"
     if pipeline_state.is_stage_completed("preprocess_pdf"):
-        if not paper_markdown.is_file() or not paper_markdown.read_text(
-            encoding="utf-8"
-        ).strip():
+        if not paper_markdown.is_file() or not paper_markdown.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"Completed PDF artifact is missing or empty: {paper_markdown}")
         if not artifacts_dir.is_dir():
             raise RuntimeError(f"Completed PDF artifact directory is missing: {artifacts_dir}")
@@ -636,13 +672,9 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     paper_markdown = Path(state["paper_markdown"])
     claims_path = config.output / "preprocessing" / "claims.json"
     experiments_path = config.output / "preprocessing" / "experiment_todo.json"
-    transcript_path = (
-        config.output / "preprocessing" / "preprocessing_transcript.jsonl"
-    )
+    transcript_path = config.output / "preprocessing" / "preprocessing_transcript.jsonl"
     if pipeline_state.is_stage_completed("preprocessing_agent"):
-        if not paper_markdown.is_file() or not paper_markdown.read_text(
-            encoding="utf-8"
-        ).strip():
+        if not paper_markdown.is_file() or not paper_markdown.read_text(encoding="utf-8").strip():
             raise RuntimeError(
                 f"Completed preprocessing paper artifact is missing or empty: {paper_markdown}"
             )
@@ -677,9 +709,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    if not paper_markdown.is_file() or not paper_markdown.read_text(
-        encoding="utf-8"
-    ).strip():
+    if not paper_markdown.is_file() or not paper_markdown.read_text(encoding="utf-8").strip():
         raise RuntimeError(
             f"Preprocessing agent left paper artifact missing or empty: {paper_markdown}"
         )
@@ -717,12 +747,8 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     codegen_plan_path = codebase_dir / "codegen_plan.json"
     transcript_path = config.output / "codegen" / "codegen_transcript.jsonl"
     computation_provider_state_path = config.output / "remote_compute" / "instance.json"
-    dataset_patch_path = (
-        config.output / "system_maintenance" / "dataset" / "patch.json"
-    )
-    skill_corrections_path = (
-        config.output / "system_maintenance" / "skills" / "corrections.json"
-    )
+    dataset_patch_path = config.output / "system_maintenance" / "dataset" / "patch.json"
+    skill_corrections_path = config.output / "system_maintenance" / "skills" / "corrections.json"
     audit_stage = pipeline_state.state["stages"].get("audit_agent", {})
     audit_checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
     codegen_attempt = int(previous_stage.get("attempts", 0))
@@ -741,15 +767,10 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     else:
         audit_feedback_path = None
     if audit_feedback_path is not None and read_audit_verdict(audit_feedback_path) != "FAIL":
-        raise RuntimeError(
-            f"Codegen audit feedback is not a FAIL report: {audit_feedback_path}"
-        )
+        raise RuntimeError(f"Codegen audit feedback is not a FAIL report: {audit_feedback_path}")
     completed_run_validation = pipeline_state.is_stage_completed("report_agents")
     infrastructure_resume = bool(codegen_checkpoints.get("infrastructure_resume"))
-    if (
-        pipeline_state.is_stage_completed("codegen_agent")
-        and not audit_revision
-    ):
+    if pipeline_state.is_stage_completed("codegen_agent") and not audit_revision:
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
         codegen_plan = load_model(codegen_plan_path, CodegenPlan)
@@ -781,11 +802,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             {"audit_feedback_path": str(audit_feedback_path)},
         )
     if not source_prepared or not codebase_dir.is_dir():
-        if (
-            previous_status is None
-            and codebase_dir.is_dir()
-            and any(codebase_dir.iterdir())
-        ):
+        if previous_status is None and codebase_dir.is_dir() and any(codebase_dir.iterdir()):
             raise RuntimeError(f"Codebase output is not empty: {codebase_dir}")
         if config.repo is not None:
             shutil.copytree(
@@ -884,9 +901,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         report_path = Path(str(checkpoints.get("report_path", "")))
         verdict = read_audit_verdict(report_path)
         if verdict != checkpoints.get("verdict"):
-            raise RuntimeError(
-                f"Audit report verdict does not match its checkpoint: {report_path}"
-            )
+            raise RuntimeError(f"Audit report verdict does not match its checkpoint: {report_path}")
         print("resume audit_agent stage: skipped (already completed)")
         return {
             "audit_verdict": verdict,
@@ -909,18 +924,14 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
     previous_audit_status = pipeline_state.get_stage_status("audit_agent")
     pipeline_state.start_stage("audit_agent")
     scientific_attempt = rewrite_rounds_used + 1
-    attempt_dir = (
-        config.output / "codegen" / "audit" / f"attempt_{scientific_attempt:03d}"
-    )
+    attempt_dir = config.output / "codegen" / "audit" / f"attempt_{scientific_attempt:03d}"
     scripts_dir = attempt_dir / "scripts"
     results_dir = attempt_dir / "results"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
     report_path = attempt_dir / "audit_report.md"
     transcript_path = attempt_dir / "audit_transcript.jsonl"
-    codegen_plan = load_model(
-        Path(state["codebase_dir"]) / "codegen_plan.json", CodegenPlan
-    )
+    codegen_plan = load_model(Path(state["codebase_dir"]) / "codegen_plan.json", CodegenPlan)
     cloud_drive_state = validate_codegen_remote_compute(
         codegen_plan,
         config.output / "remote_compute" / "instance.json",
@@ -934,8 +945,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         else None
     )
     remote_audit_dir = (
-        f"{remote_working_dir.rstrip('/')}/preprocessing_audit/"
-        f"attempt_{scientific_attempt:03d}"
+        f"{remote_working_dir.rstrip('/')}/preprocessing_audit/" f"attempt_{scientific_attempt:03d}"
         if remote_working_dir
         else None
     )
@@ -951,9 +961,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         drive_provider=config.drive_provider,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
-        remote_dataset_dir=(
-            cloud_drive_state.get("target_path") if cloud_drive_state else None
-        ),
+        remote_dataset_dir=(cloud_drive_state.get("target_path") if cloud_drive_state else None),
         remote_working_dir=remote_working_dir,
         remote_audit_dir=remote_audit_dir,
         resources_path=state["resources_path"],
@@ -964,9 +972,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         report_path=report_path,
         codegen_attempt=codegen_attempt,
         remote_compute_state_path=config.output / "remote_compute" / "instance.json",
-        remote_compute_active=(
-            config.output / "remote_compute" / "instance.json"
-        ).is_file(),
+        remote_compute_active=(config.output / "remote_compute" / "instance.json").is_file(),
         resuming=previous_audit_status in {"running", "failed"},
     )
     run_agent(
@@ -1052,9 +1058,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
         skills_dir=skills_dir(),
-        computation_provider_state_path=(
-            config.output / "remote_compute" / "instance.json"
-        ),
+        computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
         replicate_plan_path=replicate_plan_path,
         claims=claims.model_dump(mode="json"),
         experiments=experiments.model_dump(mode="json"),
@@ -1120,9 +1124,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         codebase_dir=state["codebase_dir"],
         replication_dir=config.output / "replication",
         skills_dir=skills_dir(),
-        computation_provider_state_path=(
-            config.output / "remote_compute" / "instance.json"
-        ),
+        computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
         cloud_drive_enabled=config.clouddrive,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
@@ -1145,17 +1147,82 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
             indent=2,
         ),
     )
-    run_agent(
-        provider=config.provider,
-        prompt_path=prompt_path,
-        working_dir=Path(state["codebase_dir"]),
-        transcript_path=transcript_path,
-        siliconflow_config_path=config.siliconflow_config,
-        codex_model=config.codex_model,
-        codex_reasoning_effort=config.codex_reasoning_effort,
-    )
+    if config.provider == "codex":
+        command_dir = config.output / "replication" / "commands"
+        command_dir.mkdir(parents=True, exist_ok=True)
+        command_schema_path = config.output / "prompts" / "replicate_command.schema.json"
+        write_json(command_schema_path, ReplicationCommand.model_json_schema())
+        session_id: str | None = None
+        resume_prompt_path: Path | None = None
+        command_index = 1
+        while True:
+            command_request_path = command_dir / f"command_{command_index:03d}.json"
+            if session_id is None:
+                session_id = run_agent(
+                    provider=config.provider,
+                    prompt_path=prompt_path,
+                    working_dir=Path(state["codebase_dir"]),
+                    transcript_path=transcript_path,
+                    siliconflow_config_path=config.siliconflow_config,
+                    codex_model=config.codex_model,
+                    codex_reasoning_effort=config.codex_reasoning_effort,
+                    output_schema_path=command_schema_path,
+                    output_last_message_path=command_request_path,
+                )
+                if session_id is None:
+                    raise RuntimeError("Codex replication turn did not return a session ID")
+            else:
+                assert resume_prompt_path is not None
+                run_agent(
+                    provider=config.provider,
+                    prompt_path=resume_prompt_path,
+                    working_dir=Path(state["codebase_dir"]),
+                    transcript_path=transcript_path,
+                    siliconflow_config_path=config.siliconflow_config,
+                    codex_model=config.codex_model,
+                    codex_reasoning_effort=config.codex_reasoning_effort,
+                    output_schema_path=command_schema_path,
+                    output_last_message_path=command_request_path,
+                    resume_session_id=session_id,
+                )
 
-    outputs = validate_replication_artifacts(state)
+            command = load_model(command_request_path, ReplicationCommand).command
+            log_path = command_dir / f"command_{command_index:03d}.log"
+            result_path = command_dir / f"command_{command_index:03d}_result.json"
+            result = _run_replication_command(
+                command,
+                codebase_dir=Path(state["codebase_dir"]),
+                log_path=log_path,
+                result_path=result_path,
+            )
+            try:
+                outputs = validate_replication_artifacts(state)
+            except (RuntimeError, ValueError) as exc:
+                result["artifact_validation_error"] = str(exc)
+                write_json(result_path, result)
+                resume_prompt_path = render_prompt(
+                    "replication/command_result_instructions.md",
+                    config.output / "prompts" / f"replicate_resume_{command_index:03d}.md",
+                    command_result_path=result_path,
+                    command_log_path=log_path,
+                    exit_code=result["exit_code"],
+                    duration_seconds=result["duration_seconds"],
+                    artifact_validation_error=result["artifact_validation_error"],
+                )
+                command_index += 1
+                continue
+            break
+    else:
+        run_agent(
+            provider=config.provider,
+            prompt_path=prompt_path,
+            working_dir=Path(state["codebase_dir"]),
+            transcript_path=transcript_path,
+            siliconflow_config_path=config.siliconflow_config,
+            codex_model=config.codex_model,
+            codex_reasoning_effort=config.codex_reasoning_effort,
+        )
+        outputs = validate_replication_artifacts(state)
     power_off_run_computation_instance(config)
     pipeline_state.complete_stage(
         "replicate_agent",
@@ -1194,18 +1261,12 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     print("enter report stage")
     pipeline_state.start_stage("report_agents")
     completed_experiments = set(
-        pipeline_state.get_stage_checkpoints("report_agents").get(
-            "completed_experiments", []
-        )
+        pipeline_state.get_stage_checkpoints("report_agents").get("completed_experiments", [])
     )
     transcript_paths = []
     for experiment in experiments.experiments:
         experiment_payload = experiment.model_dump(mode="json")
-        transcript_path = (
-            config.output
-            / "report"
-            / f"{experiment.experiment_id}_transcript.jsonl"
-        )
+        transcript_path = config.output / "report" / f"{experiment.experiment_id}_transcript.jsonl"
         transcript_paths.append(str(transcript_path))
         if experiment.experiment_id in completed_experiments:
             try:
@@ -1253,12 +1314,8 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             replicate_plan_path=state["replicate_plan_path"],
             codebase_dir=state["codebase_dir"],
             replication_dir=config.output / "replication",
-            replication_log_path=(
-                config.output / "replication" / "replication_log.json"
-            ),
-            evidence_summary_path=(
-                config.output / "replication" / "evidence_summary.json"
-            ),
+            replication_log_path=(config.output / "replication" / "replication_log.json"),
+            evidence_summary_path=(config.output / "replication" / "evidence_summary.json"),
             experiment_json=json.dumps(experiment_payload, ensure_ascii=False, indent=2),
             codegen_plan_path=codegen_plan_path,
             ambiguities_json=json.dumps(

@@ -23,7 +23,7 @@ A step is only "unreproducible" once distinct strategies have each failed for a 
 
 ## Workspace Layout
 
-- **Working directory:** `{{ codebase_dir }}/` — the writable codebase produced by the codegen stage. Run commands and keep experiment outputs here.
+- **Working directory:** `{{ codebase_dir }}/` — the writable codebase produced by the codegen stage. Keep experiment outputs here.
 - **Replication plan:** `{{ replicate_plan_path }}` (read-only) — execute every step in this plan.
 - **Output directory:** `{{ replication_dir }}/` — write each pipeline-managed result here.
 Write only under the working directory and the output directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
@@ -115,7 +115,7 @@ You may browse the catalog and use a skill if its description genuinely
 matches your work; many replications will not need any skill, and that
 is fine.
 
-After your initial environment check, run `ls {{ skills_dir }}/`
+After your initial environment check, inspect `{{ skills_dir }}/`
 and review the descriptions. Note any skills you may call on while
 running and debugging the codebase. Use a skill when its description
 matches the work in front of you. If the plan uses remote compute, read
@@ -129,7 +129,33 @@ execution. Reuse that same remote copy. Download only experiment outputs,
 aggregate evidence, and logs; never download raw or row-level dataset content.
 {% endif %}
 
-## Environment Setup
+## Command handoff protocol
+
+Your response is constrained to exactly one JSON object with one non-empty
+field: `{"command": "<bash command>"}`. The command is the next action for
+local orchestration, not an explanation or a completion marker.
+
+You may inspect files, edit the writable codebase, and use lightweight
+interactive checks in this turn. Do not directly run or monitor a large
+experiment, test suite, provider CLI, or remote job here. Return that work as
+the one `command` instead. Local orchestration will execute it from
+`{{ codebase_dir }}/` with `/bin/bash -lc`, stream and save its combined log,
+then resume this same session with the exit status, log path, and artifact
+validation result.
+
+The returned command must stay in the foreground. Do not use `nohup`, `&`, or
+another background/detached launcher. A remote command must likewise wait or
+poll until its requested remote work reaches a terminal state. On the next turn,
+use the saved result to debug, choose the next experiment, or continue the
+plan. Do not return an empty command, a `status` field, or a completion
+sentinel: orchestration alone decides completion by validating the replication
+artifacts after each command.
+
+### Environment setup command
+
+If setup is required, return it as the first handoff command. For example,
+adapt the following to the actual codebase rather than executing it in this
+turn:
 
 ```bash
 cd {{ codebase_dir }}
@@ -210,21 +236,9 @@ GPU is available. Use it when present. If GPU is unavailable:
 
 ## Replication Plan
 
-Read `{{ replicate_plan_path }}` and execute every step in its listed order.
-Run commands from `{{ codebase_dir }}/`. If a step fails, try to
-fix the issue before moving on.
-
-### Long-running commands
-
-Keep each long-running command attached to one execution handle and wait on or
-poll that same handle until it reaches a terminal status. Do not create
-standalone `sleep` commands as timers, launch overlapping progress probes, or
-return while a plan command or tool call remains in progress. Keep progress
-checks sparse and bounded so repeated log output does not consume the session.
-When using a remote server, any progress or phase-status message is non-terminal:
-after emitting it, continue waiting on the same execution handle. Do not end the
-agent turn until the remote command's terminal status has been observed and
-recorded.
+Read `{{ replicate_plan_path }}` and complete every step in listed order by
+returning one foreground command at a time. If a step fails, inspect the saved
+command result on the resumed turn, fix the issue, and return the next command.
 
 ### Resume an interrupted attempt
 
@@ -315,11 +329,12 @@ details, CPU/RAM capacity, CUDA details, or other relevant package versions.
 
 When the plan uses remote compute, download and locally validate every required
 result, log, exit-status record, and evidence artifact before its final step.
-Then execute the provider adapter's reviewed power-off action using
-`{{ computation_provider_state_path }}`. Do not call release: the instance must
-remain recoverable through report generation, and orchestration releases it
-only after the completed report has been validated. Before returning after a
-failed remote attempt, preserve available evidence and make the same bounded,
-idempotent power-off call; surface any shutdown failure.
+Return the provider adapter's reviewed power-off action using
+`{{ computation_provider_state_path }}` as the appropriate foreground command.
+Do not call release: the instance must remain recoverable through report
+generation, and orchestration releases it only after the completed report has
+been validated. Before returning a command after a failed remote attempt,
+preserve available evidence and include the same bounded, idempotent power-off
+action; surface any shutdown failure.
 
 Begin execution now.

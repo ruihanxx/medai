@@ -2,7 +2,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from medai.config import RunConfig
 from medai.models import CodegenPlan
 from medai.pipeline_state import PipelineState
@@ -111,9 +110,7 @@ def _write_replication_log(path: Path, output_file: str) -> None:
     )
 
 
-def test_cloud_drive_preflight_accepts_remote_only_data(
-    tmp_path: Path, monkeypatch
-):
+def test_cloud_drive_preflight_accepts_remote_only_data(tmp_path: Path, monkeypatch):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
     monkeypatch.setenv("AUTODL_TOKEN", "token")
@@ -396,12 +393,11 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 encoding="utf-8",
             )
         elif name == "replicate.md":
+            kwargs["output_last_message_path"].write_text('{"command":"true"}\n', encoding="utf-8")
             result_dir = output / "replication" / "E1"
             result_dir.mkdir(parents=True)
             (result_dir / "figure.png").write_bytes(b"png")
-            (result_dir / "metrics.json").write_text(
-                '{"accuracy": 0.89}\n', encoding="utf-8"
-            )
+            (result_dir / "metrics.json").write_text('{"accuracy": 0.89}\n', encoding="utf-8")
             (output / "replication" / "replication_log.json").write_text(
                 json.dumps(
                     {
@@ -450,6 +446,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 ),
                 encoding="utf-8",
             )
+
             (output / "replication" / "evidence_summary.json").write_text(
                 json.dumps(
                     {
@@ -463,6 +460,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 ),
                 encoding="utf-8",
             )
+            return "thread-123"
         elif name == "report_E1.md":
             (output / "report" / "reproduction_report.md").write_text(
                 "# Reproduction Report\n\n"
@@ -485,9 +483,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     result = create_workflow().invoke({"config": config})
 
     stage_lines = [
-        line
-        for line in capsys.readouterr().out.splitlines()
-        if line.startswith("enter ")
+        line for line in capsys.readouterr().out.splitlines() if line.startswith("enter ")
     ]
     assert stage_lines == [
         "enter preflight stage",
@@ -518,9 +514,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert str(skill_corrections_path) in codegen_prompt
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
     assert "/explore-data/" not in codegen_prompt
-    audit_prompt = (output / "prompts" / "audit_attempt_001.md").read_text(
-        encoding="utf-8"
-    )
+    audit_prompt = (output / "prompts" / "audit_attempt_001.md").read_text(encoding="utf-8")
     assert str(data) in audit_prompt
     assert "Do not connect to, query, stop, release" in audit_prompt
     assert "Run the complete preprocessing locally" in audit_prompt
@@ -528,9 +522,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert '"environment"' in plan_prompt
     assert '"command_hint"' in plan_prompt
     assert '"verifies"' in plan_prompt
-    replication_prompt = (output / "prompts" / "replicate.md").read_text(
-        encoding="utf-8"
-    )
+    replication_prompt = (output / "prompts" / "replicate.md").read_text(encoding="utf-8")
     assert "replication_log.json" in replication_prompt
     assert "evidence_summary.json" in replication_prompt
     report_prompt = (output / "prompts" / "report_E1.md").read_text(encoding="utf-8")
@@ -685,6 +677,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
 
     def fake_agent(*, prompt_path, transcript_path, **kwargs):
         transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
+        kwargs["output_last_message_path"].write_text('{"command":"true"}\n', encoding="utf-8")
         result_dir = output / "replication" / "E1"
         result_dir.mkdir()
         artifact_path = result_dir / "figure.png"
@@ -748,6 +741,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
             ),
             encoding="utf-8",
         )
+        return "thread-123"
 
     monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
     replicate_agent_node(
@@ -766,6 +760,143 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
     assert "five adjustment rounds per experiment" in prompt
 
 
+def test_codex_replication_hands_off_failed_commands_to_same_session(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _replicate_config(tmp_path)
+    PipelineState.create(config.output, {"paper": str(config.paper), "provider": "codex"})
+    codebase = config.output / "codegen" / "codebase"
+    codebase.mkdir(parents=True)
+    claims_path = config.output / "preprocessing" / "claims.json"
+    claims_path.parent.mkdir()
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "statement": "Accuracy is reported.",
+                        "role": "final",
+                        "kind": "numeric",
+                        "paper_result": 0.9,
+                        "provenance": {
+                            "page": 1,
+                            "section": "Results",
+                            "quote": "Accuracy was 0.9.",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    experiments_path = config.output / "preprocessing" / "experiment_todo.json"
+    experiments_path.write_text(
+        json.dumps(
+            {
+                "experiments": [
+                    {
+                        "experiment_id": "E1",
+                        "description": "Train and evaluate.",
+                        "computational_demand": "CPU",
+                        "claims": ["C1"],
+                        "artifacts": [],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    replicate_plan_path = config.output / "plan" / "replicate_plan.json"
+    replicate_plan_path.parent.mkdir()
+    replicate_plan_path.write_text(
+        json.dumps(
+            {
+                "environment": {
+                    "language": "Python",
+                    "key_dependencies": [],
+                    "setup_hints": "none",
+                },
+                "steps": [
+                    {
+                        "id": step_id,
+                        "description": f"Step {step_id}.",
+                        "command_hint": "python run.py",
+                        "expected_outcome": "metric",
+                        "verifies": ["C1"] if step_id == 3 else [],
+                    }
+                    for step_id in (1, 2, 3)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    requested_commands = iter(
+        [
+            "pwd; printf 'first-error\\n' >&2; false",
+            "printf 'second-command\\n'",
+        ]
+    )
+    agent_calls = []
+    validation_calls = []
+    events = []
+
+    def fake_agent(**kwargs):
+        agent_calls.append(kwargs)
+        command = next(requested_commands)
+        kwargs["output_last_message_path"].write_text(
+            json.dumps({"command": command}), encoding="utf-8"
+        )
+        mode = "a" if kwargs.get("resume_session_id") else "w"
+        with kwargs["transcript_path"].open(mode, encoding="utf-8") as transcript:
+            transcript.write('{"type":"turn.completed"}\n')
+        return "thread-123"
+
+    def fake_validate(_state):
+        validation_calls.append("validate")
+        if len(validation_calls) == 1:
+            raise RuntimeError("replication log is incomplete")
+        return [str(config.output / "replication" / "replication_log.json")]
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    monkeypatch.setattr("medai.workflow.validate_replication_artifacts", fake_validate)
+    monkeypatch.setattr(
+        "medai.workflow.power_off_run_computation_instance",
+        lambda _config: events.append("power-off"),
+    )
+
+    replicate_agent_node(
+        {
+            "config": config,
+            "claims_path": str(claims_path),
+            "experiments_path": str(experiments_path),
+            "replicate_plan_path": str(replicate_plan_path),
+            "codebase_dir": str(codebase),
+        }
+    )
+
+    commands = config.output / "replication" / "commands"
+    first_result = json.loads((commands / "command_001_result.json").read_text())
+    second_result = json.loads((commands / "command_002_result.json").read_text())
+    assert json.loads((commands / "command_001.json").read_text()) == {
+        "command": "pwd; printf 'first-error\\n' >&2; false"
+    }
+    assert first_result["exit_code"] == 1
+    assert first_result["artifact_validation_error"] == "replication log is incomplete"
+    assert Path(first_result["log_path"]) == commands / "command_001.log"
+    assert str(codebase) in (commands / "command_001.log").read_text()
+    assert "first-error" in (commands / "command_001.log").read_text()
+    assert second_result["exit_code"] == 0
+    assert second_result["artifact_validation_error"] is None
+    assert len(agent_calls) == 2
+    assert agent_calls[1]["resume_session_id"] == "thread-123"
+    assert agent_calls[0]["output_schema_path"] == agent_calls[1]["output_schema_path"]
+    assert (config.output / "prompts" / "replicate_resume_001.md").is_file()
+    assert events == ["power-off"]
+
+
 def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
     tmp_path: Path,
     monkeypatch,
@@ -776,12 +907,12 @@ def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
     config = RunConfig(
         paper=base.paper,
         output=base.output,
-        provider=base.provider,
+        provider="claude",
         clouddrive=True,
         drive_provider="aliyun",
         cloud_dataset="mimic-iv",
     )
-    PipelineState.create(config.output, {"provider": "codex"})
+    PipelineState.create(config.output, {"provider": "claude"})
     plan = workflow.ReplicationPlan.model_validate(
         {
             "environment": {
@@ -923,9 +1054,7 @@ def test_graph_routes_failed_audit_back_to_codegen_once(monkeypatch):
 
     monkeypatch.setattr(workflow, "preflight_node", stage("preflight"))
     monkeypatch.setattr(workflow, "preprocess_pdf_node", stage("preprocess_pdf"))
-    monkeypatch.setattr(
-        workflow, "preprocessing_agent_node", stage("preprocessing_agent")
-    )
+    monkeypatch.setattr(workflow, "preprocessing_agent_node", stage("preprocessing_agent"))
     monkeypatch.setattr(workflow, "codegen_agent_node", stage("codegen_agent"))
     monkeypatch.setattr(workflow, "audit_agent_node", audit)
     monkeypatch.setattr(workflow, "plan_agent_node", stage("plan_agent"))
@@ -1042,18 +1171,14 @@ def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path:
 
 def test_remote_plan_and_replication_prompts_require_power_off_not_release():
     templates = Path(__file__).parents[1] / "templates"
-    plan_prompt = (templates / "plan" / "session_instructions.md").read_text(
+    plan_prompt = (templates / "plan" / "session_instructions.md").read_text(encoding="utf-8")
+    replicate_prompt = (templates / "replication" / "session_instructions.md").read_text(
         encoding="utf-8"
     )
-    replicate_prompt = (
-        templates / "replication" / "session_instructions.md"
-    ).read_text(encoding="utf-8")
 
     assert "provider adapter's reviewed power-off action" in plan_prompt
     assert "must not release" in plan_prompt
-    assert "Every invocation of this stage is a complete replication attempt" in (
-        replicate_prompt
-    )
+    assert "Every invocation of this stage is a complete replication attempt" in (replicate_prompt)
     assert "Do not call release" in replicate_prompt
 
 
@@ -1075,16 +1200,18 @@ def test_resume_archives_interrupted_replicate_attempt_and_restarts_it(
     )
     (config.output / "replication" / "old.txt").write_text("old", encoding="utf-8")
     (config.output / "report").mkdir(parents=True)
-    (config.output / "report" / "reproduction_report.md").write_text(
-        "old report", encoding="utf-8"
-    )
+    (config.output / "report" / "reproduction_report.md").write_text("old report", encoding="utf-8")
     (config.output / "prompts").mkdir(parents=True)
     (config.output / "prompts" / "replicate.md").write_text(
         "old replicate prompt", encoding="utf-8"
     )
-    (config.output / "prompts" / "report_E1.md").write_text(
-        "old report prompt", encoding="utf-8"
+    (config.output / "prompts" / "replicate_resume_001.md").write_text(
+        "old command result", encoding="utf-8"
     )
+    (config.output / "prompts" / "replicate_command.schema.json").write_text(
+        "{}\n", encoding="utf-8"
+    )
+    (config.output / "prompts" / "report_E1.md").write_text("old report prompt", encoding="utf-8")
     remote_state_path = config.output / "remote_compute" / "instance.json"
     _write_remote_state(remote_state_path)
     state.start_stage("replicate_agent")
@@ -1107,20 +1234,18 @@ def test_resume_archives_interrupted_replicate_attempt_and_restarts_it(
     assert result["rollback"] == "replicate"
     assert result["archive"] == str(archive)
     assert (archive / "replication" / "old.txt").read_text(encoding="utf-8") == "old"
-    assert (
-        archive / "report" / "reproduction_report.md"
-    ).read_text(encoding="utf-8") == "old report"
+    assert (archive / "report" / "reproduction_report.md").read_text(
+        encoding="utf-8"
+    ) == "old report"
     assert (archive / "prompts" / "replicate.md").is_file()
+    assert (archive / "prompts" / "replicate_resume_001.md").is_file()
+    assert (archive / "prompts" / "replicate_command.schema.json").is_file()
     assert (archive / "prompts" / "report_E1.md").is_file()
     copied_output = archive / "referenced_codebase_outputs" / "results" / "metrics.json"
     assert copied_output.read_text(encoding="utf-8") == '{"score": 0.9}'
     mapping = json.loads((archive / "path_mapping.json").read_text(encoding="utf-8"))
-    assert mapping["referenced_codebase_outputs"][0]["original_path"] == str(
-        referenced_output
-    )
-    assert mapping["referenced_codebase_outputs"][0]["archived_path"] == str(
-        copied_output
-    )
+    assert mapping["referenced_codebase_outputs"][0]["original_path"] == str(referenced_output)
+    assert mapping["referenced_codebase_outputs"][0]["archived_path"] == str(copied_output)
     assert list((config.output / "replication").iterdir()) == []
     assert list((config.output / "report").iterdir()) == []
     assert not (config.output / "prompts" / "replicate.md").exists()
@@ -1394,9 +1519,7 @@ def test_computation_cleanup_dispatches_fake_provider_metadata(tmp_path: Path, m
     state_path = tmp_path / "output" / "remote_compute" / "instance.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
-        json.dumps(
-            {"provider": "fake", "created_by_run": True, "released": False}
-        ),
+        json.dumps({"provider": "fake", "created_by_run": True, "released": False}),
         encoding="utf-8",
     )
     paper = tmp_path / "paper.pdf"

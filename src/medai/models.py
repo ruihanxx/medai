@@ -4,7 +4,7 @@ import math
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
 
 
 class StrictModel(BaseModel):
@@ -172,6 +172,17 @@ class ReplicationLog(StrictModel):
         return self
 
 
+class ReplicationCommand(StrictModel):
+    command: str = Field(min_length=1)
+
+    @field_validator("command")
+    @classmethod
+    def nonempty_command(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("command must not be blank")
+        return value
+
+
 class EvidenceEnvironment(StrictModel):
     model_config = ConfigDict(extra="allow")
 
@@ -313,9 +324,7 @@ class IdeaImplementationPlan(StrictModel):
     def unique_model_files_and_experiment_ids(self) -> "IdeaImplementationPlan":
         if len(self.new_model_files) != len(set(self.new_model_files)):
             raise ValueError("new_model_files must be unique")
-        experiment_ids = [
-            integration.experiment_id for integration in self.experiment_integrations
-        ]
+        experiment_ids = [integration.experiment_id for integration in self.experiment_integrations]
         if len(experiment_ids) != len(set(experiment_ids)):
             raise ValueError("Implementation experiment IDs must be unique")
         return self
@@ -464,9 +473,7 @@ class ExperimentMetricComparison(StrictModel):
                 abs_tol=1e-9,
             ):
                 raise ValueError("relative_delta is inconsistent with the metric values")
-            expected_score = (
-                expected_relative if self.direction == "higher" else -expected_relative
-            )
+            expected_score = expected_relative if self.direction == "higher" else -expected_relative
             if self.score is None or not math.isclose(
                 self.score,
                 expected_score,
@@ -522,9 +529,7 @@ class IdeaAssessment(StrictModel):
             raise ValueError("Assessment weighted score does not match experiment scores")
 
         if (not self.audit_passed or not self.protocol_consistent) and self.verdict != "invalid":
-            raise ValueError(
-                "A failed audit or inconsistent protocol requires an invalid verdict"
-            )
+            raise ValueError("A failed audit or inconsistent protocol requires an invalid verdict")
         if self.audit_passed and self.protocol_consistent:
             expected_verdict = (
                 "inconclusive"
@@ -600,9 +605,7 @@ def validate_replication_log(plan: ReplicationPlan, log: ReplicationLog) -> None
         raise ValueError("Replication log must cover plan steps in order")
     outcomes_by_id = {outcome.step_id: outcome for outcome in log.step_outcomes}
     missing_outputs = [
-        step.id
-        for step in plan.steps
-        if step.verifies and not outcomes_by_id[step.id].output_files
+        step.id for step in plan.steps if step.verifies and not outcomes_by_id[step.id].output_files
     ]
     if missing_outputs:
         raise ValueError(
@@ -652,9 +655,7 @@ def validate_codegen_audit(
     ]
     actual = [(check.experiment_id, check.aspect) for check in audit.checks]
     if actual != expected:
-        raise ValueError(
-            "Codegen audit must check every experiment contract aspect in order"
-        )
+        raise ValueError("Codegen audit must check every experiment contract aspect in order")
 
 
 def validate_autoresearch_experiment_plan(
@@ -665,9 +666,7 @@ def validate_autoresearch_experiment_plan(
     expected = [experiment.experiment_id for experiment in contracts.experiments]
     actual = [experiment.experiment_id for experiment in plan.experiments]
     if actual != expected:
-        raise ValueError(
-            "Auto Research experiment plan must cover every experiment in order"
-        )
+        raise ValueError("Auto Research experiment plan must cover every experiment in order")
     integrations = {
         integration.experiment_id: integration
         for integration in implementation.experiment_integrations
@@ -675,16 +674,10 @@ def validate_autoresearch_experiment_plan(
     for experiment in plan.experiments:
         commands = {step.command_hint.strip() for step in experiment.steps}
         integration = integrations[experiment.experiment_id]
-        baseline_commands = {
-            command.strip() for command in integration.baseline_entry_points
-        }
+        baseline_commands = {command.strip() for command in integration.baseline_entry_points}
         if commands & baseline_commands:
-            raise ValueError(
-                f"Auto Research plan reruns a baseline: {experiment.experiment_id}"
-            )
-        refinement_commands = {
-            command.strip() for command in integration.refinement_entry_points
-        }
+            raise ValueError(f"Auto Research plan reruns a baseline: {experiment.experiment_id}")
+        refinement_commands = {command.strip() for command in integration.refinement_entry_points}
         if not commands & refinement_commands:
             raise ValueError(
                 f"Auto Research plan is missing a refinement entry point: "
@@ -711,9 +704,7 @@ def validate_autoresearch_experiment_log(
             raise ValueError(
                 f"Experiment log must cover steps in order: {planned_experiment.experiment_id}"
             )
-        outcomes_by_id = {
-            outcome.step_id: outcome for outcome in logged_experiment.step_outcomes
-        }
+        outcomes_by_id = {outcome.step_id: outcome for outcome in logged_experiment.step_outcomes}
         missing_outputs = [
             step.id
             for step in planned_experiment.steps
@@ -741,9 +732,7 @@ def validate_smart_replicate_log(
             f"Expected smart-replicate anchors do not match {experiment.experiment_id}"
         )
     if log.anchors != anchors:
-        raise ValueError(
-            f"Smart-replicate log anchors do not match {experiment.experiment_id}"
-        )
+        raise ValueError(f"Smart-replicate log anchors do not match {experiment.experiment_id}")
 
 
 def validate_reproduction_report(
@@ -757,13 +746,10 @@ def validate_reproduction_report(
         "## 2. Validation claim assessment",
         "## 3. Replication risk list",
     ]
-    invalid_sections = [
-        section for section in required_sections if report_text.count(section) != 1
-    ]
+    invalid_sections = [section for section in required_sections if report_text.count(section) != 1]
     if invalid_sections:
         raise ValueError(
-            "Report must contain exactly one of each required section: "
-            f"{invalid_sections}"
+            "Report must contain exactly one of each required section: " f"{invalid_sections}"
         )
     section_positions = [report_text.index(section) for section in required_sections]
     if section_positions != sorted(section_positions):
@@ -771,16 +757,19 @@ def validate_reproduction_report(
     per_experiment_text = report_text.split(required_sections[0], 1)[1].split(
         required_sections[1], 1
     )[0]
-    validation_text = report_text.split(required_sections[1], 1)[1].split(
-        required_sections[2], 1
-    )[0]
+    validation_text = report_text.split(required_sections[1], 1)[1].split(required_sections[2], 1)[
+        0
+    ]
     risk_text = report_text.split(required_sections[2], 1)[1]
 
     def contains_identifier(text: str, identifier: str) -> bool:
-        return re.search(
-            rf"(?<![A-Za-z0-9_.-]){re.escape(identifier)}(?![A-Za-z0-9_.-])",
-            text,
-        ) is not None
+        return (
+            re.search(
+                rf"(?<![A-Za-z0-9_.-]){re.escape(identifier)}(?![A-Za-z0-9_.-])",
+                text,
+            )
+            is not None
+        )
 
     missing_experiments = [
         experiment.experiment_id
@@ -807,8 +796,7 @@ def validate_reproduction_report(
     missing_validation_claims = [
         claim.claim_id
         for claim in claims.claims
-        if claim.role == "validation"
-        and not contains_identifier(validation_text, claim.claim_id)
+        if claim.role == "validation" and not contains_identifier(validation_text, claim.claim_id)
     ]
     if missing_validation_claims:
         raise ValueError(

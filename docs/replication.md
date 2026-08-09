@@ -35,6 +35,17 @@ The LangGraph stages are:
    claim/artifact comparisons, validation-anchor assessments, and a risk list
    derived from code-generation ambiguities.
 
+For `provider=codex` only, replication uses an intra-invocation command handoff
+loop. Codex returns one schema-validated non-empty Bash command, orchestration
+runs it locally from the codebase while streaming and saving its combined log,
+then validates the canonical replication artifacts. A failed command or an
+incomplete validation resumes the same explicit Codex session with that saved
+result so Codex can debug or choose the next command. Completion is solely a
+successful artifact validation; command exit status is diagnostic, not an
+automatic stage failure. This session is intentionally temporary: an explicit
+CLI resume still archives and restarts the replication attempt as described
+below.
+
 Each workflow node prints `enter <stage> stage` to standard output immediately
 when it starts.
 
