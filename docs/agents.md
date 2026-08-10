@@ -62,6 +62,11 @@
   chunks or bounded batches, immediately perform chunk-eligible preprocessing,
   retain only required columns, and postpone global operations such as
   downsampling until the compact chunk outputs are merged.
+- Codegen exits nonzero as soon as it determines that the paper requires a file
+  absent from the supplied dataset, regardless of whether the likely cause is
+  dataset version, incomplete download, paper error, or another source
+  mismatch. It must not invent an absent or derived artifact, generate code that
+  waits for it, substitute other data, or proceed to preprocessing audit.
 - A codegen retry caused by audit reads the latest failed report and may change
   data reading, cohort construction, window/feature aggregation, missing-data
   handling, and related configuration only. It must repair the evidenced root

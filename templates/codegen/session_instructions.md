@@ -240,6 +240,13 @@ results.
 
 Strictly follow the paper's dataset processing and cohort construction procedures.
 
+If the paper requires any data file that is absent from the supplied dataset,
+immediately make the Codex CLI exit nonzero and terminate this workflow. This is
+terminal regardless of whether the likely cause is a dataset-version mismatch,
+an incomplete download, an error in the paper, or another source mismatch. Do
+not invent a missing file or derived artifact, write code that waits for it,
+substitute other data, or continue to the preprocessing audit.
+
 For large raw tables/dataframes, use this processing pattern: Reads large raw
 tables/dataframe in chunks or bounded batches, applies chunk-eligible
 preprocessing immediately after each chunk read, projects required columns,
