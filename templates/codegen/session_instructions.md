@@ -10,17 +10,6 @@ upload code and ordinary local data again, recreate the environment, and rerun
 remote setup checks. For cloud-backed data, invoke the reviewed cloud
 materialization command again and require its completed state before inspection.
 Rerun all codegen self-review checks before completing the stage.
-{% elif audit_feedback_path|default(none) %}
-This stage is revising a completed implementation after the preprocessing
-audit rejected it. Read the audit report at
-`{{ audit_feedback_path }}` before changing code. Preserve valid work and change
-only the complete preprocessing chain needed to resolve the reported cause:
-data reading, cohort construction, window/feature aggregation, missing-data
-handling, and their configuration. Do not change model definitions, training,
-evaluation, or generated results. Update the corresponding
-`codegen_plan.json` ambiguity so its assumption records the evidence-based
-resolution and implementation location. Do not chase a larger cohort or a paper
-result; the next audit reruns the actual preprocessing.
 {% elif resuming %}
 This stage is resuming after an interrupted code-generation attempt. Inspect the
 existing files in `{{ codebase_dir }}/`, preserve valid completed work, repair or
@@ -47,11 +36,6 @@ implementation of the paper's methodology.
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
-{% if audit_feedback_path|default(none) %}
-- Failed local preprocessing audit: `{{ audit_feedback_path }}`
-{% endif %}
-
-
 ## Available skills
 
 A catalog of scientific-computing skills is staged at

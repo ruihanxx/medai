@@ -18,10 +18,12 @@ runs/<run_id>/
 │   ├── command_001.log
 │   └── command_001_result.json
 ├── codegen/audit/attempt_001/
-│   ├── audit_report.md
+│   ├── audit_report.json
 │   ├── audit_transcript.jsonl
 │   ├── scripts/
 │   └── results/
+├── codegen/cohort_refine/attempt_001/  # only after a failed audit
+│   └── cohort_refine_transcript.jsonl
 ├── plan/replicate_plan.json
 ├── plan/plan_transcript.jsonl
 ├── replication/replication_log.json
@@ -36,6 +38,7 @@ runs/<run_id>/
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
 │   ├── audit_attempt_001.md
+│   ├── cohort_refine_attempt_001.md  # only after a failed audit
 │   ├── codegen_cloud_pull_command.schema.json  # opted-in cloud handoff only
 │   ├── codegen_cloud_pull_resume_001.md
 │   ├── replicate_command.schema.json
@@ -134,11 +137,16 @@ audit-only CPU, streaming, or small-batch adapters remain under `scripts/` and
 never enter `codegen/codebase/`; preprocessing outputs, command logs, and
 statistics remain under `results/`. Cloud-data audits use a separate remote
 attempt beneath the codegen remote working directory and copy back only
-aggregate statistics, logs, and the report into these local paths. The Markdown
-report has no schema or static body validation.
-Its sole machine protocol is exactly one verdict marker as the final non-empty
-line: `Verdict: PASS` or `Verdict: FAIL`. Audit reports are stage artifacts and
-do not change the reproduction report's three-section contract.
+aggregate statistics, logs, and the report into these local paths. The compact
+JSON report contains exactly `verdict` and `issues`. Each issue contains exactly
+non-empty `error` and `required_fix` strings. `PASS` requires an empty issue list
+and `FAIL` requires at least one issue. Legacy Markdown reports retain read-only
+verdict compatibility. Audit reports are stage artifacts and do not change the
+reproduction report's three-section contract.
+
+Each successful cohort-refinement round retains its transcript in a numbered
+attempt directory. A provider retry reuses the same directory and transcript
+archive convention instead of consuming another scientific round.
 
 Remote-compute objects in codegen, replication, and Auto Research plans require
 only `state_path`, `remote_working_dir`, and `remote_dataset_dir`. The directory

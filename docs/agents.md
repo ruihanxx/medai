@@ -20,6 +20,9 @@
 - The base preprocessing-audit prompt lives beside codegen at
   `templates/codegen/audit_session_instructions.md`; rendered prompts are saved
   per scientific attempt as `prompts/audit_attempt_<NNN>.md`.
+- The cohort-refinement prompt lives at
+  `templates/cohort_refine/session_instructions.md`; rendered prompts are saved
+  per refinement round as `prompts/cohort_refine_attempt_<NNN>.md`.
 - Each agent invocation's provider event stream is preserved as a JSONL
   transcript beside that stage's artifacts. Before a retried invocation, an
   existing transcript is preserved as `<name>.attempt-<N>.jsonl`. Transcript
@@ -67,11 +70,15 @@
   dataset version, incomplete download, paper error, or another source
   mismatch. It must not invent an absent or derived artifact, generate code that
   waits for it, substitute other data, or proceed to preprocessing audit.
-- A codegen retry caused by audit reads the latest failed report and may change
-  data reading, cohort construction, window/feature aggregation, missing-data
-  handling, and related configuration only. It must repair the evidenced root
-  cause and update the corresponding ambiguity; it may not alter models,
-  training, evaluation, or result artifacts to chase paper values.
+- Cohort refinement reads the paper, codebase, read-only code-generation plan,
+  and latest failed audit report. It must fix and verify every reported issue
+  before succeeding. It may change only cohort construction, data loading,
+  preprocessing, and directly related data configuration; it may not change the
+  code-generation plan, models, training, tuning, evaluation, or result
+  artifacts. Local-data refinement never operates remote compute. Cloud-data
+  refinement reuses the existing instance and may retrieve only aggregate
+  verification output and logs; it never rents, releases, reauthorizes, or
+  rematerializes data.
 - Remote compute access is exposed through the `computation-provider` skill.
   Provider references resolve provider-specific SSH connection metadata; the
   skill's shared SSH helper owns provider-independent key-first authentication,

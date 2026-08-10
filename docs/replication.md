@@ -20,7 +20,7 @@ The LangGraph stages are:
    the complete dataset before any data inspection, then records the completed state's
    read-only target as `remote_dataset_dir`.
 5. `audit_agent`: run real-data preprocessing, compute paper-aware cohort and
-   data-quality sanity statistics, and write a free-form audit report. Local
+   data-quality sanity statistics, and write a compact JSON audit report. Local
    data runs keep the existing isolated local audit and never connect to remote
    compute. Cloud-drive runs instead reuse codegen's active instance, remote
    dataset, and preprocessing implementation in an independent remote audit
@@ -28,10 +28,13 @@ The LangGraph stages are:
    instrumentation, prohibit training/tuning/evaluation and local CPU adapters,
    and retrieve only aggregate statistics, logs, and the report—not raw or
    row-level data.
-6. `plan_agent`: check coverage, install dependencies, smoke-test, and write the
+6. `cohort_refine_agent`: after a failed audit, fix every reported cohort
+   construction, data-loading, or preprocessing issue without changing the
+   code-generation plan, models, training, evaluation, or generated results.
+7. `plan_agent`: check coverage, install dependencies, smoke-test, and write the
    replication plan.
-7. `replicate_agent`: execute every experiment and write evidence.
-8. `report_agents`: sequentially update one report with per-experiment
+8. `replicate_agent`: execute every experiment and write evidence.
+9. `report_agents`: sequentially update one report with per-experiment
    claim/artifact comparisons, validation-anchor assessments, and a risk list
    derived from code-generation ambiguities.
 
@@ -58,7 +61,9 @@ Each workflow node prints `enter <stage> stage` to standard output immediately
 when it starts.
 
 There is no reduced-scale fallback. Missing evidence, invalid artifacts, or an
-agent failure stops the run explicitly.
+agent or technical failure stops the run explicitly. The sole scientific-verdict
+exception is an audit FAIL after all cohort-refinement rounds, which continues
+to planning while retaining the failed report and checkpoint.
 
 A failed remote interaction starts bounded, safe recovery: the agent begins
 with the selected provider reference, may consult official provider
@@ -79,12 +84,13 @@ successful procedure that conflicts with the skill reference is recorded in
 `system_maintenance/skills/corrections.json`, not applied to the repository
 skill during the run.
 
-Audit PASS proceeds to planning. Audit FAIL returns to codegen with the failed
-report and permits changes only to the complete preprocessing chain and related
-configuration; model, training, evaluation, and generated results remain out of
-scope. The codegen ambiguity record must capture the evidence-based resolution.
-There may be at most three such rewrites after the initial audit, for four audit
-attempts total. The fourth FAIL stops the run after preserving every report.
+Audit PASS proceeds to planning. Audit FAIL enters cohort refinement with the
+failed report and permits changes only to cohort construction, data loading,
+preprocessing, and directly related data configuration; the code-generation
+plan, models, training, evaluation, and generated results remain read-only.
+There may be at most three refinement rounds after the initial audit, for four
+audit attempts total. The fourth FAIL proceeds to planning after preserving
+every report and recording that refinement was exhausted.
 Judgment is paper- and data-type-aware: no universal retention or balance
 threshold is imposed, and paper-expected natural imbalance is not itself a
 failure.
@@ -125,13 +131,14 @@ an `infrastructure_resume` checkpoint while the prepared local codebase remains.
 A reused instance keeps the existing earlier-stage checkpoint. Cloud-drive runs
 invoke the idempotent `cloud-pull` before every replication attempt.
 
-The audit checkpoint records `audited_codegen_attempt`, `verdict`, `report_path`,
-and `rewrite_rounds_used`. A completed verdict for the current codegen attempt is
-reused; a newer codegen attempt is audited again. Audit or provider technical
-failure resumes the same scientific audit directory and does not consume a
-rewrite. A persisted fourth FAIL remains terminal on resume. When audit-driven
-codegen supersedes a legacy completed implementation, downstream plan,
-replication, and report stages are invalidated and rerun.
+The audit checkpoint records `audited_codegen_attempt`, `audited_refine_round`,
+`verdict`, `report_path`, `refine_rounds_used`, and
+`refinement_exhausted`. A completed verdict is reused only for the same codegen
+attempt and completed refinement round. Audit or provider technical failure
+resumes the same scientific audit directory and does not consume a refinement.
+Each successful cohort refinement records its completed round and source audit
+report; a technical retry reuses that round. Cohort refinement invalidates stale
+planning, replication, and report stages before changing preprocessing.
 
 Replication plans end by downloading and validating required outputs and then
 powering off, not releasing, remote compute. Orchestration repeats that

@@ -346,16 +346,8 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 encoding="utf-8",
             )
         elif name == "audit_attempt_001.md":
-            (working_dir / "audit_report.md").write_text(
-                "# Preprocessing Audit Report\n\n"
-                "## Scope\n\nFull local preprocessing.\n\n"
-                "## Paper expectations\n\nOne binary target.\n\n"
-                "## Commands executed\n\n`python preprocess.py`\n\n"
-                "## Observed statistics\n\nBoth classes remain.\n\n"
-                "## Sanity assessment\n\nNo significant issue.\n\n"
-                "## Limitations\n\nNone.\n\n"
-                "## Required codegen changes\n\nNone.\n\n"
-                "Verdict: PASS\n",
+            (working_dir / "audit_report.json").write_text(
+                json.dumps({"verdict": "PASS", "issues": []}),
                 encoding="utf-8",
             )
         elif name == "plan.md":
@@ -1028,6 +1020,7 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     monkeypatch.setattr(workflow, "preprocessing_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "codegen_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "audit_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "cohort_refine_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "plan_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "replicate_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "report_agents_node", must_not_run)
@@ -1037,7 +1030,7 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     assert calls == ["preflight", "preprocess_pdf"]
 
 
-def test_graph_routes_failed_audit_back_to_codegen_once(monkeypatch):
+def test_graph_routes_failed_audit_through_cohort_refine_once(monkeypatch):
     import medai.workflow as workflow
 
     calls = []
@@ -1059,6 +1052,11 @@ def test_graph_routes_failed_audit_back_to_codegen_once(monkeypatch):
     monkeypatch.setattr(workflow, "preprocessing_agent_node", stage("preprocessing_agent"))
     monkeypatch.setattr(workflow, "codegen_agent_node", stage("codegen_agent"))
     monkeypatch.setattr(workflow, "audit_agent_node", audit)
+    monkeypatch.setattr(
+        workflow,
+        "cohort_refine_agent_node",
+        stage("cohort_refine_agent"),
+    )
     monkeypatch.setattr(workflow, "plan_agent_node", stage("plan_agent"))
     monkeypatch.setattr(workflow, "replicate_agent_node", stage("replicate_agent"))
     monkeypatch.setattr(workflow, "report_agents_node", stage("report_agents"))
@@ -1071,7 +1069,7 @@ def test_graph_routes_failed_audit_back_to_codegen_once(monkeypatch):
         "preprocessing_agent",
         "codegen_agent",
         "audit_agent",
-        "codegen_agent",
+        "cohort_refine_agent",
         "audit_agent",
         "plan_agent",
         "replicate_agent",
@@ -1129,7 +1127,6 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
         gpu_info=[],
         computation_provider="AutoDL",
         resuming=True,
-        audit_feedback_path=None,
     )
 
     prompt = prompt_path.read_text(encoding="utf-8")
@@ -1417,7 +1414,12 @@ def test_resume_replacement_before_replicate_invalidates_from_codegen(
     (codebase / "run.py").write_text("print('preserved')", encoding="utf-8")
     remote_state_path = config.output / "remote_compute" / "instance.json"
     _write_remote_state(remote_state_path)
-    for stage_name in ("codegen_agent", "audit_agent", "plan_agent"):
+    for stage_name in (
+        "codegen_agent",
+        "audit_agent",
+        "cohort_refine_agent",
+        "plan_agent",
+    ):
         state.start_stage(stage_name)
         state.complete_stage(stage_name, [stage_name])
     state.resume({"provider": "codex"})
@@ -1440,6 +1442,7 @@ def test_resume_replacement_before_replicate_invalidates_from_codegen(
         "infrastructure_resume": True,
     }
     assert resumed.get_stage_status("audit_agent") == "invalidated"
+    assert resumed.get_stage_status("cohort_refine_agent") == "invalidated"
     assert resumed.get_stage_status("plan_agent") == "invalidated"
     assert (codebase / "run.py").read_text(encoding="utf-8") == "print('preserved')"
 

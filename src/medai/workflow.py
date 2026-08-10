@@ -38,7 +38,7 @@ from medai.prompts import render_prompt
 from medai.providers import run_agent
 from medai.resources import detect_resources
 
-MAX_AUDIT_REWRITES = 3
+MAX_COHORT_REFINE_ROUNDS = 3
 
 
 class WorkflowState(TypedDict, total=False):
@@ -50,6 +50,7 @@ class WorkflowState(TypedDict, total=False):
     codebase_dir: str
     audit_verdict: str
     audit_report_path: str
+    audit_refinement_exhausted: bool
     replicate_plan_path: str
     report_path: str
 
@@ -191,6 +192,40 @@ def validate_report_experiment(
 
 
 def read_audit_verdict(report_path: Path) -> str:
+    if report_path.suffix == ".json":
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Audit agent did not write its report: {report_path}") from exc
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Audit report is not valid JSON: {report_path}") from exc
+        if not isinstance(report, dict) or set(report) != {"verdict", "issues"}:
+            raise RuntimeError(
+                "Audit report must contain exactly `verdict` and `issues`: "
+                f"{report_path}"
+            )
+        verdict = report["verdict"]
+        issues = report["issues"]
+        if verdict not in {"PASS", "FAIL"} or not isinstance(issues, list):
+            raise RuntimeError(f"Audit report has an invalid verdict or issues: {report_path}")
+        for issue in issues:
+            if (
+                not isinstance(issue, dict)
+                or set(issue) != {"error", "required_fix"}
+                or not isinstance(issue["error"], str)
+                or not issue["error"].strip()
+                or not isinstance(issue["required_fix"], str)
+                or not issue["required_fix"].strip()
+            ):
+                raise RuntimeError(f"Audit report contains an invalid issue: {report_path}")
+        if (verdict == "PASS" and issues) or (verdict == "FAIL" and not issues):
+            raise RuntimeError(
+                "Audit report PASS requires no issues and FAIL requires at least one issue: "
+                f"{report_path}"
+            )
+        return verdict
+
+    # Compatibility for reports written before the compact JSON contract.
     try:
         lines = [
             line.strip()
@@ -717,6 +752,7 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
             [
                 "codegen_agent",
                 "audit_agent",
+                "cohort_refine_agent",
                 "plan_agent",
                 "replicate_agent",
                 "report_agents",
@@ -893,28 +929,9 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     computation_provider_state_path = config.output / "remote_compute" / "instance.json"
     dataset_patch_path = config.output / "system_maintenance" / "dataset" / "patch.json"
     skill_corrections_path = config.output / "system_maintenance" / "skills" / "corrections.json"
-    audit_stage = pipeline_state.state["stages"].get("audit_agent", {})
-    audit_checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
-    codegen_attempt = int(previous_stage.get("attempts", 0))
-    audit_revision = (
-        previous_status == "completed"
-        and audit_stage.get("status") == "completed"
-        and audit_checkpoints.get("verdict") == "FAIL"
-        and audit_checkpoints.get("audited_codegen_attempt") == codegen_attempt
-    )
-    if audit_revision:
-        audit_feedback_path = Path(str(audit_checkpoints["report_path"]))
-    elif previous_status in {"running", "failed"} and codegen_checkpoints.get(
-        "audit_feedback_path"
-    ):
-        audit_feedback_path = Path(str(codegen_checkpoints["audit_feedback_path"]))
-    else:
-        audit_feedback_path = None
-    if audit_feedback_path is not None and read_audit_verdict(audit_feedback_path) != "FAIL":
-        raise RuntimeError(f"Codegen audit feedback is not a FAIL report: {audit_feedback_path}")
     completed_run_validation = pipeline_state.is_stage_completed("report_agents")
     infrastructure_resume = bool(codegen_checkpoints.get("infrastructure_resume"))
-    if pipeline_state.is_stage_completed("codegen_agent") and not audit_revision:
+    if pipeline_state.is_stage_completed("codegen_agent"):
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
         codegen_plan = load_model(codegen_plan_path, CodegenPlan)
@@ -934,17 +951,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         return {"codebase_dir": str(codebase_dir)}
 
     print("enter codegen stage")
-    if audit_revision:
-        pipeline_state.invalidate_stages(
-            ["plan_agent", "replicate_agent", "report_agents"],
-            f"Codegen revised after failed preprocessing audit: {audit_feedback_path}",
-        )
     pipeline_state.start_stage("codegen_agent")
-    if audit_feedback_path is not None:
-        pipeline_state.update_stage_checkpoints(
-            "codegen_agent",
-            {"audit_feedback_path": str(audit_feedback_path)},
-        )
     if not source_prepared or not codebase_dir.is_dir():
         if previous_status is None and codebase_dir.is_dir() and any(codebase_dir.iterdir()):
             raise RuntimeError(f"Codebase output is not empty: {codebase_dir}")
@@ -996,7 +1003,6 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         gpu_info=resources["gpus"],
         computation_provider=config.computation_provider,
         resuming=previous_status in {"running", "failed", "invalidated"},
-        audit_feedback_path=audit_feedback_path,
     )
     if cloud_pull_handoff and not _cloud_drive_materialization_completed(config):
         _run_codegen_cloud_pull_handoff(
@@ -1038,7 +1044,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     return {"codebase_dir": str(codebase_dir)}
 
 
-def audit_agent_node(state: WorkflowState) -> dict[str, str]:
+def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
     codegen_stage = pipeline_state.state["stages"].get("codegen_agent", {})
@@ -1047,10 +1053,18 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         raise RuntimeError("Preprocessing audit requires a completed codegen attempt")
 
     checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
+    cohort_refine_checkpoints = pipeline_state.get_stage_checkpoints(
+        "cohort_refine_agent"
+    )
+    completed_refine_round = int(
+        cohort_refine_checkpoints.get("completed_round", 0)
+    )
     audited_codegen_attempt = checkpoints.get("audited_codegen_attempt")
+    audited_refine_round = int(checkpoints.get("audited_refine_round", 0))
     if (
         pipeline_state.is_stage_completed("audit_agent")
         and audited_codegen_attempt == codegen_attempt
+        and audited_refine_round == completed_refine_round
     ):
         report_path = Path(str(checkpoints.get("report_path", "")))
         verdict = read_audit_verdict(report_path)
@@ -1060,30 +1074,23 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
         return {
             "audit_verdict": verdict,
             "audit_report_path": str(report_path),
+            "audit_refinement_exhausted": bool(
+                checkpoints.get("refinement_exhausted", False)
+            ),
         }
 
-    rewrite_rounds_used = int(checkpoints.get("rewrite_rounds_used", 0))
-    if (
-        pipeline_state.get_stage_status("audit_agent") == "failed"
-        and audited_codegen_attempt == codegen_attempt
-        and checkpoints.get("verdict") == "FAIL"
-        and rewrite_rounds_used >= MAX_AUDIT_REWRITES
-    ):
-        raise RuntimeError(
-            "Preprocessing audit failed after three codegen rewrite rounds; "
-            f"latest report: {checkpoints.get('report_path')}"
-        )
+    refine_rounds_used = int(checkpoints.get("refine_rounds_used", 0))
 
     print("enter audit agent stage")
     previous_audit_status = pipeline_state.get_stage_status("audit_agent")
     pipeline_state.start_stage("audit_agent")
-    scientific_attempt = rewrite_rounds_used + 1
+    scientific_attempt = refine_rounds_used + 1
     attempt_dir = config.output / "codegen" / "audit" / f"attempt_{scientific_attempt:03d}"
     scripts_dir = attempt_dir / "scripts"
     results_dir = attempt_dir / "results"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
-    report_path = attempt_dir / "audit_report.md"
+    report_path = attempt_dir / "audit_report.json"
     transcript_path = attempt_dir / "audit_transcript.jsonl"
     codegen_plan = load_model(Path(state["codebase_dir"]) / "codegen_plan.json", CodegenPlan)
     cloud_drive_state = validate_codegen_remote_compute(
@@ -1141,26 +1148,23 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str]:
     verdict = read_audit_verdict(report_path)
     checkpoint = {
         "audited_codegen_attempt": codegen_attempt,
+        "audited_refine_round": completed_refine_round,
         "verdict": verdict,
         "report_path": str(report_path),
-        "rewrite_rounds_used": rewrite_rounds_used,
+        "refine_rounds_used": refine_rounds_used,
+        "refinement_exhausted": (
+            verdict == "FAIL" and refine_rounds_used >= MAX_COHORT_REFINE_ROUNDS
+        ),
     }
     outputs = [str(attempt_dir), str(report_path), str(transcript_path)]
-    if verdict == "FAIL" and rewrite_rounds_used >= MAX_AUDIT_REWRITES:
-        pipeline_state.update_stage_checkpoints("audit_agent", checkpoint)
-        error = (
-            "Preprocessing audit failed after three codegen rewrite rounds; "
-            f"latest report: {report_path}"
-        )
-        pipeline_state.fail(error, outputs)
-        raise RuntimeError(error)
-    if verdict == "FAIL":
-        checkpoint["rewrite_rounds_used"] = rewrite_rounds_used + 1
+    if verdict == "FAIL" and not checkpoint["refinement_exhausted"]:
+        checkpoint["refine_rounds_used"] = refine_rounds_used + 1
     pipeline_state.update_stage_checkpoints("audit_agent", checkpoint)
     pipeline_state.complete_stage("audit_agent", outputs)
     return {
         "audit_verdict": verdict,
         "audit_report_path": str(report_path),
+        "audit_refinement_exhausted": checkpoint["refinement_exhausted"],
     }
 
 
@@ -1168,7 +1172,105 @@ def audit_route(state: WorkflowState) -> str:
     verdict = state.get("audit_verdict")
     if verdict not in {"PASS", "FAIL"}:
         raise RuntimeError(f"Invalid preprocessing audit verdict: {verdict!r}")
-    return "plan_agent" if verdict == "PASS" else "codegen_agent"
+    if verdict == "PASS" or state.get("audit_refinement_exhausted", False):
+        return "plan_agent"
+    return "cohort_refine_agent"
+
+
+def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
+    config = state["config"]
+    pipeline_state = PipelineState(config.output)
+    audit_checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
+    audit_report_path = Path(str(audit_checkpoints.get("report_path", "")))
+    if (
+        not pipeline_state.is_stage_completed("audit_agent")
+        or audit_checkpoints.get("verdict") != "FAIL"
+        or audit_checkpoints.get("refinement_exhausted", False)
+        or read_audit_verdict(audit_report_path) != "FAIL"
+    ):
+        raise RuntimeError("Cohort refinement requires a non-exhausted failed audit")
+
+    refine_round = int(audit_checkpoints.get("refine_rounds_used", 0))
+    if not 1 <= refine_round <= MAX_COHORT_REFINE_ROUNDS:
+        raise RuntimeError(f"Invalid cohort refinement round: {refine_round}")
+    checkpoints = pipeline_state.get_stage_checkpoints("cohort_refine_agent")
+    if (
+        pipeline_state.is_stage_completed("cohort_refine_agent")
+        and checkpoints.get("completed_round") == refine_round
+        and checkpoints.get("audit_report_path") == str(audit_report_path)
+    ):
+        print("resume cohort_refine_agent stage: skipped (already completed)")
+        return {"codebase_dir": state["codebase_dir"]}
+
+    print("enter cohort refine agent stage")
+    previous_status = pipeline_state.get_stage_status("cohort_refine_agent")
+    pipeline_state.invalidate_stages(
+        ["plan_agent", "replicate_agent", "report_agents"],
+        f"Cohort preprocessing refined after failed audit: {audit_report_path}",
+    )
+    pipeline_state.start_stage("cohort_refine_agent")
+    attempt_dir = (
+        config.output / "codegen" / "cohort_refine" / f"attempt_{refine_round:03d}"
+    )
+    attempt_dir.mkdir(parents=True, exist_ok=True)
+    transcript_path = attempt_dir / "cohort_refine_transcript.jsonl"
+    codebase_dir = Path(state["codebase_dir"])
+    codegen_plan_path = codebase_dir / "codegen_plan.json"
+    codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+    cloud_drive_state = validate_codegen_remote_compute(
+        codegen_plan,
+        config.output / "remote_compute" / "instance.json",
+        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+        drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+    )
+    remote_working_dir = (
+        codegen_plan.remote_compute.remote_working_dir
+        if config.clouddrive and codegen_plan.remote_compute is not None
+        else None
+    )
+    prompt_path = render_prompt(
+        "cohort_refine/session_instructions.md",
+        config.output / "prompts" / f"cohort_refine_attempt_{refine_round:03d}.md",
+        paper_markdown=state["paper_markdown"],
+        codebase_dir=codebase_dir,
+        codegen_plan_path=codegen_plan_path,
+        audit_report_path=audit_report_path,
+        data_dir=config.data,
+        cloud_drive_enabled=config.clouddrive,
+        cloud_dataset=config.cloud_dataset,
+        drive_provider=config.drive_provider,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
+        remote_compute_state_path=config.output / "remote_compute" / "instance.json",
+        remote_dataset_dir=(cloud_drive_state.get("target_path") if cloud_drive_state else None),
+        remote_working_dir=remote_working_dir,
+        skills_dir=skills_dir(),
+        refine_round=refine_round,
+        resuming=previous_status in {"running", "failed"},
+    )
+    run_agent(
+        provider=config.provider,
+        prompt_path=prompt_path,
+        working_dir=codebase_dir,
+        transcript_path=transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+    )
+    load_model(codegen_plan_path, CodegenPlan)
+    pipeline_state.update_stage_checkpoints(
+        "cohort_refine_agent",
+        {
+            "completed_round": refine_round,
+            "audit_report_path": str(audit_report_path),
+        },
+    )
+    pipeline_state.complete_stage(
+        "cohort_refine_agent",
+        [str(codebase_dir), str(attempt_dir), str(transcript_path)],
+    )
+    return {"codebase_dir": str(codebase_dir)}
 
 
 def plan_agent_node(state: WorkflowState) -> dict[str, str]:
@@ -1523,6 +1625,7 @@ def create_workflow():
     builder.add_node("preprocessing_agent", preprocessing_agent_node)
     builder.add_node("codegen_agent", codegen_agent_node)
     builder.add_node("audit_agent", audit_agent_node)
+    builder.add_node("cohort_refine_agent", cohort_refine_agent_node)
     builder.add_node("plan_agent", plan_agent_node)
     builder.add_node("replicate_agent", replicate_agent_node)
     builder.add_node("report_agents", report_agents_node)
@@ -1534,8 +1637,12 @@ def create_workflow():
     builder.add_conditional_edges(
         "audit_agent",
         audit_route,
-        {"plan_agent": "plan_agent", "codegen_agent": "codegen_agent"},
+        {
+            "plan_agent": "plan_agent",
+            "cohort_refine_agent": "cohort_refine_agent",
+        },
     )
+    builder.add_edge("cohort_refine_agent", "audit_agent")
     builder.add_edge("plan_agent", "replicate_agent")
     builder.add_edge("replicate_agent", "report_agents")
     builder.add_edge("report_agents", END)

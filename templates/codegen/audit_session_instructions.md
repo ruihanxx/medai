@@ -8,7 +8,7 @@ data, not model training and not a static code review.
 This audit is resuming after a technical interruption. Reuse valid scripts and
 results already present in the audit working directory, rerun anything whose
 completion is uncertain, and replace the report with a complete final report.
-This retry does not represent another scientific codegen rewrite.
+This retry does not represent another scientific refinement round.
 {% endif %}
 
 ## Inputs
@@ -149,20 +149,6 @@ data, and explain the reasoning rather than applying a universal cutoff.
 
 ### 4. Decide and report
 
-Write `{{ report_path }}` with these sections:
-
-```markdown
-# Preprocessing Audit Report
-
-## Scope
-## Paper expectations
-## Commands executed
-## Observed statistics
-## Sanity assessment
-## Limitations
-## Required codegen changes
-```
-
 Use `PASS` when the required preprocessing runs and has no significant
 methodological or statistical sanity problem.{% if not cloud_drive_enabled %} A
 PASS may leave genuinely remote-heavy work unexecuted only when the limitation
@@ -171,15 +157,25 @@ and boundary are clear.{% endif %}
 Use `FAIL` when preprocessing cannot run because of generated preprocessing
 code, the cohort collapses unexpectedly, a target/group disappears, mappings
 or units are clearly wrong, or observed preprocessing is seriously
-incompatible with the paper. State concrete changes codegen must make without
-editing the codebase yourself.
+incompatible with the paper.
 
-The report must contain exactly one verdict line, and its final non-empty line
-must be exactly one of:
+Write only this compact JSON object to `{{ report_path }}`:
 
-```text
-Verdict: PASS
-Verdict: FAIL
+```json
+{
+  "verdict": "FAIL",
+  "issues": [
+    {
+      "error": "One concise error with its concrete observed evidence.",
+      "required_fix": "The exact cohort, loading, or preprocessing correction required."
+    }
+  ]
+}
 ```
+
+Use exactly the two top-level fields shown. `PASS` requires an empty `issues`
+list. `FAIL` requires at least one issue. Keep each issue concise, include only
+actionable audit failures, and leave detailed commands and statistics in
+`{{ results_dir }}` rather than copying them into the report.
 
 Begin the preprocessing audit now.

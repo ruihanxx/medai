@@ -9,7 +9,7 @@ from medai.pipeline_state import PipelineState
 from medai.workflow import (
     audit_agent_node,
     audit_route,
-    codegen_agent_node,
+    cohort_refine_agent_node,
     read_audit_verdict,
 )
 
@@ -94,43 +94,46 @@ def _audit_state(tmp_path: Path) -> dict[str, object]:
     }
 
 
-def _fake_agents(verdicts: list[str], codegen_prompts: list[str]):
+def _fake_agents(verdicts: list[str], cohort_prompts: list[str]):
     remaining = list(verdicts)
 
     def fake_agent(*, prompt_path, working_dir, transcript_path, **kwargs):
         transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
         if prompt_path.name.startswith("audit_attempt_"):
             verdict = remaining.pop(0)
-            (working_dir / "audit_report.md").write_text(
-                "# Preprocessing Audit Report\n\n"
-                "## Scope\n\nLocal preprocessing.\n\n"
-                "## Paper expectations\n\nA stable cohort.\n\n"
-                "## Commands executed\n\n`python preprocess.py`\n\n"
-                "## Observed statistics\n\nCounts recorded.\n\n"
-                "## Sanity assessment\n\nReviewed.\n\n"
-                "## Limitations\n\nNone.\n\n"
-                "## Required codegen changes\n\nSee assessment.\n\n"
-                f"Verdict: {verdict}\n",
+            issues = (
+                []
+                if verdict == "PASS"
+                else [
+                    {
+                        "error": "The cohort lost all positive targets.",
+                        "required_fix": "Correct target mapping before filtering.",
+                    }
+                ]
+            )
+            (working_dir / "audit_report.json").write_text(
+                json.dumps({"verdict": verdict, "issues": issues}),
                 encoding="utf-8",
             )
+        elif prompt_path.name.startswith("cohort_refine_attempt_"):
+            cohort_prompts.append(prompt_path.read_text(encoding="utf-8"))
         else:
-            codegen_prompts.append(prompt_path.read_text(encoding="utf-8"))
-            _write_codegen_plan(Path(working_dir) / "codegen_plan.json")
+            raise AssertionError(f"Unexpected agent prompt: {prompt_path}")
 
     return fake_agent
 
 
-def test_failed_audit_revises_preprocessing_then_passes(
+def test_failed_audit_runs_cohort_refine_then_passes(
     tmp_path: Path,
     monkeypatch,
 ):
     state = _audit_state(tmp_path)
     config = state["config"]
     assert isinstance(config, RunConfig)
-    codegen_prompts: list[str] = []
+    cohort_prompts: list[str] = []
     monkeypatch.setattr(
         "medai.workflow.run_agent",
-        _fake_agents(["FAIL", "PASS"], codegen_prompts),
+        _fake_agents(["FAIL", "PASS"], cohort_prompts),
     )
 
     first = audit_agent_node(state)
@@ -138,39 +141,39 @@ def test_failed_audit_revises_preprocessing_then_passes(
     first_report = Path(first["audit_report_path"])
 
     pipeline_state = PipelineState(config.output)
-    pipeline_state.resume({"paper": str(config.paper), "data": str(config.data)})
     for stage_name in ("plan_agent", "replicate_agent", "report_agents"):
         pipeline_state.start_stage(stage_name)
         pipeline_state.complete_stage(stage_name, [f"old-{stage_name}"])
 
-    state.update(codegen_agent_node(state))
+    state.update(cohort_refine_agent_node(state))
     after_revision = PipelineState(config.output)
     for stage_name in ("plan_agent", "replicate_agent", "report_agents"):
         assert after_revision.get_stage_status(stage_name) == "invalidated"
-    assert len(codegen_prompts) == 1
-    assert str(first_report) in codegen_prompts[0]
-    assert "only the complete preprocessing chain" in codegen_prompts[0]
-    assert "Do not change model definitions, training,\nevaluation" in codegen_prompts[0]
+    assert len(cohort_prompts) == 1
+    assert str(first_report) in cohort_prompts[0]
+    assert "Fix every issue exactly as required" in cohort_prompts[0]
+    assert "Do not modify" in cohort_prompts[0]
+    assert "model definitions, training" in cohort_prompts[0]
 
-    PipelineState(config.output).resume(
-        {"paper": str(config.paper), "data": str(config.data)}
-    )
     second = audit_agent_node(state)
     assert second["audit_verdict"] == "PASS"
     assert audit_route(second) == "plan_agent"
     checkpoints = PipelineState(config.output).get_stage_checkpoints("audit_agent")
     assert checkpoints == {
-        "audited_codegen_attempt": 2,
+        "audited_codegen_attempt": 1,
+        "audited_refine_round": 1,
         "verdict": "PASS",
         "report_path": second["audit_report_path"],
-        "rewrite_rounds_used": 1,
+        "refine_rounds_used": 1,
+        "refinement_exhausted": False,
     }
+    assert after_revision.state["stages"]["codegen_agent"]["attempts"] == 1
     assert first_report.is_file()
     assert Path(second["audit_report_path"]).is_file()
 
 
 @pytest.mark.parametrize("final_verdict", ["PASS", "FAIL"])
-def test_audit_allows_three_rewrites_and_fourth_decision(
+def test_audit_allows_three_refinements_and_fourth_decision(
     tmp_path: Path,
     monkeypatch,
     final_verdict: str,
@@ -183,21 +186,21 @@ def test_audit_allows_three_rewrites_and_fourth_decision(
         _fake_agents(["FAIL", "FAIL", "FAIL", final_verdict], []),
     )
 
-    for index in range(4):
-        if index == 3 and final_verdict == "FAIL":
-            with pytest.raises(RuntimeError, match="three codegen rewrite rounds"):
-                audit_agent_node(state)
-            break
+    for _ in range(4):
         result = audit_agent_node(state)
-        if result["audit_verdict"] == "FAIL":
-            state.update(codegen_agent_node(state))
+        if result["audit_verdict"] == "FAIL" and not result[
+            "audit_refinement_exhausted"
+        ]:
+            state.update(cohort_refine_agent_node(state))
 
     pipeline_state = PipelineState(config.output)
     checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
-    assert checkpoints["rewrite_rounds_used"] == 3
-    assert checkpoints["audited_codegen_attempt"] == 4
+    assert checkpoints["refine_rounds_used"] == 3
+    assert checkpoints["audited_codegen_attempt"] == 1
+    assert checkpoints["audited_refine_round"] == 3
     assert checkpoints["verdict"] == final_verdict
-    assert pipeline_state.state["stages"]["codegen_agent"]["attempts"] == 4
+    assert pipeline_state.state["stages"]["codegen_agent"]["attempts"] == 1
+    assert pipeline_state.state["stages"]["cohort_refine_agent"]["attempts"] == 3
     assert pipeline_state.state["stages"]["audit_agent"]["attempts"] == 4
     for attempt in range(1, 5):
         report_path = (
@@ -205,16 +208,17 @@ def test_audit_allows_three_rewrites_and_fourth_decision(
             / "codegen"
             / "audit"
             / f"attempt_{attempt:03d}"
-            / "audit_report.md"
+            / "audit_report.json"
         )
         assert report_path.is_file()
     if final_verdict == "PASS":
         assert pipeline_state.get_stage_status("audit_agent") == "completed"
         assert audit_route({"audit_verdict": "PASS"}) == "plan_agent"
     else:
-        assert pipeline_state.get_stage_status("audit_agent") == "failed"
-        assert pipeline_state.state["status"] == "failed"
-        assert "plan_agent" not in pipeline_state.state["stages"]
+        assert checkpoints["refinement_exhausted"] is True
+        assert pipeline_state.get_stage_status("audit_agent") == "completed"
+        assert pipeline_state.state["status"] == "running"
+        assert audit_route(result) == "plan_agent"
 
 
 def test_audit_provider_retry_reuses_scientific_attempt(
@@ -235,8 +239,8 @@ def test_audit_provider_retry_reuses_scientific_attempt(
         assert "resuming after a technical interruption" in prompt_path.read_text(
             encoding="utf-8"
         )
-        (working_dir / "audit_report.md").write_text(
-            "# Audit\n\nVerdict: PASS\n", encoding="utf-8"
+        (working_dir / "audit_report.json").write_text(
+            json.dumps({"verdict": "PASS", "issues": []}), encoding="utf-8"
         )
 
     monkeypatch.setattr("medai.workflow.run_agent", interrupted_then_passes)
@@ -248,9 +252,49 @@ def test_audit_provider_retry_reuses_scientific_attempt(
     assert result["audit_verdict"] == "PASS"
     pipeline_state = PipelineState(config.output)
     assert pipeline_state.state["stages"]["audit_agent"]["attempts"] == 2
-    assert pipeline_state.get_stage_checkpoints("audit_agent")["rewrite_rounds_used"] == 0
+    assert pipeline_state.get_stage_checkpoints("audit_agent")["refine_rounds_used"] == 0
     audit_root = config.output / "codegen" / "audit"
     assert [path.name for path in audit_root.iterdir()] == ["attempt_001"]
+
+
+def test_cohort_refine_provider_retry_reuses_round(
+    tmp_path: Path,
+    monkeypatch,
+):
+    state = _audit_state(tmp_path)
+    config = state["config"]
+    assert isinstance(config, RunConfig)
+    monkeypatch.setattr("medai.workflow.run_agent", _fake_agents(["FAIL"], []))
+    audit_agent_node(state)
+    calls = 0
+
+    def interrupted_then_succeeds(*, prompt_path, transcript_path, **kwargs):
+        nonlocal calls
+        calls += 1
+        transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
+        if calls == 1:
+            raise RuntimeError("provider interrupted")
+        assert "technical retry of the same refinement round" in prompt_path.read_text(
+            encoding="utf-8"
+        )
+
+    monkeypatch.setattr("medai.workflow.run_agent", interrupted_then_succeeds)
+    with pytest.raises(RuntimeError, match="provider interrupted"):
+        cohort_refine_agent_node(state)
+    PipelineState(config.output).fail("provider interrupted")
+
+    cohort_refine_agent_node(state)
+
+    pipeline_state = PipelineState(config.output)
+    assert pipeline_state.state["stages"]["cohort_refine_agent"]["attempts"] == 2
+    assert pipeline_state.get_stage_checkpoints("cohort_refine_agent") == {
+        "completed_round": 1,
+        "audit_report_path": str(
+            config.output / "codegen" / "audit" / "attempt_001" / "audit_report.json"
+        ),
+    }
+    refine_root = config.output / "codegen" / "cohort_refine"
+    assert [path.name for path in refine_root.iterdir()] == ["attempt_001"]
 
 
 def test_completed_pass_is_reused_without_running_provider(
@@ -273,22 +317,30 @@ def test_completed_pass_is_reused_without_running_provider(
 
 
 @pytest.mark.parametrize(
-    "contents",
+    "payload",
     [
-        "# Audit\n",
-        "# Audit\n\nVerdict: MAYBE\n",
-        "Verdict: PASS\n\nMore text\n",
-        "Verdict: FAIL\n\nVerdict: PASS\n",
+        {},
+        {"verdict": "MAYBE", "issues": []},
+        {"verdict": "PASS", "issues": [{"error": "x", "required_fix": "y"}]},
+        {"verdict": "FAIL", "issues": []},
+        {"verdict": "FAIL", "issues": [{"error": "x"}]},
+        {"verdict": "PASS", "issues": [], "summary": "extra"},
     ],
 )
-def test_audit_report_rejects_missing_duplicate_or_illegal_verdict(
+def test_audit_report_rejects_invalid_json_contract(
     tmp_path: Path,
-    contents: str,
+    payload: object,
 ):
-    report_path = tmp_path / "audit_report.md"
-    report_path.write_text(contents, encoding="utf-8")
-    with pytest.raises(RuntimeError, match="exactly one verdict"):
+    report_path = tmp_path / "audit_report.json"
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Audit report"):
         read_audit_verdict(report_path)
+
+
+def test_legacy_markdown_audit_verdict_remains_readable(tmp_path: Path):
+    report_path = tmp_path / "audit_report.md"
+    report_path.write_text("# Audit\n\nVerdict: PASS\n", encoding="utf-8")
+    assert read_audit_verdict(report_path) == "PASS"
 
 
 def test_remote_state_is_local_only_audit_context(
@@ -375,11 +427,15 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr("medai.workflow.run_agent", _fake_agents(["PASS"], []))
+    cohort_prompts: list[str] = []
+    monkeypatch.setattr(
+        "medai.workflow.run_agent",
+        _fake_agents(["FAIL"], cohort_prompts),
+    )
 
     result = audit_agent_node(state)
 
-    assert result["audit_verdict"] == "PASS"
+    assert result["audit_verdict"] == "FAIL"
     prompt = (config.output / "prompts" / "audit_attempt_001.md").read_text(
         encoding="utf-8"
     )
@@ -390,3 +446,14 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
     assert "Download only aggregate statistics" in prompt
     assert "local CPU, streaming, small-batch, or sampled substitute" in prompt
     assert "Never use the `computation-provider` skill" not in prompt
+
+    cohort_refine_agent_node(state)
+
+    assert len(cohort_prompts) == 1
+    cohort_prompt = cohort_prompts[0]
+    assert str(remote_state_path) in cohort_prompt
+    assert remote_dataset in cohort_prompt
+    assert "/root/autodl-tmp/run-001" in cohort_prompt
+    assert "reuse the existing instance" in cohort_prompt
+    assert "do not\nrent, release, reauthorize, or rematerialize data" in cohort_prompt
+    assert "model definitions, training" in cohort_prompt
