@@ -8,7 +8,7 @@ finish incomplete work, and repeat any uncertain verification.{% endif %}
 
 - Paper Markdown: `{{ paper_markdown }}`
 - Writable codebase: `{{ codebase_dir }}`
-- Code-generation plan (read-only): `{{ codegen_plan_path }}`
+- Code-generation plan (only `ambiguities` is writable): `{{ codegen_plan_path }}`
 - Failed audit report: `{{ audit_report_path }}`
 - Refinement round: {{ refine_round }}
 {% if cloud_drive_enabled %}
@@ -34,21 +34,31 @@ compute or the `computation-provider` skill.{% endif %}
 
 - Modify only cohort construction, data loading, preprocessing, and their
   directly related data configuration inside `{{ codebase_dir }}`.
-- Do not modify `{{ codegen_plan_path }}`, model definitions, training,
-  tuning, evaluation, or generated results.
+- In `{{ codegen_plan_path }}`, modify only the `ambiguities` list. Keep every
+  other plan field unchanged.
+- Do not modify model definitions, training, tuning, evaluation, or generated
+  results.
 {% if cloud_drive_enabled %}
 - Keep remote raw and row-level data remote. Transfer only the necessary
   preprocessing code and retrieve only aggregate verification output and logs.
 {% endif %}
-- Do not tune toward paper results or hide an audit failure.
+- Do not hide an audit failure.
+- Do not write fallback plan when you cannot solve an issue. Keep solving it.
 
 ## Workflow
 
 1. Read the paper context, code-generation plan, and every issue in
    `{{ audit_report_path }}`.
 2. Fix every issue exactly as required, preserving all out-of-scope behavior.
-3. Run focused preprocessing checks that verify every fix on the supplied data.
-4. Exit successfully only when every reported issue is fixed and verified. If
+3. If a fix exposes a new paper-underspecified cohort or preprocessing decision,
+   first reread the relevant paper text and confirm the paper truly does not
+   specify it. Never record an ambiguity that the paper resolves.
+4. Resolve each confirmed ambiguity using applicable medical expertise and
+   standard medical-research methods. Add it to `codegen_plan.json["ambiguities"]`
+   with the question and the evidence-based assumption, including its code or
+   configuration location. Preserve unrelated existing ambiguities.
+5. Run focused preprocessing checks that verify every fix on the supplied data.
+6. Exit successfully only when every reported issue is fixed and verified. If
    any issue cannot be fixed or verified, exit nonzero instead of proceeding.
 
 Begin cohort refinement now.

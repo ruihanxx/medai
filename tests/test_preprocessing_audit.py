@@ -154,6 +154,9 @@ def test_failed_audit_runs_cohort_refine_then_passes(
     assert "Fix every issue exactly as required" in cohort_prompts[0]
     assert "Do not modify" in cohort_prompts[0]
     assert "model definitions, training" in cohort_prompts[0]
+    assert "confirm the paper truly does not" in cohort_prompts[0]
+    assert 'codegen_plan.json["ambiguities"]' in cohort_prompts[0]
+    assert "applicable medical expertise" in cohort_prompts[0]
 
     second = audit_agent_node(state)
     assert second["audit_verdict"] == "PASS"

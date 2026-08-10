@@ -29,8 +29,9 @@ The LangGraph stages are:
    and retrieve only aggregate statistics, logs, and the report—not raw or
    row-level data.
 6. `cohort_refine_agent`: after a failed audit, fix every reported cohort
-   construction, data-loading, or preprocessing issue without changing the
-   code-generation plan, models, training, evaluation, or generated results.
+   construction, data-loading, or preprocessing issue; it may update only the
+   code-generation plan's `ambiguities` list and may not change models,
+   training, evaluation, or generated results.
 7. `plan_agent`: check coverage, install dependencies, smoke-test, and write the
    replication plan.
 8. `replicate_agent`: execute every experiment and write evidence.
@@ -86,8 +87,11 @@ skill during the run.
 
 Audit PASS proceeds to planning. Audit FAIL enters cohort refinement with the
 failed report and permits changes only to cohort construction, data loading,
-preprocessing, and directly related data configuration; the code-generation
-plan, models, training, evaluation, and generated results remain read-only.
+preprocessing, directly related data configuration, and the code-generation
+plan's `ambiguities` list; all other plan fields, models, training, evaluation,
+and generated results remain read-only. A new ambiguity is recorded only after
+the paper is rechecked and confirmed to be underspecified, then resolved using
+applicable medical expertise and standard medical-research methods.
 There may be at most three refinement rounds after the initial audit, for four
 audit attempts total. The fourth FAIL proceeds to planning after preserving
 every report and recording that refinement was exhausted.

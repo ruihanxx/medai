@@ -70,15 +70,18 @@
   dataset version, incomplete download, paper error, or another source
   mismatch. It must not invent an absent or derived artifact, generate code that
   waits for it, substitute other data, or proceed to preprocessing audit.
-- Cohort refinement reads the paper, codebase, read-only code-generation plan,
-  and latest failed audit report. It must fix and verify every reported issue
-  before succeeding. It may change only cohort construction, data loading,
-  preprocessing, and directly related data configuration; it may not change the
-  code-generation plan, models, training, tuning, evaluation, or result
-  artifacts. Local-data refinement never operates remote compute. Cloud-data
-  refinement reuses the existing instance and may retrieve only aggregate
-  verification output and logs; it never rents, releases, reauthorizes, or
-  rematerializes data.
+- Cohort refinement reads the paper, codebase, code-generation plan, and latest
+  failed audit report. It must fix and verify every reported issue before
+  succeeding. It may change only cohort construction, data loading,
+  preprocessing, directly related data configuration, and the plan's
+  `ambiguities` list; all other plan fields, models, training, tuning,
+  evaluation, and result artifacts remain read-only. A newly encountered
+  ambiguity is recorded only after rereading the relevant paper text and
+  confirming it is genuinely underspecified, then resolving it with applicable
+  medical expertise and standard medical-research methods. Local-data
+  refinement never operates remote compute. Cloud-data refinement reuses the
+  existing instance and may retrieve only aggregate verification output and
+  logs; it never rents, releases, reauthorizes, or rematerializes data.
 - Remote compute access is exposed through the `computation-provider` skill.
   Provider references resolve provider-specific SSH connection metadata; the
   skill's shared SSH helper owns provider-independent key-first authentication,
