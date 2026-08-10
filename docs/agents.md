@@ -17,12 +17,12 @@
   `computational_demand` for every extracted experiment. It searches the paper
   for `nvidia`, `memory`, `gpu`, `cpu`, `GB`, and `rtx`, records paper-stated
   resources, and labels method- and scale-based resource inferences.
-- The base preprocessing-audit prompt lives beside codegen at
-  `templates/codegen/audit_session_instructions.md`; rendered prompts are saved
-  per scientific attempt as `prompts/audit_attempt_<NNN>.md`.
-- The cohort-refinement prompt lives at
+- The preprocessing-audit and cohort-refinement prompts form the independent
+  module between codegen and planning. They live at
+  `templates/cohort_refine/audit_session_instructions.md` and
   `templates/cohort_refine/session_instructions.md`; rendered prompts are saved
-  per refinement round as `prompts/cohort_refine_attempt_<NNN>.md`.
+  as `prompts/audit_attempt_<NNN>.md` and
+  `prompts/cohort_refine_attempt_<NNN>.md`.
 - Each agent invocation's provider event stream is preserved as a JSONL
   transcript beside that stage's artifacts. Before a retried invocation, an
   existing transcript is preserved as `<name>.attempt-<N>.jsonl`. Transcript
