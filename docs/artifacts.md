@@ -139,10 +139,14 @@ statistics remain under `results/`. Cloud-data audits use a separate remote
 attempt beneath the codegen remote working directory and copy back only
 aggregate statistics, logs, and the report into these local paths. The compact
 JSON report contains exactly `verdict` and `issues`. Each issue contains exactly
-non-empty `error` and `required_fix` strings. `PASS` requires an empty issue list
-and `FAIL` requires at least one issue. Legacy Markdown reports retain read-only
-verdict compatibility. Audit reports are stage artifacts and do not change the
-reproduction report's three-section contract.
+non-empty `evidence`, `diagnosis`, and `required_fix` strings. `evidence`
+records concise observations and supporting result/log paths; `diagnosis`
+records the evidence-bound causal defect rather than only its symptom; and
+`required_fix` records the testable correction contract. `PASS` requires an
+empty issue list and `FAIL` requires the complete accumulated set of distinct
+actionable issues, with at least one issue. Legacy Markdown reports retain
+read-only verdict compatibility. Audit reports are stage artifacts and do not
+change the reproduction report's three-section contract.
 
 Each successful cohort-refinement round retains its transcript in a numbered
 attempt directory. A provider retry reuses the same directory and transcript

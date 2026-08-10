@@ -1,8 +1,11 @@
 # Preprocessing audit agent
 
-Audit the runnable preprocessing produced by code generation before any
-replication plan is written. This is a scientific sanity check using the real
-data, not model training and not a static code review.
+Exhaustively audit the runnable preprocessing produced by code generation before
+any replication plan is written. This is a scientific sanity check using the
+real data, not model training and not a static code review. Accumulate every
+issue discoverable within the audit scope and write one complete report only
+after all feasible checks have run. Finding one failure is never a reason to
+stop the audit.
 {% if resuming %}
 
 This audit is resuming after a technical interruption. Reuse valid scripts and
@@ -93,6 +96,15 @@ values as sanity context, never as numbers to hard-code or tune toward.
 
 Inspect the codebase and its entry points without modifying it. Run
 preprocessing through the final input immediately before model computation.
+Instrument the preprocessing boundaries before execution so a crash still
+leaves enough aggregate evidence to audit earlier boundaries and independently
+check mappings, units, filtering, and feature propagation.
+
+A generated-code exception is one issue to diagnose, not a signal to end the
+audit. Trace it to its causal preprocessing or data-contract violation instead
+of reporting only the terminal exception. After a crash, continue every check
+that remains independently executable, including focused aggregate probes of
+the failed boundary. Do not patch the generated code to bypass the failure.
 
 {% if cloud_drive_enabled %}
 Use the exact remote data-reading and preprocessing implementation from
@@ -100,8 +112,10 @@ codegen. In `{{ remote_audit_dir }}`, make only small audit instrumentation
 changes needed to record counts, retention, distributions, missingness, and
 other aggregate checks. Execute the complete dataset preprocessing remotely.
 Training, hyperparameter tuning, inference evaluation, and model-performance
-comparison are forbidden. A remote technical failure is an explicit audit
-failure; do not write a local CPU, streaming, small-batch, or sampled substitute.
+comparison are forbidden. A failure in the generated remote preprocessing is an
+explicit issue to accumulate and diagnose. A provider or audit-infrastructure
+failure that prevents the complete audit must exit nonzero for a same-attempt
+retry; do not write a local CPU, streaming, small-batch, or sampled substitute.
 Capture remote commands, status, aggregate outputs, and logs, then retrieve only
 those audit artifacts locally.
 {% else %}
@@ -131,13 +145,18 @@ Capture commands and outputs under `{{ results_dir }}`.
 
 ### 3. Perform basic statistical sanity checks
 
-Use the checks that apply to the paper and data type. At minimum consider:
+Maintain an issue accumulator while running the checks that apply to the paper
+and data type. Complete the applicable checklist before deciding the verdict;
+do not write the report when the first issue is found. At minimum check:
 
 - counts and retention ratios before and after each preprocessing boundary;
 - missing, duplicate, infinite, and obviously invalid values;
 - target, major cohort group, and split distributions;
 - paper-stated cohort criteria, sample counts, class balance, and the result of
   any stated balancing procedure;
+- for every paper-required mapped concept or derived feature, aggregate source
+  rows, mapped rows, normalized/accepted rows, and final nonzero or populated
+  outputs so a silently dropped component cannot be treated as legitimate zero;
 - for time series, sequence counts, length/sampling distributions, temporal
   ordering, and window counts;
 - for multimodal data, modality coverage, pairing completeness, label
@@ -159,6 +178,14 @@ code, the cohort collapses unexpectedly, a target/group disappears, mappings
 or units are clearly wrong, or observed preprocessing is seriously
 incompatible with the paper.
 
+Decide `PASS` or `FAIL` only after the complete applicable checklist has been
+attempted. Before writing a `FAIL`, review the accumulated findings once more
+for related symptoms, shared root causes, and independently observable issues.
+Report every distinct actionable root cause supported by this audit, not only
+the first failure or its downstream symptoms. If an audit-infrastructure or
+provider interruption prevents this complete pass, exit nonzero without a
+scientific verdict so orchestration retries the same audit attempt.
+
 Write only this compact JSON object to `{{ report_path }}`:
 
 ```json
@@ -166,7 +193,8 @@ Write only this compact JSON object to `{{ report_path }}`:
   "verdict": "FAIL",
   "issues": [
     {
-      "error": "One concise error with its concrete observed evidence.",
+      "evidence": "Concise observed facts, aggregate values, and supporting result/log paths.",
+      "diagnosis": "The evidence-bound causal preprocessing or data-contract defect, not merely a symptom.",
       "required_fix": "The exact cohort, loading, or preprocessing correction required."
     }
   ]
@@ -174,8 +202,11 @@ Write only this compact JSON object to `{{ report_path }}`:
 ```
 
 Use exactly the two top-level fields shown. `PASS` requires an empty `issues`
-list. `FAIL` requires at least one issue. Keep each issue concise, include only
-actionable audit failures, and leave detailed commands and statistics in
+list. `FAIL` requires the complete accumulated set of distinct actionable
+issues and at least one issue. Each issue must contain exactly the three
+non-empty strings `evidence`, `diagnosis`, and `required_fix`. Keep evidence
+observational, keep diagnosis causal without unsupported speculation, and keep
+the required fix testable. Leave detailed commands and statistics in
 `{{ results_dir }}` rather than copying them into the report.
 
 Begin the preprocessing audit now.

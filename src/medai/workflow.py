@@ -211,9 +211,11 @@ def read_audit_verdict(report_path: Path) -> str:
         for issue in issues:
             if (
                 not isinstance(issue, dict)
-                or set(issue) != {"error", "required_fix"}
-                or not isinstance(issue["error"], str)
-                or not issue["error"].strip()
+                or set(issue) != {"evidence", "diagnosis", "required_fix"}
+                or not isinstance(issue["evidence"], str)
+                or not issue["evidence"].strip()
+                or not isinstance(issue["diagnosis"], str)
+                or not issue["diagnosis"].strip()
                 or not isinstance(issue["required_fix"], str)
                 or not issue["required_fix"].strip()
             ):

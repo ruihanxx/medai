@@ -61,6 +61,16 @@
   add only audit instrumentation, and execute complete preprocessing there. It
   may download only aggregate statistics, logs, and the report; raw or row-level
   data, local CPU adapters, training, tuning, and evaluation are prohibited.
+- The preprocessing audit agent accumulates issues throughout the complete
+  applicable checklist and writes its report only after every feasible check.
+  A generated-code crash is root-caused and recorded but does not end independent
+  mapping, unit, boundary, or feature-propagation checks. Each paper-required
+  mapped concept or derived feature is traced from aggregate source coverage
+  through mapping and normalization/acceptance to its final output. The report
+  separates observed `evidence`, causal `diagnosis`, and testable
+  `required_fix`; it contains every distinct actionable root cause supported by
+  the attempt. A provider or audit-infrastructure interruption that prevents
+  this complete pass exits nonzero for a same-attempt technical retry.
 - For large raw tables/dataframes, codegen and the preprocessing audit read in
   chunks or bounded batches, immediately perform chunk-eligible preprocessing,
   retain only required columns, and postpone global operations such as
@@ -71,8 +81,10 @@
   mismatch. It must not invent an absent or derived artifact, generate code that
   waits for it, substitute other data, or proceed to preprocessing audit.
 - Cohort refinement reads the paper, codebase, code-generation plan, and latest
-  failed audit report. It must fix and verify every reported issue before
-  succeeding. It may change only cohort construction, data loading,
+  failed audit report. For every issue it uses the reported evidence as the
+  observed failure, the diagnosis as the root-cause claim, and the required fix
+  as the minimum correction contract. It must fix and verify every reported
+  issue before succeeding. It may change only cohort construction, data loading,
   preprocessing, directly related data configuration, and the plan's
   `ambiguities` list; all other plan fields, models, training, tuning,
   evaluation, and result artifacts remain read-only. A newly encountered

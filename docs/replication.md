@@ -19,15 +19,17 @@ The LangGraph stages are:
    Cloud-drive mode always selects the configured provider: codegen materializes
    the complete dataset before any data inspection, then records the completed state's
    read-only target as `remote_dataset_dir`.
-5. `audit_agent`: run real-data preprocessing, compute paper-aware cohort and
-   data-quality sanity statistics, and write a compact JSON audit report. Local
-   data runs keep the existing isolated local audit and never connect to remote
-   compute. Cloud-drive runs instead reuse codegen's active instance, remote
-   dataset, and preprocessing implementation in an independent remote audit
-   directory. They execute complete preprocessing with small audit-only
-   instrumentation, prohibit training/tuning/evaluation and local CPU adapters,
-   and retrieve only aggregate statistics, logs, and the report—not raw or
-   row-level data.
+5. `audit_agent`: exhaustively run real-data preprocessing and every applicable
+   independent paper-aware cohort and data-quality check, then write one compact
+   JSON report containing the complete discovered issue set. A generated-code
+   exception is accumulated as an issue and root-caused; it does not stop
+   independently executable checks. Local data runs keep the existing isolated
+   local audit and never connect to remote compute. Cloud-drive runs instead
+   reuse codegen's active instance, remote dataset, and preprocessing
+   implementation in an independent remote audit directory. They execute
+   complete preprocessing with small audit-only instrumentation, prohibit
+   training/tuning/evaluation and local CPU adapters, and retrieve only
+   aggregate statistics, logs, and the report—not raw or row-level data.
 6. `cohort_refine_agent`: after a failed audit, fix every reported cohort
    construction, data-loading, or preprocessing issue; it may update only the
    code-generation plan's `ambiguities` list and may not change models,
@@ -97,7 +99,13 @@ audit attempts total. The fourth FAIL proceeds to planning after preserving
 every report and recording that refinement was exhausted.
 Judgment is paper- and data-type-aware: no universal retention or balance
 threshold is imposed, and paper-expected natural imbalance is not itself a
-failure.
+failure. Before deciding the verdict, audit instrumentation records each
+paper-required mapped concept or derived feature across source, mapping,
+normalization/acceptance, and final-output boundaries. The agent accumulates
+all distinct actionable root causes supported by the completed checks and does
+not use the first failure as an early-exit condition. An audit-infrastructure
+interruption that prevents the complete pass exits nonzero for a same-attempt
+technical retry instead of producing an incomplete scientific verdict.
 
 `manifest.json` is the canonical pipeline state. It records a versioned input
 fingerprint, overall and per-stage status, attempts, timestamps, outputs, and

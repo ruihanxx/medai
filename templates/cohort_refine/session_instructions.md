@@ -48,8 +48,12 @@ compute or the `computation-provider` skill.{% endif %}
 ## Workflow
 
 1. Read the paper context, code-generation plan, and every issue in
-   `{{ audit_report_path }}`.
-2. Fix every issue exactly as required, preserving all out-of-scope behavior.
+   `{{ audit_report_path }}`. Treat `evidence` as the observed failure,
+   `diagnosis` as its causal interpretation, and `required_fix` as the minimum
+   correction contract.
+2. Fix every diagnosed issue exactly as required, preserving all out-of-scope
+   behavior. Do not fix only a shared symptom while leaving a reported root
+   cause unresolved.
 3. If a fix exposes a new paper-underspecified cohort or preprocessing decision,
    first reread the relevant paper text and confirm the paper truly does not
    specify it. Never record an ambiguity that the paper resolves.
@@ -57,7 +61,8 @@ compute or the `computation-provider` skill.{% endif %}
    standard medical-research methods. Add it to `codegen_plan.json["ambiguities"]`
    with the question and the evidence-based assumption, including its code or
    configuration location. Preserve unrelated existing ambiguities.
-5. Run focused preprocessing checks that verify every fix on the supplied data.
+5. Run focused preprocessing checks that verify every fix against its reported
+   evidence on the supplied data.
 6. Exit successfully only when every reported issue is fixed and verified. If
    any issue cannot be fixed or verified, exit nonzero instead of proceeding.
 

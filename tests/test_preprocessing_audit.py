@@ -106,7 +106,8 @@ def _fake_agents(verdicts: list[str], cohort_prompts: list[str]):
                 if verdict == "PASS"
                 else [
                     {
-                        "error": "The cohort lost all positive targets.",
+                        "evidence": "The final cohort contains zero positive targets.",
+                        "diagnosis": "Target mapping drops every positive row before output.",
                         "required_fix": "Correct target mapping before filtering.",
                     }
                 ]
@@ -151,12 +152,14 @@ def test_failed_audit_runs_cohort_refine_then_passes(
         assert after_revision.get_stage_status(stage_name) == "invalidated"
     assert len(cohort_prompts) == 1
     assert str(first_report) in cohort_prompts[0]
-    assert "Fix every issue exactly as required" in cohort_prompts[0]
+    assert "Fix every diagnosed issue exactly as required" in cohort_prompts[0]
     assert "Do not modify" in cohort_prompts[0]
     assert "model definitions, training" in cohort_prompts[0]
     assert "confirm the paper truly does not" in cohort_prompts[0]
     assert 'codegen_plan.json["ambiguities"]' in cohort_prompts[0]
     assert "applicable medical expertise" in cohort_prompts[0]
+    assert "Treat `evidence` as the observed failure" in cohort_prompts[0]
+    assert "leaving a reported root\n   cause unresolved" in cohort_prompts[0]
 
     second = audit_agent_node(state)
     assert second["audit_verdict"] == "PASS"
@@ -324,9 +327,24 @@ def test_completed_pass_is_reused_without_running_provider(
     [
         {},
         {"verdict": "MAYBE", "issues": []},
-        {"verdict": "PASS", "issues": [{"error": "x", "required_fix": "y"}]},
+        {
+            "verdict": "PASS",
+            "issues": [
+                {"evidence": "x", "diagnosis": "y", "required_fix": "z"}
+            ],
+        },
         {"verdict": "FAIL", "issues": []},
-        {"verdict": "FAIL", "issues": [{"error": "x"}]},
+        {"verdict": "FAIL", "issues": [{"error": "x", "required_fix": "y"}]},
+        {
+            "verdict": "FAIL",
+            "issues": [{"evidence": "x", "diagnosis": "y"}],
+        },
+        {
+            "verdict": "FAIL",
+            "issues": [
+                {"evidence": "", "diagnosis": "y", "required_fix": "z"}
+            ],
+        },
         {"verdict": "PASS", "issues": [], "summary": "extra"},
     ],
 )
@@ -448,6 +466,11 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
     assert "make only small audit instrumentation" in prompt
     assert "Download only aggregate statistics" in prompt
     assert "local CPU, streaming, small-batch, or sampled substitute" in prompt
+    assert "Finding one failure is never a reason to\nstop the audit" in prompt
+    assert "A generated-code exception is one issue to diagnose" in prompt
+    assert "source\n  rows, mapped rows, normalized/accepted rows" in prompt
+    assert '"evidence"' in prompt
+    assert '"diagnosis"' in prompt
     assert "Never use the `computation-provider` skill" not in prompt
 
     cohort_refine_agent_node(state)

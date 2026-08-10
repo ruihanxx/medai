@@ -32,10 +32,13 @@ extra structured output, command/log/result persistence, nonzero command
 handoff for debugging, validation-driven continuation, final-only power-off,
 and unchanged one-turn behavior for other providers.
 
-Preprocessing-audit mocks cover the compact JSON verdict/issue contract,
-legacy Markdown verdict reads, audit-to-cohort-refinement routing, three-round
-exhaustion that continues to planning, local and cloud permission boundaries,
-same-round technical retries, and codegen remaining a single scientific stage.
+Preprocessing-audit mocks cover the compact JSON verdict/issue contract with
+separate non-empty evidence, diagnosis, and required-fix fields; rejection of
+the former combined error field; exhaustive issue-accumulation, root-cause, and
+feature-propagation prompt requirements; legacy Markdown verdict reads;
+audit-to-cohort-refinement routing; three-round exhaustion that continues to
+planning; local and cloud permission boundaries; same-round technical retries;
+and codegen remaining a single scientific stage.
 
 A real cloud-drive E2E is manual and billable. Use an isolated disposable
 instance, run the selected adapter's `cloud-pull` for a disposable dataset,
