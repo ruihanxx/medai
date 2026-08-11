@@ -1,0 +1,499 @@
+dataset_id: eicu-crd
+dataset_name: eICU Collaborative Research Database
+version: '2.0'
+generated_at: '2026-08-11'
+raw_root: raw
+local_raw_root_note: raw is the original local 2.0 directory renamed in place; original raw files were not modified.
+official_sources:
+- title: PhysioNet eICU Collaborative Research Database v2.0 project page
+  url: https://physionet.org/content/eicu-crd/2.0/
+  accessed: '2026-08-11'
+  notes: Official dataset release page, citation, version, access policy, and dataset summary.
+- title: eICU-CRD v2.0 documentation index
+  url: https://eicu.mit.edu/
+  accessed: '2026-08-11'
+  notes: Official MIT-LCP documentation index for the eICU-CRD tables.
+- title: eICU-CRD schema documentation
+  url: https://eicu.mit.edu/about/schema/
+  accessed: '2026-08-11'
+  notes: Official relational schema and table relationship documentation.
+resources:
+- resource_id: admissiondrug
+  columns:
+  - admissiondrugid
+  - patientunitstayid
+  - drugoffset
+  - drugenteredoffset
+  - drugnotetype
+  - specialtytype
+  - usertype
+  - rxincluded
+  - writtenineicu
+  - drugname
+  - drugdosage
+  - drugunit
+  - drugadmitfrequency
+  - drughiclseqno
+  paths:
+  - raw/admissionDrug.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 12219967
+    human_readable: 11.7 MB
+  count_summary:
+    file_count: 1
+    row_count: 874920
+    column_count: 14
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/admissiondrug/
+  notes: Medications documented as being taken before ICU admission, linked to the ICU unit stay.
+- resource_id: admissiondx
+  columns:
+  - admissiondxid
+  - patientunitstayid
+  - admitdxenteredoffset
+  - admitdxpath
+  - admitdxname
+  - admitdxtext
+  paths:
+  - raw/admissionDx.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 7619661
+    human_readable: 7.3 MB
+  count_summary:
+    file_count: 1
+    row_count: 626858
+    column_count: 6
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/admissiondx/
+  notes: Primary ICU admission diagnoses entered for APACHE scoring, linked to the ICU unit stay.
+- resource_id: careplaninfectiousdisease
+  columns:
+  - cplinfectid
+  - patientunitstayid
+  - activeupondischarge
+  - cplinfectdiseaseoffset
+  - infectdiseasesite
+  - infectdiseaseassessment
+  - responsetotherapy
+  - treatment
+  paths:
+  - raw/carePlanInfectiousDisease.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 80468
+    human_readable: 78.6 KB
+  count_summary:
+    file_count: 1
+    row_count: 8056
+    column_count: 8
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/careplaninfectiousdisease/
+  notes: Infectious disease assessments recorded in ICU care plans.
+- resource_id: diagnosis
+  columns:
+  - diagnosisid
+  - patientunitstayid
+  - activeupondischarge
+  - diagnosisoffset
+  - diagnosisstring
+  - icd9code
+  - diagnosispriority
+  paths:
+  - raw/diagnosis.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 35218518
+    human_readable: 33.6 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 7
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/diagnosis/
+  notes: Time-stamped diagnoses from the structured ICU problem list.
+- resource_id: infusiondrug
+  columns:
+  - infusiondrugid
+  - patientunitstayid
+  - infusionoffset
+  - drugname
+  - drugrate
+  - infusionrate
+  - drugamount
+  - volumeoffluid
+  - patientweight
+  paths:
+  - raw/infusionDrug.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 48940171
+    human_readable: 46.7 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 9
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/infusiondrug/
+  notes: Time-stamped continuous infusion drug records for ICU unit stays.
+- resource_id: medication
+  columns:
+  - medicationid
+  - patientunitstayid
+  - drugorderoffset
+  - drugstartoffset
+  - drugivadmixture
+  - drugordercancelled
+  - drugname
+  - drughiclseqno
+  - dosage
+  - routeadmin
+  - frequency
+  - loadingdose
+  - prn
+  - drugstopoffset
+  - gtc
+  paths:
+  - raw/medication.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 134280520
+    human_readable: 128.1 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 15
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/medication/
+  notes: Medication orders with order, start, and stop offsets for ICU unit stays.
+- resource_id: microlab
+  columns:
+  - microlabid
+  - patientunitstayid
+  - culturetakenoffset
+  - culturesite
+  - organism
+  - antibiotic
+  - sensitivitylevel
+  paths:
+  - raw/microLab.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 145541
+    human_readable: 142.1 KB
+  count_summary:
+    file_count: 1
+    row_count: 16996
+    column_count: 7
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/microlab/
+  notes: Microbiology cultures, identified organisms, antibiotics, and susceptibility results.
+- resource_id: note
+  columns:
+  - noteid
+  - patientunitstayid
+  - noteoffset
+  - noteenteredoffset
+  - notetype
+  - notepath
+  - notevalue
+  - notetext
+  paths:
+  - raw/note.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 23859454
+    human_readable: 22.8 MB
+  count_summary:
+    file_count: 1
+    row_count: 2254179
+    column_count: 8
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/note/
+  notes: Structured note data and note text linked to ICU unit stays.
+- resource_id: patient
+  columns:
+  - patientunitstayid
+  - patienthealthsystemstayid
+  - gender
+  - age
+  - ethnicity
+  - hospitalid
+  - wardid
+  - apacheadmissiondx
+  - admissionheight
+  - hospitaladmittime24
+  - hospitaladmitoffset
+  - hospitaladmitsource
+  - hospitaldischargeyear
+  - hospitaldischargetime24
+  - hospitaldischargeoffset
+  - hospitaldischargelocation
+  - hospitaldischargestatus
+  - unittype
+  - unitadmittime24
+  - unitadmitsource
+  - unitvisitnumber
+  - unitstaytype
+  - admissionweight
+  - dischargeweight
+  - unitdischargetime24
+  - unitdischargeoffset
+  - unitdischargelocation
+  - unitdischargestatus
+  - uniquepid
+  paths:
+  - raw/patient.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: entity_table
+  size_summary:
+    total_bytes: 10359850
+    human_readable: 9.9 MB
+  count_summary:
+    file_count: 1
+    row_count: 200859
+    column_count: 29
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/patient/
+  notes: Patient demographics and hospital and ICU admission and discharge details.
+- resource_id: respiratorycare
+  columns:
+  - respcareid
+  - patientunitstayid
+  - respcarestatusoffset
+  - currenthistoryseqnum
+  - airwaytype
+  - airwaysize
+  - airwayposition
+  - cuffpressure
+  - ventstartoffset
+  - ventendoffset
+  - priorventstartoffset
+  - priorventendoffset
+  - apneaparms
+  - lowexhmvlimit
+  - hiexhmvlimit
+  - lowexhtvlimit
+  - hipeakpreslimit
+  - lowpeakpreslimit
+  - hirespratelimit
+  - lowrespratelimit
+  - sighpreslimit
+  - lowironoxlimit
+  - highironoxlimit
+  - meanairwaypreslimit
+  - peeplimit
+  - cpaplimit
+  - setapneainterval
+  - setapneatv
+  - setapneaippeephigh
+  - setapnearr
+  - setapneapeakflow
+  - setapneainsptime
+  - setapneaie
+  - setapneafio2
+  paths:
+  - raw/respiratoryCare.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 9006163
+    human_readable: 8.6 MB
+  count_summary:
+    file_count: 1
+    row_count: 865381
+    column_count: 34
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/respiratorycare/
+  notes: Airway, ventilation interval, alarm limit, and apnea-setting documentation.
+- resource_id: treatment
+  columns:
+  - treatmentid
+  - patientunitstayid
+  - treatmentoffset
+  - treatmentstring
+  - activeupondischarge
+  paths:
+  - raw/treatment.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 42775816
+    human_readable: 40.8 MB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 5
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/treatment/
+  notes: Time-stamped treatments selected from the structured ICU treatment list.
+- resource_id: vitalperiodic
+  columns:
+  - vitalperiodicid
+  - patientunitstayid
+  - observationoffset
+  - temperature
+  - sao2
+  - heartrate
+  - respiration
+  - cvp
+  - etco2
+  - systemicsystolic
+  - systemicdiastolic
+  - systemicmean
+  - pasystolic
+  - padiastolic
+  - pamean
+  - st1
+  - st2
+  - st3
+  - icp
+  paths:
+  - raw/vitalPeriodic.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 1784209686
+    human_readable: 1.7 GB
+  count_summary:
+    file_count: 1
+    row_count: not_counted_large_file
+    column_count: 19
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  source_evidence:
+  - local header
+  - https://eicu.mit.edu/eicutables/vitalperiodic/
+  notes: Periodically sampled bedside vital signs linked to ICU unit stays.
+- resource_id: license_txt
+  columns: []
+  paths:
+  - raw/LICENSE.txt
+  modality: documentation
+  file_format: text
+  compression: none
+  role: license
+  size_summary:
+    total_bytes: 2542
+    human_readable: 2.5 KB
+  count_summary:
+    file_count: 1
+  readable: true
+  reader_hint: plain text
+  source_evidence:
+  - local raw documentation file
+  notes: Local dataset license file.
+- resource_id: sha256sums_txt
+  columns: []
+  paths:
+  - raw/SHA256SUMS.txt
+  modality: documentation
+  file_format: text
+  compression: none
+  role: manifest
+  size_summary:
+    total_bytes: 2710
+    human_readable: 2.6 KB
+  count_summary:
+    file_count: 1
+  readable: true
+  reader_hint: plain text
+  source_evidence:
+  - local raw documentation file
+  notes: Local checksum manifest for raw files.
+- resource_id: index_html
+  columns: []
+  paths:
+  - raw/index.html
+  modality: documentation
+  file_format: html
+  compression: none
+  role: download_index
+  size_summary:
+    total_bytes: 4296
+    human_readable: 4.2 KB
+  count_summary:
+    file_count: 1
+  readable: true
+  reader_hint: plain text or web browser
+  source_evidence:
+  - local raw documentation file
+  notes: Local download index listing files in the official eICU-CRD v2.0 release.
