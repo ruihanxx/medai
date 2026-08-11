@@ -174,6 +174,10 @@ schema is defined by the selected adapter. Its common envelope records the
 provider, current-run ownership, and release state. Cloud runs additionally
 store `provider_state.cloud_drive` with the public fields `drive`, `dataset`,
 `completed`, and `target_path`; adapters may store additional non-secret detail.
+Vast records `failed_create_retries` from zero through two. When a confirmed
+instance fails its create initialization wait, it also records
+`creation_failed=true` and a non-secret `creation_failure`; released failed
+attempts remain in `instance_history`.
 Power-off leaves top-level `released` false; only successful irreversible release
 changes it to true. Provider-owned history and resource identifiers remain
 non-secret. Credentials, hashes, access tokens, and drive secrets are never

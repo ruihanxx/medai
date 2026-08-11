@@ -44,6 +44,11 @@ then returns one foreground local monitor command. Orchestration runs that
 command without an active Codex process and resumes the same session after its
 terminal result; codegen may inspect data only after provider state records
 completed materialization.
+For Vast, `create` waits at most ten minutes for `running`. A confirmed rented
+instance that fails this initialization is released before codegen selects a
+different eligible offer, with at most two additional create attempts. An
+uncertain creation or unconfirmed release remains terminal and never permits a
+second rental.
 
 Auto Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 through
 10 (default 1),

@@ -119,6 +119,12 @@
   request explicitly fails because the selected GPU has no inventory may the
   provider procedure try exactly once with a stronger eligible GPU that still
   satisfies every original requirement. A failed retry is terminal.
+- A provider-confirmed create that fails to initialize may be retried only when
+  the selected reference defines a bounded failed-create replacement. Vast
+  requires the recorded failed instance to be released first, a different
+  eligible offer for each retry, and no more than two additional create
+  attempts. Uncertain creation, unconfirmed release, or a third failed create is
+  terminal.
 - When a paper explicitly reports GPU hardware for its full experiment,
   codegen treats its GPU count and per-GPU VRAM as a required capacity floor.
   If local capacity is below that floor, codegen must use configured remote

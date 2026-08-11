@@ -172,8 +172,13 @@ those attempts, immediately make the Codex agent CLI exit nonzero. Do not
 continue with local work or a later workflow phase.
 
 The single stronger-GPU retry described by the selected provider reference is
-the only permitted second billable create request. Do not make further resource
-substitutions.
+the only permitted no-inventory substitution. Separately, if `create`
+unambiguously records a current-run instance but returns nonzero because that
+instance did not initialize, follow the provider reference to release it before
+renting a different eligible offer. Make at most two additional create attempts
+after the first failure. Do not continue polling after the adapter's create
+timeout, retry an uncertain creation, rent before release succeeds, reuse a
+failed offer, or continue after the third create attempt fails.
 
 If a successful, evidence-based procedure conflicts with the selected skill
 reference, do not edit the repository skill. Append one reviewable correction

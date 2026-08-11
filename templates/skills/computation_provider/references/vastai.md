@@ -119,6 +119,15 @@ replaces after an ambiguous API response. A create response without an
 unambiguous instance ID remains `creation_uncertain`; a later resume may adopt
 exactly one instance found by its run label, otherwise it fails explicitly.
 
+`create` waits at most 600 seconds for a confirmed instance to reach `running`.
+If that wait fails after state records an unambiguous current-run instance, the
+adapter marks `creation_failed=true`. Release that instance with the reviewed
+`release` command before searching for and creating a different eligible offer.
+The adapter permits at most two such replacement creates, records them in
+instance history, and rejects reuse of the failed offer. If creation is
+uncertain, release is not confirmed, no different eligible offer exists, or the
+third create attempt fails, stop explicitly without another rental.
+
 For the selected Google Drive command handoff, never stop a merely provisioning
 instance. First complete the reviewed `cloud-pull --prepare` procedure in
 `../cloud/google-drive.md`; it proves an activated instance ID, onstart-backed
@@ -129,7 +138,8 @@ resumes.
 
 Power-off and release differ. Stopping retains the container disk and can still
 incur storage charges; destroying is irreversible and deletes that disk. The
-adapter refuses normal release before report and pipeline completion. See
+adapter refuses normal release before report and pipeline completion except for
+an unambiguously recorded instance whose create initialization failed. See
 <https://docs.vast.ai/api-reference/instances/show-instance>,
 <https://docs.vast.ai/api-reference/instances/manage-instance>,
 <https://docs.vast.ai/api-reference/instances/destroy-instance>, and

@@ -277,6 +277,13 @@ def load_state(path: Path) -> dict[str, Any]:
     if not isinstance(selected, dict):
         raise RuntimeError("Vast state is missing provider_state.selected_offer")
     _offer_record(selected)
+    failed_create_retries = provider_state.get("failed_create_retries", 0)
+    if (
+        isinstance(failed_create_retries, bool)
+        or not isinstance(failed_create_retries, int)
+        or failed_create_retries not in range(3)
+    ):
+        raise RuntimeError("Vast state has an invalid provider_state.failed_create_retries")
     if provider_state.get("creation_uncertain") is not True:
         _required_string(provider_state, "instance_id", "provider_state")
     return state
@@ -486,8 +493,15 @@ def _history_from_released_state(
         raise RuntimeError("Vast state still owns an unreleased instance; refusing another rental")
     provider_state = state["provider_state"]
     resume_count = _manifest_resume_count(state_path)
-    if resume_count is not None and provider_state.get("created_for_resume_count") == resume_count:
+    retrying_failed_creation = provider_state.get("creation_failed") is True
+    if (
+        resume_count is not None
+        and provider_state.get("created_for_resume_count") == resume_count
+        and not retrying_failed_creation
+    ):
         raise RuntimeError("A replacement Vast instance was already created for this manual resume")
+    if retrying_failed_creation and provider_state.get("failed_create_retries", 0) >= 2:
+        raise RuntimeError("Vast failed-create replacement attempts are exhausted")
     history = provider_state.get("instance_history", [])
     if not isinstance(history, list):
         raise RuntimeError("Vast instance history has an invalid structure")
@@ -504,6 +518,9 @@ def _history_from_released_state(
             "unavailable_reason",
             "cloud_drive",
             "created_for_resume_count",
+            "failed_create_retries",
+            "creation_failed",
+            "creation_failure",
         )
         if name in provider_state
     }
@@ -617,17 +634,24 @@ def create_instance(args: argparse.Namespace) -> str:
             raise RuntimeError("Vast fallback offer must be at least as capable as the primary offer")
 
     previous = load_state(args.state) if args.state.exists() else None
+    failed_create_retries = 0
     if previous is None:
         history: list[dict[str, Any]] = []
         resume_count = _manifest_resume_count(args.state)
         run_token = uuid.uuid4().hex
     else:
         history, resume_count, run_token = _history_from_released_state(args.state, previous)
+        previous_provider_state = previous["provider_state"]
+        if previous_provider_state.get("creation_failed") is True:
+            if primary["id"] == previous_provider_state["selected_offer"]["id"]:
+                raise RuntimeError("Vast failed-create replacement must use a different offer")
+            failed_create_retries = previous_provider_state.get("failed_create_retries", 0) + 1
     provider_state: dict[str, Any] = {
         "schema_version": 1,
         "run_token": run_token,
         "label": f"medai-{run_token}",
         "creation_uncertain": True,
+        "failed_create_retries": failed_create_retries,
         "requested": specification,
         "selected_offer": primary,
         "remote_working_dir": f"/workspace/medai/{run_token}/work",
@@ -686,7 +710,14 @@ def create_instance(args: argparse.Namespace) -> str:
                 else:
                     raise
     saved = load_state(args.state)
-    _wait_for_status(saved, "running", 840, 10)
+    try:
+        _wait_for_status(saved, "running", 600, 10)
+    except RuntimeError as exc:
+        failed = load_state(args.state)
+        failed["provider_state"]["creation_failed"] = True
+        failed["provider_state"]["creation_failure"] = str(exc)
+        save_state(args.state, failed)
+        raise
     return instance_id
 
 
@@ -869,11 +900,17 @@ def release_instance(args: argparse.Namespace, *, allow_before_report: bool = Fa
     state = load_state(args.state)
     if state.get("released") is True:
         return
-    if not allow_before_report and _manifest_report_completed(args.state) is False:
+    failed_creation = state["provider_state"].get("creation_failed") is True
+    if (
+        not allow_before_report
+        and not failed_creation
+        and _manifest_report_completed(args.state) is False
+    ):
         raise RuntimeError("Refusing to release Vast instance before report and pipeline completion")
     instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
     try:
-        power_off_instance(args)
+        if not failed_creation or instance_status(state) in {"running", "stopped"}:
+            power_off_instance(args)
     except VastApiError as exc:
         if exc.status != 404:
             raise
