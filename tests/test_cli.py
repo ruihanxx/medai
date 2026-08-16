@@ -532,18 +532,40 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
     assert "between 1 and 10" in result.stderr
 
 
-def test_autoresearch_rejects_cloud_backed_base_run(tmp_path: Path):
+def test_autoresearch_inherits_vast_google_drive_base_run(tmp_path: Path, monkeypatch):
     base_run = tmp_path / "base"
     base_run.mkdir()
+    monkeypatch.setenv("MEDAI_COMPUTATION_PROVIDER", "vastai")
+    monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "google-drive")
+    monkeypatch.setenv("VAST_API_KEY", "test-key")
+    monkeypatch.setenv("VASTAI_IMAGE", "test-image")
+    monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "drive-1")
     (base_run / "manifest.json").write_text(
-        json.dumps({"inputs": {"provider": "codex", "clouddrive": True}}),
+        json.dumps(
+            {
+                "inputs": {
+                    "provider": "codex",
+                    "clouddrive": True,
+                    "computation_provider": "vastai",
+                    "drive_provider": "google-drive",
+                    "cloud_dataset": "mimic-iv",
+                    "cloud_source": "medai/mimic-iv",
+                }
+            }
+        ),
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="cloud-backed"):
-        AutoResearchConfig.create(
-            base_run=base_run,
-            output=base_run / "autoresearch",
-            provider=None,
-            siliconflow_config=None,
-        )
+    config = AutoResearchConfig.create(
+        base_run=base_run,
+        output=base_run / "autoresearch",
+        provider=None,
+        siliconflow_config=None,
+    )
+
+    assert config.clouddrive is True
+    assert config.data is None
+    assert config.computation_provider == "vastai"
+    assert config.drive_provider == "google-drive"
+    assert config.cloud_dataset == "mimic-iv"
+    assert config.cloud_source == "medai/mimic-iv"

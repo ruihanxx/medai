@@ -72,6 +72,10 @@ def build_autoresearch_inputs(config: AutoResearchConfig) -> dict[str, Any]:
             str(config.data) if config.data else "",
         )
         or None,
+        "clouddrive": config.clouddrive,
+        "drive_provider": config.drive_provider,
+        "cloud_dataset": config.cloud_dataset,
+        "cloud_source": config.cloud_source,
         "provider": config.provider,
         "codex_model": config.codex_model,
         "codex_reasoning_effort": config.codex_reasoning_effort,
@@ -331,6 +335,23 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         digest.update(relative.encode("utf-8"))
         digest.update(b"\0")
         _update_digest_from_file(digest, path)
+
+    try:
+        manifest = json.loads((base_run / "manifest.json").read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Base run manifest is invalid: {base_run / 'manifest.json'}") from exc
+    inputs = manifest.get("inputs") if isinstance(manifest, dict) else None
+    if isinstance(inputs, dict) and inputs.get("clouddrive") is True:
+        for relative in (
+            "remote_compute/instance.json",
+            "remote_compute/cloud-inventory.v1.json",
+        ):
+            path = base_run / relative
+            if not path.is_file():
+                raise ValueError(f"Base run artifact is missing: {path}")
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            _update_digest_from_file(digest, path)
 
     ignored_names = {
         ".git",

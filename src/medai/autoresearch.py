@@ -394,6 +394,53 @@ def _validate_base_run(config: AutoResearchConfig) -> None:
                     for claim_id in experiment.claims
                 },
             )
+    if config.clouddrive:
+        _load_base_cloud_state(config)
+
+
+def _load_base_cloud_state(config: AutoResearchConfig) -> dict[str, Any]:
+    state_path = config.base_run / "remote_compute" / "instance.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Base remote-compute state is invalid: {state_path}") from exc
+    provider_state = state.get("provider_state") if isinstance(state, dict) else None
+    selected = (
+        provider_state.get("selected_offer") if isinstance(provider_state, dict) else None
+    )
+    cloud = provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
+    if (
+        state.get("provider") != "vastai"
+        or state.get("created_by_run") is not True
+        or state.get("released") is not True
+        or not isinstance(selected, dict)
+        or not isinstance(selected.get("gpu_name"), str)
+        or not isinstance(selected.get("gpu_count"), int)
+        or not isinstance(selected.get("gpu_ram_mb"), int)
+        or not isinstance(selected.get("cpu_ram_mb"), int)
+        or not isinstance(cloud, dict)
+        or cloud.get("completed") is not True
+        or cloud.get("drive") != config.drive_provider
+        or cloud.get("dataset") != config.cloud_dataset
+        or not isinstance(cloud.get("target_path"), str)
+    ):
+        raise RuntimeError(
+            "Cloud-backed Auto Research requires a released VastAI base instance "
+            "with completed Google Drive state and recorded selected GPU resources"
+        )
+    inventory_path = config.base_run / "remote_compute" / "cloud-inventory.v1.json"
+    try:
+        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Base cloud inventory is invalid: {inventory_path}") from exc
+    if (
+        not isinstance(inventory, dict)
+        or inventory.get("dataset") != config.cloud_dataset
+        or not isinstance(inventory.get("files"), list)
+        or not inventory["files"]
+    ):
+        raise RuntimeError(f"Base cloud inventory is invalid: {inventory_path}")
+    return state
 
 
 def autoresearch_preflight_node(state: AutoResearchState) -> dict[str, Any]:

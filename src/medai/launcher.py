@@ -540,8 +540,6 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         if not isinstance(inherited, dict):
             raise LauncherError(f"Base run manifest has invalid inputs: {manifest_path}")
         inherited_inputs = inherited
-        if inherited_inputs.get("clouddrive"):
-            raise LauncherError("Auto Research does not support a cloud-backed base run")
         provider = (args.provider or str(inherited_inputs.get("provider", ""))).strip().casefold()
         if not provider:
             raise LauncherError("Base run does not record a provider; pass --provider")
@@ -555,13 +553,14 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             codex_model = args.codex_model
             codex_reasoning_effort = args.codex_reasoning_effort
 
-        data_source = inherited_inputs.get("data_source")
-        if data_source:
-            data = _optional_directory(Path(str(data_source)), "base run data")
-        elif inherited_inputs.get("data"):
-            raise LauncherError(
-                "Base run uses local data but does not record its host source path"
-            )
+        if not inherited_inputs.get("clouddrive"):
+            data_source = inherited_inputs.get("data_source")
+            if data_source:
+                data = _optional_directory(Path(str(data_source)), "base run data")
+            elif inherited_inputs.get("data"):
+                raise LauncherError(
+                    "Base run uses local data but does not record its host source path"
+                )
 
     if provider not in {"claude", "codex", "codex-siliconflow"}:
         raise LauncherError(f"Unsupported provider: {provider}")

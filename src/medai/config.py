@@ -172,9 +172,14 @@ class AutoResearchConfig:
     max_iter: int = 1
     assessment_threshold: float = 0.0
     data: Path | None = None
+    clouddrive: bool = False
     computation_provider: str | None = None
     computation_provider_config: dict[str, Any] | None = None
     computation_provider_reference: Path | None = None
+    drive_provider: str | None = None
+    drive_reference: Path | None = None
+    cloud_dataset: str | None = None
+    cloud_source: str | None = None
     siliconflow_config: Path | None = None
     codex_model: str | None = None
     codex_reasoning_effort: str | None = None
@@ -190,6 +195,32 @@ class AutoResearchConfig:
             raise ValueError("--assessment-threshold must be a finite non-negative number")
         if self.data is not None and not self.data.is_dir():
             raise ValueError(f"Base run data directory does not exist: {self.data}")
+        if self.clouddrive:
+            if self.data is not None:
+                raise ValueError("Cloud-backed Auto Research cannot use local data")
+            if (
+                self.computation_provider != "vastai"
+                or self.drive_provider != "google-drive"
+                or self.computation_provider_config is None
+                or self.computation_provider_reference is None
+                or self.drive_reference is None
+                or self.cloud_source is None
+                or not self.cloud_dataset
+                or not CLOUD_DATASET_PATTERN.fullmatch(self.cloud_dataset)
+            ):
+                raise ValueError(
+                    "Cloud-backed Auto Research requires inherited VastAI and Google Drive configuration"
+                )
+        elif any(
+            value is not None
+            for value in (
+                self.drive_provider,
+                self.drive_reference,
+                self.cloud_dataset,
+                self.cloud_source,
+            )
+        ):
+            raise ValueError("Auto Research cloud configuration requires a cloud-backed base run")
         if self.provider not in VALID_PROVIDERS:
             raise ValueError(f"Unsupported provider: {self.provider}")
         if self.provider == "codex-siliconflow":
@@ -223,8 +254,7 @@ class AutoResearchConfig:
     ) -> "AutoResearchConfig":
         resolved_base_run = base_run.expanduser().resolve()
         base_inputs = _load_base_inputs(resolved_base_run)
-        if base_inputs.get("clouddrive"):
-            raise ValueError("Auto Research does not support a cloud-backed base run")
+        clouddrive = base_inputs.get("clouddrive") is True
         normalized_provider = (provider or str(base_inputs.get("provider", ""))).strip().casefold()
         if not normalized_provider:
             raise ValueError("Base run does not record a provider; pass --provider")
@@ -246,20 +276,39 @@ class AutoResearchConfig:
                 None if codex_reasoning_effort is None else codex_reasoning_effort
             )
 
-        data_value = base_inputs.get("data")
+        data_value = None if clouddrive else base_inputs.get("data")
         data = Path(str(data_value)).expanduser().resolve() if data_value else None
         (
             computation_provider,
             computation_provider_config,
             computation_provider_reference,
-            _,
-            _,
-            _,
+            drive_provider,
+            drive_reference,
+            cloud_source,
         ) = _resolve_computation_selection(
             output=output,
-            clouddrive=False,
-            cloud_dataset=None,
+            clouddrive=clouddrive,
+            cloud_dataset=(
+                str(base_inputs.get("cloud_dataset", "")).strip()
+                if clouddrive
+                else None
+            ),
         )
+        cloud_dataset = (
+            str(base_inputs.get("cloud_dataset", "")).strip() if clouddrive else None
+        )
+        if clouddrive and (
+            base_inputs.get("computation_provider") != "vastai"
+            or base_inputs.get("drive_provider") != "google-drive"
+            or computation_provider != "vastai"
+            or drive_provider != "google-drive"
+            or not cloud_dataset
+            or base_inputs.get("cloud_source") != cloud_source
+        ):
+            raise ValueError(
+                "Cloud-backed Auto Research requires the base run and current configuration "
+                "to select VastAI and Google Drive with the same dataset"
+            )
         config = cls(
             base_run=resolved_base_run,
             output=output.expanduser().resolve(),
@@ -267,9 +316,14 @@ class AutoResearchConfig:
             max_iter=max_iter,
             assessment_threshold=assessment_threshold,
             data=data,
+            clouddrive=clouddrive,
             computation_provider=computation_provider,
             computation_provider_config=computation_provider_config,
             computation_provider_reference=computation_provider_reference,
+            drive_provider=drive_provider,
+            drive_reference=drive_reference,
+            cloud_dataset=cloud_dataset,
+            cloud_source=cloud_source,
             siliconflow_config=(
                 siliconflow_config.expanduser().resolve() if siliconflow_config else None
             ),
