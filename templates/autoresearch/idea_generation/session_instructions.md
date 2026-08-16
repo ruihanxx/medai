@@ -24,7 +24,9 @@ be embedded into the already replicated experiments.
 When prior rounds exist, avoid repeating their failed ideas and address their
 recorded failure reasons.
 
-## Output
+## Output schemas
+
+### Idea artifact schema
 
 Write `{{ ideas_path }}` using exactly this structure and these IDs:
 
@@ -45,7 +47,19 @@ Supporting papers and the point each supports.
 {% endfor %}
 ```
 
-Also write `{{ candidates_path }}` using this JSON structure:
+Requirements:
+
+- Include exactly the three requested idea IDs, in the given order.
+- For every idea, include exactly the three non-empty sections shown above and
+  no other level-1, level-2, or level-3 headings.
+- `Description` states the diagnosed problem and final method; `Motivation`
+  states the supporting paper or experimental evidence, selection rationale,
+  and expected mechanism; `Provenance` identifies the literature and the exact
+  point each reference supports.
+
+### Candidate-pool schema
+
+Write `{{ candidates_path }}` using this JSON structure:
 
 ```json
 {
@@ -73,6 +87,22 @@ Also write `{{ candidates_path }}` using this JSON structure:
   "selected_candidate_ids": ["C0001", "C0002", "C0003"]
 }
 ```
+
+The candidate object above defines the repeated item schema. Before returning,
+write exactly six candidate objects and select exactly three of their IDs.
+
+Requirements:
+
+- Use exactly the three top-level fields shown above, the five candidate fields,
+  and the three evidence fields.
+- Format candidate IDs as `C` followed by four digits. Allocate IDs from
+  `next_candidate_index`, increment it monotonically, and never reuse an ID.
+- `methods` is a non-empty list of distinct methods. `source` is one of
+  `paper`, `experiment`, or `literature`.
+- Every candidate has at least one `paper` or `experiment` evidence entry and
+  at least one `literature` evidence entry.
+- `selected_candidate_ids` contains three distinct IDs present in `candidates`.
+  Their order maps the selected candidates to the three idea IDs in order.
 
 ## Workflow
 ### 0. Establish the Paper Anchor
