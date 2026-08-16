@@ -723,6 +723,29 @@ def test_autoresearch_ineligible_and_missing_skill_stop_before_ideas(
 
 def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
     path = tmp_path / "artifact"
+    contracts = {
+        "experiments": [
+            {
+                "experiment_id": "E1",
+                "data_contract": "fixed cohort and split",
+                "prediction_target_contract": "fixed outcome",
+                "output_contract": "prediction score",
+                "evaluation_contract": "frozen evaluator",
+                "metrics": ["AUROC"],
+                "primary_metric": "AUROC",
+                "metric_direction": "higher",
+            }
+        ]
+    }
+    weights = {
+        "experiments": [
+            {
+                "experiment_id": "E1",
+                "weight": 1.0,
+                "rationale": "only experiment",
+            }
+        ]
+    }
     template_contexts = {
         "eligibility": {
             "paper_markdown": path,
@@ -781,8 +804,13 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             "implementation_plan_path": path,
             "audit_path": path,
             "codebase_dir": path,
+            "data_dir": path,
+            "experiment_dir": path,
             "experiment_plan_path": path,
             "computation_provider_state_path": path,
+            "contracts": contracts,
+            "weights": weights,
+            "gpu_info": [],
         },
         "experiment": {
             "idea_id": "R01-I01",
@@ -836,6 +864,12 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             **context,
         )
         assert rendered.is_file()
+
+    plan_prompt = (tmp_path / "plan.md").read_text(encoding="utf-8")
+    assert "Primary metric: `AUROC`" in plan_prompt
+    assert "shape-prescriptive" in plan_prompt
+    assert "no pre-authorized reductions" in plan_prompt
+    assert "Never include or rerun an old existing or replicated baseline" in plan_prompt
 
 
 def test_idea_artifact_rejects_wrong_ids_or_fields():

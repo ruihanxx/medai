@@ -52,9 +52,14 @@ permits one repair and re-audit; a second failure creates an invalid assessment
 and skips planning and execution.
 
 The Auto Research plan and log group refinement-only steps by experiment. The
-experiment stage never reruns the replicated baseline and cannot modify the
-audited source code; execution failures remain explicit. Assessment compares
-each frozen primary metric with existing baseline evidence. It computes
+plan covers every frozen primary metric with shape-prescriptive outputs, uses
+the audited refinement's full training scale and complete frozen evaluation
+protocol, and prohibits pre-authorized reductions. Result-blind weights do not
+permit experiments to be skipped or downsized. Planned outputs stay inside the
+idea codebase or its experiment directory. The experiment stage never reruns
+the replicated baseline and cannot modify the audited source code; execution
+failures remain explicit. Assessment compares each frozen primary metric with
+existing baseline evidence. It computes
 `relative_delta = (refined - baseline) / abs(baseline)`, reverses the sign for a
 lower-is-better metric, multiplies by the frozen experiment weight, and sums the
 contributions. A complete weighted score strictly above

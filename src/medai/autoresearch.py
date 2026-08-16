@@ -874,7 +874,10 @@ def _run_experiment_plan(
     plan_path = plan_dir / "experiment_plan.json"
     transcript_path = plan_dir / "plan_transcript.jsonl"
     contracts_path = config.output / "experiment_setup" / "experiment_contracts.json"
+    weights_path = config.output / "experiment_setup" / "experiment_weights.json"
+    experiment_dir = _idea_dir(config, round_index, idea_index) / "experiment"
     contracts = load_model(contracts_path, ExperimentContracts)
+    weights = load_model(weights_path, ExperimentWeights)
     if pipeline_state.is_stage_completed(stage_name):
         plan = load_model(plan_path, AutoResearchExperimentPlan)
         validate_autoresearch_experiment_plan(contracts, plan)
@@ -895,12 +898,19 @@ def _run_experiment_plan(
         / "plan.md",
         idea_id=idea_id,
         contracts_path=contracts_path,
-        weights_path=config.output / "experiment_setup" / "experiment_weights.json",
+        weights_path=weights_path,
         implementation_plan_path=implementation_plan_path,
         audit_path=audit_path,
         codebase_dir=codebase_dir,
+        data_dir=config.data,
+        experiment_dir=experiment_dir,
         experiment_plan_path=plan_path,
         computation_provider_state_path=config.output / "remote_compute" / "instance.json",
+        contracts=contracts.model_dump(mode="json"),
+        weights=weights.model_dump(mode="json"),
+        gpu_info=json.loads(
+            (config.output / "preflight" / "resources.json").read_text(encoding="utf-8")
+        )["gpus"],
     )
     run_agent(
         provider=config.provider,

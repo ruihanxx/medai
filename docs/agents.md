@@ -63,8 +63,12 @@
   JSON with description, motivation, and reference/support provenance.
   Orchestration validates both artifacts and removes the selected candidates
   before completing the round.
-- Plan agents may modify the writable codebase but may not change model
-  semantics, introduce fallback plans, or hardcode paper results.
+- Replicate plan agents may modify the writable codebase but may not change
+  model semantics, introduce fallback plans, or hardcode paper results. The Auto
+  Research experiment-plan agent instead treats the audited idea codebase as
+  read-only. It plans every frozen experiment at the audited full scale, maps
+  result-producing steps to frozen metrics with shape-prescriptive outputs, and
+  may not expose paper, baseline, target, or assessment-threshold result values.
 - The preprocessing audit agent runs with its local attempt directory as working
   directory and treats `codegen/codebase/` as read-only. For local data it also
   treats source data as read-only, writes only local audit artifacts, never uses
