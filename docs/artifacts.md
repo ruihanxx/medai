@@ -67,7 +67,7 @@ runs/<run_id>/autoresearch/
 ├── experiment_setup/experiment_contracts_transcript.jsonl
 ├── idea_generation/candidates.json
 ├── rounds/round_001/
-│   ├── ideas.md
+│   ├── ideas.json
 │   ├── idea_generation_transcript.jsonl
 │   ├── ideas/idea_01/
 │   │   ├── codegen/codebase/
@@ -103,6 +103,11 @@ ID, problem, methods, motivation, and structured paper/experiment/literature
 evidence. Before completing a round, orchestration requires six reviewed
 candidates and three selected IDs, removes those selected candidate objects,
 clears the selection list, and leaves the remaining candidates for later rounds.
+
+Each `rounds/round_<NNN>/ideas.json` records the round index and exactly three
+ordered ideas with the canonical round idea IDs. Every idea contains a non-empty
+description, motivation, and one or more provenance objects; each provenance
+object contains exactly an identifiable `reference` and a `support` statement.
 
 Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
 record a `final` or `validation` role plus a verbatim provenance quote.

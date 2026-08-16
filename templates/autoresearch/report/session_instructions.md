@@ -8,7 +8,7 @@ Create the evidence-bound final report for the completed Auto Research campaign.
 - Frozen result-blind experiment weights: `{{ weights_path }}`
 - Frozen executable experiment contracts: `{{ contracts_path }}`
 - Base reproduction report: `{{ base_reproduction_report }}`
-- Round idea documents, implementation/audit/experiment artifacts, assessments,
+- Round idea artifacts, implementation/audit/experiment artifacts, assessments,
   and deterministic summaries:
 
 ```json

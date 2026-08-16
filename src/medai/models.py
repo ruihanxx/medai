@@ -268,6 +268,33 @@ class ExperimentWeights(StrictModel):
         return self
 
 
+class IdeaProvenance(StrictModel):
+    reference: str = Field(min_length=1)
+    support: str = Field(min_length=1)
+
+
+class GeneratedIdea(StrictModel):
+    idea_id: str = Field(pattern=r"^R\d{2,}-I\d{2}$")
+    description: str = Field(min_length=1)
+    motivation: str = Field(min_length=1)
+    provenance: list[IdeaProvenance] = Field(min_length=1)
+
+
+class IdeaGenerationArtifact(StrictModel):
+    round_index: int = Field(ge=1)
+    ideas: list[GeneratedIdea] = Field(min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def exact_round_idea_ids(self) -> "IdeaGenerationArtifact":
+        expected_ids = [
+            f"R{self.round_index:02d}-I{idea_index:02d}" for idea_index in range(1, 4)
+        ]
+        actual_ids = [idea.idea_id for idea in self.ideas]
+        if actual_ids != expected_ids:
+            raise ValueError(f"Ideas must use exactly these IDs in order: {expected_ids}")
+        return self
+
+
 class IdeaCandidateEvidence(StrictModel):
     source: Literal["paper", "experiment", "literature"]
     reference: str = Field(min_length=1)
@@ -722,6 +749,16 @@ def validate_candidate_pool_for_selection(pool: IdeaCandidatePool) -> None:
             raise ValueError(
                 f"Candidate {candidate.candidate_id} lacks literature evidence"
             )
+
+
+def validate_idea_generation_artifact(
+    artifact: IdeaGenerationArtifact,
+    round_index: int,
+) -> None:
+    if artifact.round_index != round_index:
+        raise ValueError(
+            f"Idea artifact round {artifact.round_index} does not match round {round_index}"
+        )
 
 
 def validate_idea_implementation_plan(

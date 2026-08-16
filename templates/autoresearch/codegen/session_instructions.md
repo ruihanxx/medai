@@ -33,7 +33,7 @@ Follow these four steps in order.
 First read and understand the writable codebase: trace its baseline entry
 points, data flow, input representation, model, training logic, evaluator, and
 the integration shared by the frozen experiments. Then read the paper and the
-selected `{{ idea_id }}` in the round idea document. Use the research brief,
+selected `{{ idea_id }}` in the round idea artifact. Use the research brief,
 experiment definitions, base plans, and frozen contracts to determine how the
 idea can be added to the existing implementation.
 

@@ -28,6 +28,8 @@ recorded failure reasons.
 
 ### Idea schema
 
+Write `{{ ideas_path }}` using this JSON schema:
+
 ```json
 {
   "round_index": {{ round_index }},
@@ -47,26 +49,6 @@ recorded failure reasons.
 {% endfor %}
   ]
 }
-```
-
-Write `{{ ideas_path }}` as the Markdown serialization of that schema, using
-exactly this structure and these IDs:
-
-```markdown
-# Idea Generation Round {{ round_index }}
-{% for idea_id in idea_ids %}
-## {{ idea_id }}
-
-### Description
-...
-
-### Motivation
-...
-
-### Provenance
-Supporting papers and the point each supports.
-
-{% endfor %}
 ```
 
 ### Candidate-pool schema
@@ -188,11 +170,11 @@ over minor variants of the same method.
 
 Write only these three ideas to `{{ ideas_path }}` using the required schema and IDs:
 
-- `Description`: the diagnosed problem and the final proposed method.
-- `Motivation`: why it was selected, the paper or experimental evidence, and the
+- `description`: the diagnosed problem and the final proposed method.
+- `motivation`: why it was selected, the paper or experimental evidence, and the
   expected improvement mechanism.
-- `Provenance`: the relevant references and the specific claim or design choice
-  supported by each one.
+- `provenance`: one object per relevant reference, with `reference` identifying
+  the source and `support` stating the specific supported claim or design choice.
 
 Set `selected_candidate_ids` to the three chosen candidate IDs in the same order
 as the round idea IDs. Leave all six candidates in the JSON when returning; the

@@ -7,9 +7,9 @@ from medai.autoresearch import (
     REQUIRED_BASE_STAGES,
     autoresearch_preflight_node,
     create_autoresearch_workflow,
-    validate_ideas_document,
 )
 from medai.config import AutoResearchConfig
+from medai.models import IdeaGenerationArtifact, validate_idea_generation_artifact
 from medai.pipeline_state import (
     PipelineState,
     build_autoresearch_inputs,
@@ -308,15 +308,24 @@ def _configure_fake_agents(
             ]
             candidates_path.parent.mkdir(parents=True, exist_ok=True)
             candidates_path.write_text(json.dumps(candidate_pool), encoding="utf-8")
-            text = f"# Idea Generation Round {context['round_index']}\n\n"
-            for current_id in context["idea_ids"]:
-                text += (
-                    f"## {current_id}\n\n"
-                    "### Description\nA nontrivial refinement.\n\n"
-                    "### Motivation\nAn observed modeling limitation.\n\n"
-                    "### Provenance\nSupporting paper.\n\n"
-                )
-            Path(context["ideas_path"]).write_text(text, encoding="utf-8")
+            ideas = {
+                "round_index": context["round_index"],
+                "ideas": [
+                    {
+                        "idea_id": current_id,
+                        "description": "A nontrivial refinement.",
+                        "motivation": "An observed modeling limitation.",
+                        "provenance": [
+                            {
+                                "reference": "Supporting paper.",
+                                "support": "The method addresses the observed limitation.",
+                            }
+                        ],
+                    }
+                    for current_id in context["idea_ids"]
+                ],
+            }
+            Path(context["ideas_path"]).write_text(json.dumps(ideas), encoding="utf-8")
         elif template_name.endswith("codegen/session_instructions.md"):
             if idea_id.endswith("I02"):
                 refinement_types = ["training_strategy"]
@@ -666,7 +675,7 @@ def test_autoresearch_retries_rounds_and_skips_audit_failed_experiments(
 
     round_two_prompt = config.output / "prompts" / "round_002" / "idea_generation.md"
     _, round_two_context = contexts[round_two_prompt]
-    assert "round_001/ideas.md" in round_two_context["prior_rounds_json"]
+    assert "round_001/ideas.json" in round_two_context["prior_rounds_json"]
     assert "round_001/round_summary.json" in round_two_context["prior_rounds_json"]
     assert "round_001/ideas/idea_01/audit/audit.json" in (
         round_two_context["prior_rounds_json"]
@@ -837,24 +846,36 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
         assert rendered.is_file()
 
 
-def test_idea_document_rejects_additional_ideas_or_sections():
-    valid = "# Idea Generation Round 1\n\n"
-    for idea_id in ("R01-I01", "R01-I02", "R01-I03"):
-        valid += (
-            f"## {idea_id}\n\n"
-            "### Description\nrefinement\n\n"
-            "### Motivation\nobservation\n\n"
-            "### Provenance\npaper\n\n"
-        )
-    validate_ideas_document(valid, 1)
+def test_idea_artifact_rejects_wrong_ids_or_fields():
+    valid = {
+        "round_index": 1,
+        "ideas": [
+            {
+                "idea_id": idea_id,
+                "description": "refinement",
+                "motivation": "observation",
+                "provenance": [{"reference": "paper", "support": "mechanism"}],
+            }
+            for idea_id in ("R01-I01", "R01-I02", "R01-I03")
+        ],
+    }
+    IdeaGenerationArtifact.model_validate(valid)
 
-    with pytest.raises(ValueError, match="exactly these ideas"):
-        validate_ideas_document(valid + "## Extra\n", 1)
-    with pytest.raises(ValueError, match="exactly Description"):
-        validate_ideas_document(
-            valid.replace("### Provenance\npaper", "### Extra\nextra\n\n### Provenance\npaper", 1),
-            1,
+    with pytest.raises(ValueError, match="does not match round 2"):
+        validate_idea_generation_artifact(
+            IdeaGenerationArtifact.model_validate(valid),
+            2,
         )
+
+    wrong_id = json.loads(json.dumps(valid))
+    wrong_id["ideas"][2]["idea_id"] = "R01-I04"
+    with pytest.raises(ValueError, match="exactly these IDs"):
+        IdeaGenerationArtifact.model_validate(wrong_id)
+
+    extra_field = json.loads(json.dumps(valid))
+    extra_field["ideas"][0]["extra"] = "not allowed"
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        IdeaGenerationArtifact.model_validate(extra_field)
 
 
 def test_base_fingerprint_includes_paper_artifacts(tmp_path: Path):

@@ -59,8 +59,10 @@
 - The Auto Research idea agent maintains one campaign-wide candidate-pool JSON.
   It carries unused candidates across rounds, replenishes the pool to six,
   records paper/experiment and literature evidence, and declares the three
-  selected IDs in idea order. Orchestration validates the pool and removes the
-  selected candidates before completing the round.
+  selected IDs in idea order. It writes the three selected ideas as structured
+  JSON with description, motivation, and reference/support provenance.
+  Orchestration validates both artifacts and removes the selected candidates
+  before completing the round.
 - Plan agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.
 - The preprocessing audit agent runs with its local attempt directory as working

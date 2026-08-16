@@ -26,6 +26,7 @@ from medai.models import (
     ExperimentWeights,
     IdeaAssessment,
     IdeaCandidatePool,
+    IdeaGenerationArtifact,
     IdeaImplementationPlan,
     ReplicationLog,
     ReplicationPlan,
@@ -38,6 +39,7 @@ from medai.models import (
     validate_experiment_contracts,
     validate_experiment_coverage,
     validate_experiment_weights,
+    validate_idea_generation_artifact,
     validate_idea_implementation_plan,
     validate_replication_log,
     validate_replication_plan,
@@ -78,42 +80,6 @@ class AutoResearchState(TypedDict, total=False):
 
 def expected_idea_ids(round_index: int) -> list[str]:
     return [f"R{round_index:02d}-I{idea_index:02d}" for idea_index in range(1, 4)]
-
-
-def validate_ideas_document(text: str, round_index: int) -> None:
-    expected_ids = expected_idea_ids(round_index)
-    h1_headings = re.findall(r"(?m)^# ([^\r\n]+?)[ \t]*$", text)
-    expected_title = f"Idea Generation Round {round_index}"
-    if h1_headings != [expected_title]:
-        raise ValueError(f"Idea document must use title: # {expected_title}")
-    level_two_headings = re.findall(r"(?m)^## ([^\r\n]+?)[ \t]*$", text)
-    if level_two_headings != expected_ids:
-        raise ValueError(
-            f"Idea document must contain exactly these ideas in order: {expected_ids}"
-        )
-    matches = list(re.finditer(r"(?m)^## (R\d{2}-I\d{2})[ \t]*$", text))
-    expected_sections = ["Description", "Motivation", "Provenance"]
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        section = text[match.end() : end]
-        section_matches = list(re.finditer(r"(?m)^### ([^\r\n]+?)[ \t]*$", section))
-        actual_sections = [heading.group(1) for heading in section_matches]
-        if actual_sections != expected_sections:
-            raise ValueError(
-                f"{match.group(1)} must contain exactly Description, Motivation, "
-                "and Provenance in order"
-            )
-        for heading_index, heading_match in enumerate(section_matches):
-            body_start = heading_match.end()
-            body_end = (
-                section_matches[heading_index + 1].start()
-                if heading_index + 1 < len(section_matches)
-                else len(section)
-            )
-            if not section[body_start:body_end].strip():
-                raise ValueError(
-                    f"{match.group(1)} has an empty {heading_match.group(1)} section"
-                )
 
 
 def _remove_selected_candidates(path: Path, pool: IdeaCandidatePool) -> None:
@@ -190,7 +156,7 @@ def _round_artifact_context(
         )
     return {
         "round": round_index,
-        "ideas": str(_round_dir(config, round_index) / "ideas.md"),
+        "ideas": str(_round_dir(config, round_index) / "ideas.json"),
         "summary": str(_round_dir(config, round_index) / "round_summary.json"),
         "idea_artifacts": idea_artifacts,
     }
@@ -651,14 +617,12 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
     pipeline_state = PipelineState(config.output)
     stage_name = _stage_name(round_index, None, "idea_generation")
     round_dir = _round_dir(config, round_index)
-    ideas_path = round_dir / "ideas.md"
+    ideas_path = round_dir / "ideas.json"
     transcript_path = round_dir / "idea_generation_transcript.jsonl"
     candidates_path = config.output / "idea_generation" / "candidates.json"
     if pipeline_state.is_stage_completed(stage_name):
-        try:
-            validate_ideas_document(ideas_path.read_text(encoding="utf-8"), round_index)
-        except FileNotFoundError as exc:
-            raise RuntimeError(f"Completed idea document is missing: {ideas_path}") from exc
+        artifact = load_model(ideas_path, IdeaGenerationArtifact)
+        validate_idea_generation_artifact(artifact, round_index)
         if not transcript_path.is_file():
             raise RuntimeError(
                 f"Completed idea-generation transcript is missing: {transcript_path}"
@@ -697,10 +661,8 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    try:
-        validate_ideas_document(ideas_path.read_text(encoding="utf-8"), round_index)
-    except FileNotFoundError as exc:
-        raise RuntimeError(f"Idea-generation agent did not write: {ideas_path}") from exc
+    artifact = load_model(ideas_path, IdeaGenerationArtifact)
+    validate_idea_generation_artifact(artifact, round_index)
     candidate_pool = load_model(candidates_path, IdeaCandidatePool)
     validate_candidate_pool_for_selection(candidate_pool)
     _remove_selected_candidates(candidates_path, candidate_pool)
