@@ -1,6 +1,6 @@
 # Auto Research idea-generation agent
 
-You are generating nontrivial refinement ideas for the experiments in a medical paper.
+You are generating nontrivial refinement ideas for the models in a medical paper.
 {% if round_index > 1 %}
 This is round {{ round_index }}. Learn from the experience of previous rounds at `{{ prior_rounds_json }}`
 {% endif %}
@@ -18,8 +18,7 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 
 Read and follow the required idea-generation skill. Use the research brief to
 establish the target problem and relevant research line, then propose standalone
-input-representation, model, or training-strategy upgrades that can be embedded
-into the already replicated experiments.
+model upgrades that can be embedded into the already replicated experiments.
 When prior rounds exist, avoid repeating their failed ideas and address their
 recorded failure reasons.
 
@@ -61,7 +60,7 @@ Make sure that your later improvement won't touch any of the fixed anchor.
 Default rule for finding potential improvement:
 Keep fixed:
 - task
-- downstream experiment dataset
+- dataset
 - cohort
 - outcome
 - prediction setting
@@ -72,19 +71,12 @@ Search over:
 - model
 - training strategy
 
+{% if round_index > 1 %}
+ Learn from the experience of previous rounds at `{{ prior_rounds_json }}` before you
+{% endif %}`
+
 Use the hint in the later  `Hint for finding potential improvement` section when you search over the 3 parts.
 
-Input-representation refinements may change feature construction or encoding,
-but they must use only the fixed downstream dataset, cohort, modalities, and information
-available at the original prediction time. They must not introduce outcome or
-train/validation/test leakage.
-
-Training-strategy refinements may change the training target, loss/objective,
-sampling or balancing, augmentation, optimization, pretraining, or training
-logic. A modified training target may be transformed, structured, or auxiliary,
-but it must still serve the fixed final prediction outcome and horizon. The
-downstream dataset, cohort, split, evaluator-facing prediction, metrics, and evaluation
-protocol remain fixed.
 
 
 ### 2.
@@ -414,7 +406,38 @@ Is the paper's core idea useful but incompletely, rigidly, or inefficiently impl
 This is a **high-priority** search direction because it preserves the original paper's research motivation, maximizes code reuse, and allows targeted ablation of the proposed mechanism.
 
 
-**2.5 Incorporate Known Structure or Constraints**
+**2.5 Evaluate the Learning Objective**
+
+Ask:
+- Why is this loss used?
+- Does the optimized objective match the clinical objective?
+- Is class imbalance important?
+- Are false positives and false negatives equally costly?
+- Is a survival endpoint being reduced to binary classification?
+- Is an ordinal outcome being treated incorrectly?
+- Would ranking be more important than probability accuracy?
+- Is calibration clinically important?
+- Are multiple related outcomes available for multi-task learning?
+- Should auxiliary objectives be used?
+
+Examples:
+
+```text
+binary cross-entropy
+→ cost-sensitive loss
+→ focal loss
+→ ranking objective
+→ survival objective
+→ multi-task objective
+```
+
+Key question:
+
+> Is the paper optimizing what is mathematically convenient, or what actually matters for the task?
+
+---
+
+**2.6 Incorporate Known Structure or Constraints**
 
 Ask:
 - Is monotonicity known for some variables?
@@ -434,7 +457,7 @@ Potential methods:
 - ontology-aware embeddings
 
 
-**2.6 Robustness and Shortcut Learning**
+**2.7 Robustness and Shortcut Learning**
 
 Ask:
 - Which subgroups perform poorly?
@@ -476,36 +499,7 @@ Potential approaches:
 - multi-task learning
 - semi-supervised learning
 
-**3.2 Training Target and Loss Function**
-
-Ask:
-- Does the training target faithfully represent the fixed prediction outcome and horizon?
-- Is a time-to-event outcome reduced to a binary label despite censoring or variable follow-up?
-- Is an ordinal or continuous outcome unnecessarily collapsed into categories?
-- Does a hard target discard clinically meaningful uncertainty, severity, or progression?
-- Is the label noisy, weakly observed, or defined by an imperfect proxy?
-- Are related outcomes available as auxiliary targets without changing the final prediction task?
-- Does the loss align with the primary evaluation metric and intended clinical use?
-- Are false positives and false negatives equally costly?
-- Should the objective emphasize ranking, calibration, robustness, or minority examples?
-- Can a better target or loss be evaluated with the unchanged cohort, split, and evaluation protocol?
-
-Potential approaches:
-- censoring-aware survival targets and objectives
-- ordinal or continuous targets
-- ranking- or calibration-aware losses
-- cost-sensitive, class-balanced, focal, or asymmetric losses
-- soft targets, label smoothing, or noise-robust losses
-- auxiliary or multi-task targets tied to the same final outcome
-
-Key question:
-> Is the current target and loss optimized for mathematical convenience, or for learning the fixed clinical prediction objective?
-
-Do not redefine the final prediction outcome merely to make training easier. A
-new training target or loss must still produce outputs compatible with the
-unchanged evaluator.
-
-**3.3 Class Imbalance**
+**3.2 Class Imbalance**
 
 Ask:
 - What is the outcome prevalence?
@@ -518,7 +512,7 @@ Ask:
 
 Treat simple imbalance handling as an engineering improvement unless it supports a broader methodological hypothesis.
 
-**3.4 Data Augmentation**
+**3.3 Data Augmentation**
 
 Ask:
 - Which transformations should preserve the label?
@@ -552,7 +546,7 @@ Key question:
 > Which transformations preserve the clinically relevant semantics?
 
 
-**3.5 Optimization Stability**
+**3.4 Optimization Stability**
 
 Ask:
 - Is performance sensitive to random seed?
@@ -567,7 +561,7 @@ A method improvement should not rely on a single favorable run.
 
 
 
-**3.6 Pretraining and Transfer**
+**3.5 Pretraining and Transfer**
 
 Ask:
 - Is there a larger external dataset with the same modality?
@@ -578,7 +572,7 @@ Ask:
 - Would source-domain bias hurt downstream performance?
 
 
-**3.7 Sampling and Curriculum**
+**3.6 Sampling and Curriculum**
 
 Ask:
 - Are some examples substantially harder than others?
