@@ -268,6 +268,51 @@ class ExperimentWeights(StrictModel):
         return self
 
 
+class IdeaCandidateEvidence(StrictModel):
+    source: Literal["paper", "experiment", "literature"]
+    reference: str = Field(min_length=1)
+    support: str = Field(min_length=1)
+
+
+class IdeaCandidate(StrictModel):
+    candidate_id: str = Field(pattern=r"^C\d{4}$")
+    problem: str = Field(min_length=1)
+    methods: list[str] = Field(min_length=1)
+    motivation: str = Field(min_length=1)
+    evidence: list[IdeaCandidateEvidence] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_methods(self) -> "IdeaCandidate":
+        if len(self.methods) != len(set(self.methods)):
+            raise ValueError("Candidate methods must be unique")
+        return self
+
+
+class IdeaCandidatePool(StrictModel):
+    next_candidate_index: int = Field(ge=1)
+    candidates: list[IdeaCandidate] = Field(max_length=6)
+    selected_candidate_ids: list[str] = Field(max_length=3)
+
+    @model_validator(mode="after")
+    def valid_candidate_ids(self) -> "IdeaCandidatePool":
+        candidate_ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(candidate_ids) != len(set(candidate_ids)):
+            raise ValueError("Candidate IDs must be unique")
+        if any(
+            re.fullmatch(r"C\d{4}", candidate_id) is None
+            for candidate_id in self.selected_candidate_ids
+        ):
+            raise ValueError("Selected candidate IDs must use the C0001 format")
+        if len(self.selected_candidate_ids) != len(set(self.selected_candidate_ids)):
+            raise ValueError("Selected candidate IDs must be unique")
+        if not set(self.selected_candidate_ids).issubset(candidate_ids):
+            raise ValueError("Selected candidate IDs must exist in the candidate pool")
+        used_indexes = [int(candidate_id[1:]) for candidate_id in candidate_ids]
+        if used_indexes and self.next_candidate_index <= max(used_indexes):
+            raise ValueError("next_candidate_index must exceed every candidate ID")
+        return self
+
+
 class ExperimentContract(StrictModel):
     experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     baseline_entry_points: list[str] = Field(min_length=1)
@@ -660,6 +705,23 @@ def validate_experiment_contracts(
     actual = [experiment.experiment_id for experiment in contracts.experiments]
     if actual != expected:
         raise ValueError("Experiment contracts must cover every experiment in order")
+
+
+def validate_candidate_pool_for_selection(pool: IdeaCandidatePool) -> None:
+    if len(pool.candidates) != 6:
+        raise ValueError("Idea generation must review exactly six candidates")
+    if len(pool.selected_candidate_ids) != 3:
+        raise ValueError("Idea generation must select exactly three candidates")
+    for candidate in pool.candidates:
+        sources = {evidence.source for evidence in candidate.evidence}
+        if not sources.intersection({"paper", "experiment"}):
+            raise ValueError(
+                f"Candidate {candidate.candidate_id} lacks paper or experiment evidence"
+            )
+        if "literature" not in sources:
+            raise ValueError(
+                f"Candidate {candidate.candidate_id} lacks literature evidence"
+            )
 
 
 def validate_idea_implementation_plan(

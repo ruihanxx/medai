@@ -26,8 +26,11 @@ Each round generates exactly three standalone input-representation, model, or
 training-strategy refinement ideas. The idea agent first develops six
 paper- or experiment-evidenced problem candidates, reviews closely relevant
 literature to revise their methods and rationale, and emits the three strongest
-candidates in the idea artifact. Representation refinements may reconstruct or
-encode only the fixed prediction-time inputs. Training refinements may change
+candidates in the idea artifact. A campaign-wide candidate-pool JSON retains
+unused candidates across rounds; each round replenishes it to six, and
+orchestration removes the three selected candidates after validating them.
+Representation refinements may reconstruct or encode only the fixed
+prediction-time inputs. Training refinements may change
 training targets, loss/objective, sampling and balancing, augmentation,
 optimization, pretraining, and training logic. External pretraining must be
 declared and must not alter or leak the downstream dataset/cohort/split. All

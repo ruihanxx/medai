@@ -65,6 +65,7 @@ runs/<run_id>/autoresearch/
 ├── experiment_setup/experiment_weighting_transcript.jsonl
 ├── experiment_setup/experiment_contracts.json
 ├── experiment_setup/experiment_contracts_transcript.jsonl
+├── idea_generation/candidates.json
 ├── rounds/round_001/
 │   ├── ideas.md
 │   ├── idea_generation_transcript.jsonl
@@ -94,6 +95,14 @@ one of those contract path categories. Model refinements require a new file;
 representation- or training-only plans may use none. The audit records
 `refinement_only` and six ordered checks per experiment: data, prediction
 target, input representation, evaluator-facing output, training, and evaluation.
+
+`idea_generation/candidates.json` is the campaign-wide unused-candidate pool.
+It records a monotonic `next_candidate_index`, up to six candidates, and a
+temporary `selected_candidate_ids` list. Each candidate has a stable `C0001`
+ID, problem, methods, motivation, and structured paper/experiment/literature
+evidence. Before completing a round, orchestration requires six reviewed
+candidates and three selected IDs, removes those selected candidate objects,
+clears the selection list, and leaves the remaining candidates for later rounds.
 
 Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
 record a `final` or `validation` role plus a verbatim provenance quote.

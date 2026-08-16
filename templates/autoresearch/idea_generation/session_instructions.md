@@ -12,6 +12,7 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 - Base reproduction report: `{{ reproduction_report_path }}`
 - Completed base codebase: `{{ codebase_dir }}`
 - Required idea-generation skill: `{{ idea_generation_skill }}`
+- Shared candidate pool: `{{ candidates_path }}` (may not exist in round 1)
 - Prior round idea, audit, assessment, and failure-reason paths: `{{ prior_rounds_json }}`
 
 ## Task
@@ -43,6 +44,36 @@ Supporting papers and the point each supports.
 
 {% endfor %}
 ```
+
+Also write `{{ candidates_path }}` using this JSON structure:
+
+```json
+{
+  "next_candidate_index": 7,
+  "candidates": [
+    {
+      "candidate_id": "C0001",
+      "problem": "specific current limitation",
+      "methods": ["plausible method"],
+      "motivation": "why this problem and these methods matter",
+      "evidence": [
+        {
+          "source": "paper",
+          "reference": "paper section, table, or figure",
+          "support": "exact point supported"
+        },
+        {
+          "source": "literature",
+          "reference": "identifiable citation",
+          "support": "exact point supported"
+        }
+      ]
+    }
+  ],
+  "selected_candidate_ids": ["C0001", "C0002", "C0003"]
+}
+```
+
 ## Workflow
 ### 0. Establish the Paper Anchor
 Before proposing any improvement, determine:
@@ -80,9 +111,13 @@ Use the hint in the later  `Hint for finding potential improvement` section when
 
 ### 2. Write down the candidates
 
-In working notes, identify exactly six distinct, current problems that could be
-improved. Do not write this six-candidate list to `{{ ideas_path }}`. For each
-candidate record:
+Read the shared candidate pool when it exists; it contains unused candidates
+from earlier rounds. Preserve useful candidates, revise them using prior-round
+evidence, and add distinct candidates until the pool contains exactly six. In
+round 1, create the pool with `next_candidate_index` set to 1 before allocating
+IDs. Allocate each new ID from that counter, increment it, and never reuse an ID.
+
+For each candidate record:
 
 - **Problem**: the specific limitation in the current method or experiment.
 - **Methods**: all plausible ways to address it through input representation,
@@ -93,7 +128,9 @@ candidate record:
 
 Do not invent a weakness when the available evidence does not support it. When
 prior rounds exist, exclude repeated ideas unless their recorded failure has led
-to a materially different method.
+to a materially different method. Keep all six candidates in
+`{{ candidates_path }}` until the selection step; do not write the candidate
+list to `{{ ideas_path }}`.
 
 ### 3. Do literature review
 
@@ -101,7 +138,8 @@ For each of the six problems, search for relevant literature and use it to
 evaluate the proposed methods. Revise the methods when the literature suggests a
 stronger design, or replace them with a better method. Then update the motivation
 and add the supporting references and the exact point each reference supports to
-the evidence.
+the evidence. Before selection, every candidate must have at least one `paper`
+or `experiment` evidence entry and at least one `literature` entry.
 
 Literature-search requirements:
 
@@ -129,6 +167,11 @@ Write only these three ideas to `{{ ideas_path }}` using the required schema and
   expected improvement mechanism.
 - `Provenance`: the relevant references and the specific claim or design choice
   supported by each one.
+
+Set `selected_candidate_ids` to the three chosen candidate IDs in the same order
+as the round idea IDs. Leave all six candidates in the JSON when returning; the
+orchestrator validates the selection and removes the three used candidates from
+the shared pool so they cannot be reused in later rounds.
 
 
 

@@ -269,6 +269,45 @@ def _configure_fake_agents(
                 encoding="utf-8",
             )
         elif template_name.endswith("idea_generation/session_instructions.md"):
+            candidates_path = Path(context["candidates_path"])
+            if candidates_path.is_file():
+                candidate_pool = json.loads(candidates_path.read_text(encoding="utf-8"))
+            else:
+                candidate_pool = {
+                    "next_candidate_index": 1,
+                    "candidates": [],
+                    "selected_candidate_ids": [],
+                }
+            while len(candidate_pool["candidates"]) < 6:
+                candidate_index = candidate_pool["next_candidate_index"]
+                candidate_id = f"C{candidate_index:04d}"
+                candidate_pool["candidates"].append(
+                    {
+                        "candidate_id": candidate_id,
+                        "problem": f"Problem {candidate_id}",
+                        "methods": [f"Method {candidate_id}"],
+                        "motivation": f"Motivation {candidate_id}",
+                        "evidence": [
+                            {
+                                "source": "paper",
+                                "reference": "paper section",
+                                "support": "Baseline limitation.",
+                            },
+                            {
+                                "source": "literature",
+                                "reference": f"Reference {candidate_id}",
+                                "support": "Method mechanism.",
+                            },
+                        ],
+                    }
+                )
+                candidate_pool["next_candidate_index"] += 1
+            candidate_pool["selected_candidate_ids"] = [
+                candidate["candidate_id"]
+                for candidate in candidate_pool["candidates"][:3]
+            ]
+            candidates_path.parent.mkdir(parents=True, exist_ok=True)
+            candidates_path.write_text(json.dumps(candidate_pool), encoding="utf-8")
             text = f"# Idea Generation Round {context['round_index']}\n\n"
             for current_id in context["idea_ids"]:
                 text += (
@@ -570,6 +609,17 @@ def test_autoresearch_completes_all_three_ideas_and_resumes(tmp_path: Path, monk
         b"\x89PNG"
     )
     assert any("codegen_repair" in str(call[1]) for call in calls)
+    candidate_pool = json.loads(
+        (config.output / "idea_generation" / "candidates.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert candidate_pool["selected_candidate_ids"] == []
+    assert [candidate["candidate_id"] for candidate in candidate_pool["candidates"]] == [
+        "C0004",
+        "C0005",
+        "C0006",
+    ]
 
     call_count = len(calls)
     PipelineState(config.output).resume(build_autoresearch_inputs(config))
@@ -624,6 +674,17 @@ def test_autoresearch_retries_rounds_and_skips_audit_failed_experiments(
     assert "round_001/ideas/idea_01/assessment/assessment.json" in (
         round_two_context["prior_rounds_json"]
     )
+    candidate_pool = json.loads(
+        (config.output / "idea_generation" / "candidates.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert candidate_pool["next_candidate_index"] == 10
+    assert [candidate["candidate_id"] for candidate in candidate_pool["candidates"]] == [
+        "C0007",
+        "C0008",
+        "C0009",
+    ]
     assert PipelineState(config.output).state["status"] == "completed"
 
 
@@ -684,6 +745,7 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             "reproduction_report_path": path,
             "codebase_dir": path,
             "idea_generation_skill": path,
+            "candidates_path": path,
             "prior_rounds_json": "[]",
             "round_index": 1,
             "idea_ids": ["R01-I01", "R01-I02", "R01-I03"],

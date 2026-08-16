@@ -43,7 +43,9 @@ and codegen remaining a single scientific stage.
 Auto Research mocks cover input-representation, model, and training-strategy
 implementation plans; declared changed-file boundaries; preservation of data,
 final prediction target, evaluator-facing output, and evaluation contracts; and
-the ordered six-aspect refinement audit.
+the ordered six-aspect refinement audit. They also cover the campaign-wide
+candidate pool, six-candidate review, three-candidate selection, selected-idea
+removal, and reuse of the remaining candidates in later rounds.
 
 A real cloud-drive E2E is manual and billable. Use an isolated disposable
 instance, run the selected adapter's `cloud-pull` for a disposable dataset,

@@ -25,6 +25,7 @@ from medai.models import (
     ExperimentTodo,
     ExperimentWeights,
     IdeaAssessment,
+    IdeaCandidatePool,
     IdeaImplementationPlan,
     ReplicationLog,
     ReplicationPlan,
@@ -32,6 +33,7 @@ from medai.models import (
     SmartReplicateLog,
     validate_autoresearch_experiment_log,
     validate_autoresearch_experiment_plan,
+    validate_candidate_pool_for_selection,
     validate_codegen_audit,
     validate_experiment_contracts,
     validate_experiment_coverage,
@@ -112,6 +114,20 @@ def validate_ideas_document(text: str, round_index: int) -> None:
                 raise ValueError(
                     f"{match.group(1)} has an empty {heading_match.group(1)} section"
                 )
+
+
+def _remove_selected_candidates(path: Path, pool: IdeaCandidatePool) -> None:
+    selected = set(pool.selected_candidate_ids)
+    remaining = IdeaCandidatePool(
+        next_candidate_index=pool.next_candidate_index,
+        candidates=[
+            candidate
+            for candidate in pool.candidates
+            if candidate.candidate_id not in selected
+        ],
+        selected_candidate_ids=[],
+    )
+    write_json(path, remaining.model_dump(mode="json"))
 
 
 def validate_autoresearch_report(report_text: str, idea_ids: list[str]) -> None:
@@ -637,6 +653,7 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
     round_dir = _round_dir(config, round_index)
     ideas_path = round_dir / "ideas.md"
     transcript_path = round_dir / "idea_generation_transcript.jsonl"
+    candidates_path = config.output / "idea_generation" / "candidates.json"
     if pipeline_state.is_stage_completed(stage_name):
         try:
             validate_ideas_document(ideas_path.read_text(encoding="utf-8"), round_index)
@@ -646,12 +663,14 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
             raise RuntimeError(
                 f"Completed idea-generation transcript is missing: {transcript_path}"
             )
+        load_model(candidates_path, IdeaCandidatePool)
         print(f"resume {stage_name} stage: skipped (already completed)")
         return ideas_path
 
     print(f"enter {stage_name} stage")
     pipeline_state.start_stage(stage_name)
     round_dir.mkdir(parents=True, exist_ok=True)
+    candidates_path.parent.mkdir(parents=True, exist_ok=True)
     prior_rounds = [
         _round_artifact_context(config, prior) for prior in range(1, round_index)
     ]
@@ -663,6 +682,7 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
         reproduction_report_path=config.base_run / "report" / "reproduction_report.md",
         codebase_dir=config.base_run / "codegen" / "codebase",
         idea_generation_skill=skills_dir() / "idea-generation" / "SKILL.md",
+        candidates_path=candidates_path,
         prior_rounds_json=json.dumps(prior_rounds, ensure_ascii=False, indent=2),
         round_index=round_index,
         idea_ids=expected_idea_ids(round_index),
@@ -681,7 +701,13 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
         validate_ideas_document(ideas_path.read_text(encoding="utf-8"), round_index)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Idea-generation agent did not write: {ideas_path}") from exc
-    pipeline_state.complete_stage(stage_name, [str(ideas_path), str(transcript_path)])
+    candidate_pool = load_model(candidates_path, IdeaCandidatePool)
+    validate_candidate_pool_for_selection(candidate_pool)
+    _remove_selected_candidates(candidates_path, candidate_pool)
+    pipeline_state.complete_stage(
+        stage_name,
+        [str(ideas_path), str(candidates_path), str(transcript_path)],
+    )
     return ideas_path
 
 
