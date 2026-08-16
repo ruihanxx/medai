@@ -201,6 +201,8 @@ def _validate_contract_code_paths(
     for contract in contracts.experiments:
         for value in (
             *contract.model_implementation_paths,
+            *contract.input_representation_paths,
+            *contract.training_paths,
             *contract.integration_paths,
         ):
             path = _relative_code_path(value)
@@ -284,7 +286,7 @@ def _source_code_fingerprint(codebase_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def _validate_model_only_implementation(
+def _validate_refinement_implementation(
     config: AutoResearchConfig,
     codebase_dir: Path,
     plan: IdeaImplementationPlan,
@@ -299,10 +301,10 @@ def _validate_model_only_implementation(
         contract.experiment_id: contract for contract in contracts.experiments
     }
 
-    new_model_files = {
-        _relative_code_path(value).as_posix() for value in plan.new_model_files
+    new_refinement_files = {
+        _relative_code_path(value).as_posix() for value in plan.new_refinement_files
     }
-    integration_files = set()
+    existing_refinement_files = set()
     for integration in plan.experiment_integrations:
         contract = contracts_by_id[integration.experiment_id]
         if integration.baseline_entry_points != contract.baseline_entry_points:
@@ -310,29 +312,39 @@ def _validate_model_only_implementation(
                 f"Implementation changed baseline entry points for "
                 f"{integration.experiment_id}"
             )
-        contract_paths = {
-            _relative_code_path(value).as_posix()
-            for value in contract.integration_paths
+        contract_paths_by_aspect = {
+            "input_representation": {
+                _relative_code_path(value).as_posix()
+                for value in contract.input_representation_paths
+            },
+            "training_strategy": {
+                _relative_code_path(value).as_posix()
+                for value in contract.training_paths
+            },
+            "integration": {
+                _relative_code_path(value).as_posix()
+                for value in contract.integration_paths
+            },
         }
-        for change in integration.integration_changes:
+        for change in integration.refinement_changes:
             path = _relative_code_path(change.path).as_posix()
-            if path not in contract_paths:
+            if path not in contract_paths_by_aspect[change.aspect]:
                 raise RuntimeError(
-                    f"Implementation changes undeclared integration path for "
+                    f"Implementation changes undeclared {change.aspect} path for "
                     f"{integration.experiment_id}: {path}"
                 )
-            integration_files.add(path)
+            existing_refinement_files.add(path)
 
-    for relative in new_model_files:
+    for relative in new_refinement_files:
         if (base_codebase_dir / relative).exists():
-            raise RuntimeError(f"Refinement model file already exists in base code: {relative}")
+            raise RuntimeError(f"Refinement file already exists in base code: {relative}")
         if not (codebase_dir / relative).is_file():
-            raise RuntimeError(f"Declared refinement model file is missing: {relative}")
-    for relative in integration_files:
+            raise RuntimeError(f"Declared refinement file is missing: {relative}")
+    for relative in existing_refinement_files:
         if not (base_codebase_dir / relative).is_file():
-            raise RuntimeError(f"Declared integration file is missing from base code: {relative}")
+            raise RuntimeError(f"Declared change file is missing from base code: {relative}")
         if not (codebase_dir / relative).is_file():
-            raise RuntimeError(f"Refinement deleted an integration file: {relative}")
+            raise RuntimeError(f"Refinement deleted a declared change file: {relative}")
 
     base_files = _codebase_file_hashes(base_codebase_dir)
     refined_files = _codebase_file_hashes(codebase_dir)
@@ -341,11 +353,11 @@ def _validate_model_only_implementation(
         for path in set(base_files) | set(refined_files)
         if base_files.get(path) != refined_files.get(path)
     }
-    allowed_files = new_model_files | integration_files
+    allowed_files = new_refinement_files | existing_refinement_files
     undeclared = changed_files - allowed_files
     if undeclared:
         raise RuntimeError(
-            f"Refinement changed files outside the model-only boundary: {sorted(undeclared)}"
+            f"Refinement changed files outside the declared boundary: {sorted(undeclared)}"
         )
     unchanged_declared = allowed_files - changed_files
     if unchanged_declared:
@@ -726,7 +738,7 @@ def _run_codegen(
             )
         if not codebase_dir.is_dir() or not transcript_path.is_file():
             raise RuntimeError(f"Completed {stage_suffix} artifacts are missing for {idea_id}")
-        _validate_model_only_implementation(config, codebase_dir, plan)
+        _validate_refinement_implementation(config, codebase_dir, plan)
         print(f"resume {stage_name} stage: skipped (already completed)")
         return codebase_dir, implementation_plan_path
 
@@ -783,7 +795,7 @@ def _run_codegen(
     plan = load_model(implementation_plan_path, IdeaImplementationPlan)
     if plan.idea_id != idea_id:
         raise RuntimeError(f"Implementation plan ID {plan.idea_id} does not match {idea_id}")
-    _validate_model_only_implementation(config, codebase_dir, plan)
+    _validate_refinement_implementation(config, codebase_dir, plan)
     pipeline_state.complete_stage(
         stage_name,
         [str(codebase_dir), str(implementation_plan_path), str(transcript_path)],

@@ -248,10 +248,15 @@ def _configure_fake_agents(
                                 "experiment_id": "E1",
                                 "baseline_entry_points": ["python baseline.py"],
                                 "model_implementation_paths": ["baseline.py"],
+                                "input_representation_paths": ["baseline.py"],
+                                "training_paths": ["baseline.py"],
                                 "integration_paths": ["baseline.py"],
-                                "input_contract": "feature vector",
-                                "target_contract": "outcome label",
+                                "data_contract": "fixed cohort, split, and features",
+                                "prediction_target_contract": "outcome label",
+                                "input_representation_contract": "feature vector",
                                 "output_contract": "risk score",
+                                "training_target_contract": "binary outcome label",
+                                "loss_contract": "binary cross entropy",
                                 "training_contract": "existing training loop",
                                 "evaluation_contract": "existing evaluation",
                                 "metrics": ["accuracy"],
@@ -274,10 +279,23 @@ def _configure_fake_agents(
                 )
             Path(context["ideas_path"]).write_text(text, encoding="utf-8")
         elif template_name.endswith("codegen/session_instructions.md"):
-            Path(working_dir, "refined_model.py").write_text(
-                f"IDEA_ID = {idea_id!r}\n",
-                encoding="utf-8",
-            )
+            if idea_id.endswith("I02"):
+                refinement_types = ["training_strategy"]
+                change_aspect = "training_strategy"
+                new_refinement_files = []
+            elif idea_id.endswith("I03"):
+                refinement_types = ["input_representation"]
+                change_aspect = "input_representation"
+                new_refinement_files = ["refinement.py"]
+            else:
+                refinement_types = ["model"]
+                change_aspect = "integration"
+                new_refinement_files = ["refinement.py"]
+            for refinement_file in new_refinement_files:
+                Path(working_dir, refinement_file).write_text(
+                    f"IDEA_ID = {idea_id!r}\n",
+                    encoding="utf-8",
+                )
             baseline_path = Path(working_dir, "baseline.py")
             baseline_text = baseline_path.read_text(encoding="utf-8")
             if context["repair_audit_path"]:
@@ -290,15 +308,17 @@ def _configure_fake_agents(
                     {
                         "idea_id": idea_id,
                         "summary": "Add refinement.",
-                        "model_description": "Standalone refined classifier.",
-                        "new_model_files": ["refined_model.py"],
+                        "refinement_types": refinement_types,
+                        "refinement_description": "Standalone refinement.",
+                        "new_refinement_files": new_refinement_files,
                         "experiment_integrations": [
                             {
                                 "experiment_id": "E1",
-                                "integration_changes": [
+                                "refinement_changes": [
                                     {
                                         "path": "baseline.py",
-                                        "change": "Select refined model.",
+                                        "aspect": change_aspect,
+                                        "change": "Select the refinement.",
                                         "rationale": "Keep experiment code unchanged.",
                                     }
                                 ],
@@ -315,26 +335,33 @@ def _configure_fake_agents(
         elif template_name.endswith("audit/session_instructions.md"):
             attempt = int(Path(context["audit_path"]).stem.rsplit("_", 1)[1])
             fail = idea_id.endswith("I01") and (attempt == 1 or audit_fails_twice)
-            aspects = ["input", "target", "output", "training", "evaluation"]
+            aspects = [
+                "data",
+                "prediction_target",
+                "input_representation",
+                "output",
+                "training",
+                "evaluation",
+            ]
             Path(context["audit_path"]).write_text(
                 json.dumps(
                     {
                         "idea_id": idea_id,
                         "verdict": "fail" if fail else "pass",
-                        "model_only": not fail,
+                        "refinement_only": not fail,
                         "scope_evidence": ["base/refinement diff"],
-                        "scope_issue": "changed training" if fail else None,
+                        "scope_issue": "changed fixed data" if fail else None,
                         "checks": [
                             {
                                 "experiment_id": "E1",
                                 "aspect": aspect,
                                 "verdict": "fail" if fail and index == 0 else "pass",
                                 "evidence": ["base/refinement diff"],
-                                "issue": "input changed" if fail and index == 0 else None,
+                                "issue": "data changed" if fail and index == 0 else None,
                             }
                             for index, aspect in enumerate(aspects)
                         ],
-                        "required_fixes": ["restore model-only scope"] if fail else [],
+                        "required_fixes": ["restore refinement scope"] if fail else [],
                     }
                 ),
                 encoding="utf-8",
@@ -529,11 +556,13 @@ def test_autoresearch_completes_all_three_ideas_and_resumes(tmp_path: Path, monk
     for idea_index in range(1, 4):
         idea_dir = config.output / "rounds" / "round_001" / "ideas" / f"idea_{idea_index:02d}"
         assert (idea_dir / "assessment" / "assessment.json").is_file()
-        assert f"R01-I{idea_index:02d}" in (
-            idea_dir / "codegen" / "codebase" / "refined_model.py"
-        ).read_text()
+        refinement_path = idea_dir / "codegen" / "codebase" / "refinement.py"
+        if idea_index == 2:
+            assert not refinement_path.exists()
+        else:
+            assert f"R01-I{idea_index:02d}" in refinement_path.read_text()
         assert not (idea_dir / "codegen" / "codebase" / ".cache").exists()
-    assert not (config.base_run / "codegen" / "codebase" / "refined_model.py").exists()
+    assert not (config.base_run / "codegen" / "codebase" / "refinement.py").exists()
     assert (config.output / "report" / "idea_metric_comparison.png").read_bytes().startswith(
         b"\x89PNG"
     )

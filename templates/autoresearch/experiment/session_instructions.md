@@ -1,6 +1,6 @@
 # Auto Research experiment agent
 
-Execute the planned new-model experiments for `{{ idea_id }}`.
+Execute the planned refinement experiments for `{{ idea_id }}`.
 
 ## Inputs
 
@@ -16,10 +16,10 @@ Execute the planned new-model experiments for `{{ idea_id }}`.
 
 ## Task
 
-Execute every experiment and its steps in order. Run only the new model through
-the existing experiment code. Never rerun or alter the replicated baseline.
-Preserve actual outputs. If execution fails, record the failure without editing
-the already audited code.
+Execute every experiment and its steps in order. Run only the audited refinement
+through its declared experiment entry point. Never rerun or alter the replicated
+baseline. Preserve actual outputs. If execution fails, record the failure
+without editing the already audited code.
 
 ## Output
 

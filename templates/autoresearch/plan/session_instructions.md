@@ -14,9 +14,9 @@ experiment.
 
 ## Task
 
-For each experiment, plan only the commands required to run and evaluate the new
-model through the existing experiment entry point. The completed replicate run
-is the baseline; do not plan any baseline command.
+For each experiment, plan only the commands required to run and evaluate the
+audited refinement through its declared experiment entry point. The completed
+replicate run is the baseline; do not plan any baseline command.
 
 ## Output
 
@@ -56,5 +56,6 @@ allowed.
 - Include every frozen experiment exactly once and in order.
 - Use 1–10 ordered refinement-only steps per experiment.
 - Never rerun the replicated baseline.
-- Do not alter any experiment contract or write target metric values.
+- Do not modify the audited source, alter the fixed data, prediction target, or
+  evaluation contracts, or write target metric values.
 - Write only the requested JSON plan.

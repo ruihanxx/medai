@@ -272,10 +272,15 @@ class ExperimentContract(StrictModel):
     experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     baseline_entry_points: list[str] = Field(min_length=1)
     model_implementation_paths: list[str] = Field(min_length=1)
+    input_representation_paths: list[str] = Field(min_length=1)
+    training_paths: list[str] = Field(min_length=1)
     integration_paths: list[str] = Field(min_length=1)
-    input_contract: str = Field(min_length=1)
-    target_contract: str = Field(min_length=1)
+    data_contract: str = Field(min_length=1)
+    prediction_target_contract: str = Field(min_length=1)
+    input_representation_contract: str = Field(min_length=1)
     output_contract: str = Field(min_length=1)
+    training_target_contract: str = Field(min_length=1)
+    loss_contract: str = Field(min_length=1)
     training_contract: str = Field(min_length=1)
     evaluation_contract: str = Field(min_length=1)
     metrics: list[str] = Field(min_length=1)
@@ -302,35 +307,59 @@ class ExperimentContracts(StrictModel):
 
 class IdeaChangePoint(StrictModel):
     path: str = Field(min_length=1)
+    aspect: Literal["input_representation", "training_strategy", "integration"]
     change: str = Field(min_length=1)
     rationale: str = Field(min_length=1)
 
 
 class IdeaExperimentIntegration(StrictModel):
     experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    integration_changes: list[IdeaChangePoint] = Field(min_length=1)
+    refinement_changes: list[IdeaChangePoint] = Field(min_length=1)
     baseline_entry_points: list[str] = Field(min_length=1)
     refinement_entry_points: list[str] = Field(min_length=1)
+
+
+RefinementType = Literal["input_representation", "model", "training_strategy"]
 
 
 class IdeaImplementationPlan(StrictModel):
     idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
     summary: str = Field(min_length=1)
-    model_description: str = Field(min_length=1)
-    new_model_files: list[str] = Field(min_length=1)
+    refinement_types: list[RefinementType] = Field(min_length=1)
+    refinement_description: str = Field(min_length=1)
+    new_refinement_files: list[str]
     experiment_integrations: list[IdeaExperimentIntegration] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def unique_model_files_and_experiment_ids(self) -> "IdeaImplementationPlan":
-        if len(self.new_model_files) != len(set(self.new_model_files)):
-            raise ValueError("new_model_files must be unique")
+    def unique_refinement_fields_and_experiment_ids(self) -> "IdeaImplementationPlan":
+        if len(self.refinement_types) != len(set(self.refinement_types)):
+            raise ValueError("refinement_types must be unique")
+        if len(self.new_refinement_files) != len(set(self.new_refinement_files)):
+            raise ValueError("new_refinement_files must be unique")
+        if "model" in self.refinement_types and not self.new_refinement_files:
+            raise ValueError("A model refinement must declare a new refinement file")
         experiment_ids = [integration.experiment_id for integration in self.experiment_integrations]
         if len(experiment_ids) != len(set(experiment_ids)):
             raise ValueError("Implementation experiment IDs must be unique")
+        changed_refinement_types = {
+            change.aspect
+            for integration in self.experiment_integrations
+            for change in integration.refinement_changes
+            if change.aspect != "integration"
+        }
+        if not changed_refinement_types.issubset(self.refinement_types):
+            raise ValueError("Every representation or training change must declare its type")
         return self
 
 
-ContractAspect = Literal["input", "target", "output", "training", "evaluation"]
+ContractAspect = Literal[
+    "data",
+    "prediction_target",
+    "input_representation",
+    "output",
+    "training",
+    "evaluation",
+]
 
 
 class CodegenAuditCheck(StrictModel):
@@ -350,7 +379,7 @@ class CodegenAuditCheck(StrictModel):
 class CodegenAudit(StrictModel):
     idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
     verdict: Literal["pass", "fail"]
-    model_only: bool
+    refinement_only: bool
     scope_evidence: list[str] = Field(min_length=1)
     scope_issue: str | None = None
     checks: list[CodegenAuditCheck] = Field(min_length=1)
@@ -361,13 +390,13 @@ class CodegenAudit(StrictModel):
         pairs = [(check.experiment_id, check.aspect) for check in self.checks]
         if len(pairs) != len(set(pairs)):
             raise ValueError("Codegen audit experiment/aspect checks must be unique")
-        if not self.model_only and not self.scope_issue:
-            raise ValueError("A non-model-only audit must describe the scope issue")
-        if self.model_only and self.scope_issue:
-            raise ValueError("A model-only audit cannot report a scope issue")
+        if not self.refinement_only and not self.scope_issue:
+            raise ValueError("An out-of-scope refinement audit must describe the scope issue")
+        if self.refinement_only and self.scope_issue:
+            raise ValueError("An in-scope refinement audit cannot report a scope issue")
         expected_verdict = (
             "pass"
-            if self.model_only and all(check.verdict == "pass" for check in self.checks)
+            if self.refinement_only and all(check.verdict == "pass" for check in self.checks)
             else "fail"
         )
         if self.verdict != expected_verdict:
@@ -640,14 +669,21 @@ def validate_idea_implementation_plan(
     expected = [experiment.experiment_id for experiment in contracts.experiments]
     actual = [integration.experiment_id for integration in plan.experiment_integrations]
     if actual != expected:
-        raise ValueError("Implementation plan must integrate the model into every experiment")
+        raise ValueError("Implementation plan must integrate the refinement into every experiment")
 
 
 def validate_codegen_audit(
     contracts: ExperimentContracts,
     audit: CodegenAudit,
 ) -> None:
-    aspects = ["input", "target", "output", "training", "evaluation"]
+    aspects = [
+        "data",
+        "prediction_target",
+        "input_representation",
+        "output",
+        "training",
+        "evaluation",
+    ]
     expected = [
         (experiment.experiment_id, aspect)
         for experiment in contracts.experiments

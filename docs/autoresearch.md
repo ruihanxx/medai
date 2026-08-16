@@ -14,24 +14,35 @@ stops.
 Before idea generation, a result-blind agent reads only the paper and experiment
 definitions, assigns every experiment a positive importance weight summing to
 one. A separate contract agent treats the completed replicate code and plans as
-authoritative and records every experiment's entry points, model and integration
-paths, input/target/output contracts, training and evaluation procedures, and
-metrics. It also freezes the actual primary metric and direction used by each
-evaluator. Auto Research does not reassess whether the replicate code agrees
-with the paper; that would duplicate the completed replication workflow.
+authoritative. For every experiment it freezes the downstream data/cohort/split,
+prediction outcome and horizon, evaluator-facing output, evaluation procedure,
+metrics, primary metric, and direction. It also records the baseline input
+representation, training target, loss, training procedure, and the existing
+paths permitted for representation, training, and integration changes. Auto
+Research does not reassess whether the replicate code agrees with the paper;
+that would duplicate the completed replication workflow.
 
-Each round generates exactly three standalone model-upgrade ideas. Ideas may not
-change data, preprocessing, targets, loss, optimizer, training loops, inference
-strategy, augmentation, or evaluation. Every idea receives an independent copy
-of the completed replicate codebase. The copies exclude Git metadata, virtual
-environments, and caches; changes never accumulate across ideas or flow back to
-the base run. Codegen first adds the new model in new files, then makes only the
-minimal declared wiring changes needed to embed it into every frozen experiment.
-A deterministic changed-file check rejects edits outside the new model and
-contract-declared integration files. An independent audit then checks the
-model-only scope plus each experiment's input, target, output, training, and
-evaluation contracts. One failed audit permits one repair and re-audit; a second
-failure creates an invalid assessment and skips planning and execution.
+Each round generates exactly three standalone input-representation, model, or
+training-strategy refinement ideas. Representation refinements may reconstruct
+or encode only the fixed prediction-time inputs. Training refinements may
+change training targets, loss/objective, sampling and balancing, augmentation,
+optimization, pretraining, and training logic. External pretraining must be
+declared and must not alter or leak the downstream dataset/cohort/split. All
+refinements preserve prediction-time information availability, final prediction
+outcome and horizon, evaluator-facing output, metrics, evaluation protocol, and
+baseline behavior. Every idea receives an independent copy of the completed
+replicate codebase. The copies exclude Git metadata, virtual environments, and
+caches;
+changes never accumulate across ideas or flow back to the base run. Codegen
+adds model refinements in new files and may add representation or training
+refinement files, then makes only the minimal declared changes in
+contract-recorded representation, training, and integration paths needed to
+embed the idea into every experiment. A deterministic changed-file check
+rejects edits outside those files. An independent audit then checks the
+refinement scope plus each experiment's data, prediction target, representation,
+evaluator-facing output, training, and evaluation boundary. One failed audit
+permits one repair and re-audit; a second failure creates an invalid assessment
+and skips planning and execution.
 
 The Auto Research plan and log group refinement-only steps by experiment. The
 experiment stage never reruns the replicated baseline and cannot modify the

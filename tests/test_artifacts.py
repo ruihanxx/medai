@@ -243,7 +243,7 @@ def test_reproduction_report_requires_all_audit_content():
         )
 
 
-def test_autoresearch_artifacts_enforce_model_and_weighted_score_contracts():
+def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts():
     with pytest.raises(ValueError, match="research brief"):
         EligibilityResult.model_validate(
             {"eligible": True, "reason": "Predictive task", "evidence_paths": []}
@@ -282,10 +282,15 @@ def test_autoresearch_artifacts_enforce_model_and_weighted_score_contracts():
                     "experiment_id": "E1",
                     "baseline_entry_points": ["python run.py"],
                     "model_implementation_paths": ["src/model.py"],
+                    "input_representation_paths": ["src/features.py"],
+                    "training_paths": ["src/train.py"],
                     "integration_paths": ["run.py"],
-                    "input_contract": "feature vector",
-                    "target_contract": "binary label",
+                    "data_contract": "fixed cohort, split, and source variables",
+                    "prediction_target_contract": "binary outcome",
+                    "input_representation_contract": "feature vector",
                     "output_contract": "risk score",
+                    "training_target_contract": "binary label",
+                    "loss_contract": "binary cross entropy",
                     "training_contract": "fixed training loop",
                     "evaluation_contract": "fixed evaluation",
                     "metrics": ["accuracy"],
@@ -301,14 +306,16 @@ def test_autoresearch_artifacts_enforce_model_and_weighted_score_contracts():
         {
             "idea_id": "R01-I01",
             "summary": "Add a calibrated refinement head.",
-            "model_description": "Standalone calibrated model.",
-            "new_model_files": ["src/refinement.py"],
+            "refinement_types": ["model"],
+            "refinement_description": "Standalone calibrated model.",
+            "new_refinement_files": ["src/refinement.py"],
             "experiment_integrations": [
                 {
                     "experiment_id": "E1",
-                    "integration_changes": [
+                    "refinement_changes": [
                         {
                             "path": "run.py",
+                            "aspect": "integration",
                             "change": "Add model selection.",
                             "rationale": "Embed the new model.",
                         }
@@ -326,7 +333,7 @@ def test_autoresearch_artifacts_enforce_model_and_weighted_score_contracts():
         {
             "idea_id": "R01-I01",
             "verdict": "pass",
-            "model_only": True,
+            "refinement_only": True,
             "scope_evidence": ["changed-file list"],
             "scope_issue": None,
             "checks": [
@@ -337,7 +344,14 @@ def test_autoresearch_artifacts_enforce_model_and_weighted_score_contracts():
                     "evidence": ["diff"],
                     "issue": None,
                 }
-                for aspect in ("input", "target", "output", "training", "evaluation")
+                for aspect in (
+                    "data",
+                    "prediction_target",
+                    "input_representation",
+                    "output",
+                    "training",
+                    "evaluation",
+                )
             ],
             "required_fixes": [],
         }

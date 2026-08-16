@@ -47,9 +47,15 @@
 - Auto Research experiment weights are generated before code inspection and do
   not receive result artifacts. Experiment contracts trust the completed
   replicate code as the executable source of truth. Auto Research codegen may
-  add model files and touch declared integration files only; the experiment
-  stage executes the audited new model without modifying source code or
-  rerunning the baseline.
+  add standalone refinement files and touch only declared input-representation,
+  training, and integration paths. It may change representation and training
+  targets, objectives, sampling, augmentation, optimization, pretraining, or
+  training logic while preserving the fixed downstream data/cohort/split, final
+  prediction target, evaluator-facing output, evaluation protocol, and baseline
+  behavior. External pretraining must be declared and may not leak or alter the
+  downstream experiment data.
+  The experiment stage executes the audited refinement without modifying source
+  code or rerunning the baseline.
 - Plan agents may modify the writable codebase but may not change model
   semantics, introduce fallback plans, or hardcode paper results.
 - The preprocessing audit agent runs with its local attempt directory as working

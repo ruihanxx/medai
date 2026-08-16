@@ -84,6 +84,17 @@ runs/<run_id>/autoresearch/
 └── remote_compute/instance.json
 ```
 
+Each Auto Research experiment contract records immutable data, prediction, and
+evaluation boundaries; baseline representation, training target, loss, and
+training descriptions; and the existing representation, training, and
+integration paths eligible for declared refinement changes. An implementation
+plan classifies the idea as input-representation, model, and/or training-strategy
+work, lists any new refinement files, and assigns every existing-file change to
+one of those contract path categories. Model refinements require a new file;
+representation- or training-only plans may use none. The audit records
+`refinement_only` and six ordered checks per experiment: data, prediction
+target, input representation, evaluator-facing output, training, and evaluation.
+
 Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
 record a `final` or `validation` role plus a verbatim provenance quote.
 Experiments have unique `experiment_id` values and list their claim IDs, paper

@@ -18,7 +18,7 @@ Assess refinement `{{ idea_id }}` using frozen result-blind experiment weights.
 ## Task
 
 For every experiment, find the contract's frozen primary metric in the completed
-replicate evidence and the new-model evidence. Copy only actual numeric values
+replicate evidence and the refinement evidence. Copy only actual numeric values
 and compute:
 
 - `absolute_delta = refined_value - baseline_value`
