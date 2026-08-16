@@ -56,7 +56,8 @@ allowed.
 
 - Include every frozen experiment exactly once and in order.
 - Use 1–10 ordered refinement-only steps per experiment.
-- Never rerun the replicated baseline.
+- Plan only the newly added refinement variant for each frozen experiment.
+  Never include or rerun an old existing or replicated baseline entry point.
 - Do not modify the audited source, alter the fixed data, prediction target, or
   evaluation contracts, or write target metric values.
 - Write only the requested JSON plan.

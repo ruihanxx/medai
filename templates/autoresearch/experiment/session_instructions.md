@@ -16,10 +16,11 @@ Execute the planned refinement experiments for `{{ idea_id }}`.
 
 ## Task
 
-Execute every experiment and its steps in order. Run only the audited refinement
-through its declared experiment entry point. Never rerun or alter the replicated
-baseline. Preserve actual outputs. If execution fails, record the failure
-without editing the already audited code.
+Execute every experiment and its steps in order. Run only the newly added,
+audited refinement variant through its refinement-only entry point. Never run an
+old existing experiment entry point or rerun or alter the replicated baseline.
+Preserve actual outputs. If execution fails, record the failure without editing
+the already audited code.
 
 ## Output
 

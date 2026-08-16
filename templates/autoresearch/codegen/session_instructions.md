@@ -75,6 +75,15 @@ and makes the refinement independently selectable. Before editing code, write
 }
 ```
 
+Every `file_path` above is relative to `{{ codebase_dir }}`. Files in
+`refine_file_list` are existing files in this idea's independent writable copy;
+files in `new_file_list` are created in that same copy. Never write to or modify
+the previous read-only codebase at `{{ base_codebase_dir }}`.
+
+Codegen does not run full experiments. The later plan and experiment stages
+must execute only the newly added refinement variant for each frozen experiment;
+they must not rerun any old existing or baseline experiment entry point.
+
 #### Plan constraints
 
 - List each applicable refinement type once. Allowed values are
@@ -86,6 +95,8 @@ and makes the refinement independently selectable. Before editing code, write
   add at least one new file and must not replace or mutate the baseline model.
 - File paths must be unique and cannot appear in both lists. At least one list
   must be non-empty.
+- Absolute paths, `..` traversal, and any path that resolves outside
+  `{{ codebase_dir }}` are prohibited.
 - Each `change` must state exactly how the existing file will change or what the
   new file will implement, including its role in integrating the refinement
   into the relevant frozen experiments while preserving baseline behavior.
