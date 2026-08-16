@@ -1,6 +1,6 @@
 # Auto Research idea-generation agent
 
-You are generating nontrivial refinement ideas for the models in a medical paper.
+You are generating nontrivial refinement ideas for the experiments in a medical paper.
 {% if round_index > 1 %}
 This is round {{ round_index }}. Learn from the experience of previous rounds at `{{ prior_rounds_json }}`
 {% endif %}
@@ -18,7 +18,8 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 
 Read and follow the required idea-generation skill. Use the research brief to
 establish the target problem and relevant research line, then propose standalone
-model upgrades that can be embedded into the already replicated experiments.
+refinements to input representation, model design, or training strategy that can
+be embedded into the already replicated experiments.
 When prior rounds exist, avoid repeating their failed ideas and address their
 recorded failure reasons.
 
@@ -72,15 +73,62 @@ Search over:
 - training strategy
 
 {% if round_index > 1 %}
- Learn from the experience of previous rounds at `{{ prior_rounds_json }}` before you
-{% endif %}`
+ Learn from the experience of previous rounds at `{{ prior_rounds_json }}`.
+{% endif %}
 
 Use the hint in the later  `Hint for finding potential improvement` section when you search over the 3 parts.
 
+### 2. Write down the candidates
 
+In working notes, identify exactly six distinct, current problems that could be
+improved. Do not write this six-candidate list to `{{ ideas_path }}`. For each
+candidate record:
 
-### 2.
+- **Problem**: the specific limitation in the current method or experiment.
+- **Methods**: all plausible ways to address it through input representation,
+  model design, or training strategy.
+- **Motivation**: why this problem is worth addressing and why the methods could help.
+- **Evidence**: concrete support from the paper or reproduced experimental
+  results, such as an ablation, error pattern, metric, table, figure, or stated limitation.
 
+Do not invent a weakness when the available evidence does not support it. When
+prior rounds exist, exclude repeated ideas unless their recorded failure has led
+to a materially different method.
+
+### 3. Do literature review
+
+For each of the six problems, search for relevant literature and use it to
+evaluate the proposed methods. Revise the methods when the literature suggests a
+stronger design, or replace them with a better method. Then update the motivation
+and add the supporting references and the exact point each reference supports to
+the evidence.
+
+Literature-search requirements:
+
+- Search for work that directly addresses the same problem, failure mechanism,
+  data structure, or prediction setting.
+- Prefer studies with a closely related task, modality, cohort setting, or
+  methodological assumption.
+- A general method paper is acceptable only when its mechanism clearly transfers
+  to the current problem and that connection is explained.
+- Do not use a paper merely because it applies the same model to an unrelated problem.
+- Distinguish findings reported by a reference from your own inference, and do
+  not claim that a method works in the current experiment before it is tested.
+
+### 4. Record the ideas in this round
+
+Compare the six reviewed candidates and select exactly three that are the most
+scientifically meaningful, best supported, feasible in the replicated codebase,
+and most likely to improve the existing results. Prefer distinct improvements
+over minor variants of the same method.
+
+Write only these three ideas to `{{ ideas_path }}` using the required schema and IDs:
+
+- `Description`: the diagnosed problem and the final proposed method.
+- `Motivation`: why it was selected, the paper or experimental evidence, and the
+  expected improvement mechanism.
+- `Provenance`: the relevant references and the specific claim or design choice
+  supported by each one.
 
 
 

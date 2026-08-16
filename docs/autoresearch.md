@@ -23,9 +23,12 @@ Research does not reassess whether the replicate code agrees with the paper;
 that would duplicate the completed replication workflow.
 
 Each round generates exactly three standalone input-representation, model, or
-training-strategy refinement ideas. Representation refinements may reconstruct
-or encode only the fixed prediction-time inputs. Training refinements may
-change training targets, loss/objective, sampling and balancing, augmentation,
+training-strategy refinement ideas. The idea agent first develops six
+paper- or experiment-evidenced problem candidates, reviews closely relevant
+literature to revise their methods and rationale, and emits the three strongest
+candidates in the idea artifact. Representation refinements may reconstruct or
+encode only the fixed prediction-time inputs. Training refinements may change
+training targets, loss/objective, sampling and balancing, augmentation,
 optimization, pretraining, and training logic. External pretraining must be
 declared and must not alter or leak the downstream dataset/cohort/split. All
 refinements preserve prediction-time information availability, final prediction
