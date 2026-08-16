@@ -372,12 +372,15 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
                     "refined_value": 0.82,
                     "absolute_delta": 0.02,
                     "relative_delta": 0.025,
-                    "score": 0.025,
-                    "weighted_score": 0.025,
+                    "score": 5,
+                    "score_rationale": (
+                        "The observed gain is compelling relative to the study context."
+                    ),
+                    "weighted_score": 5.0,
                     "evidence_paths": ["metrics.json"],
                 }
             ],
-            "weighted_score": 0.025,
+            "weighted_score": 5.0,
             "threshold": 0.0,
             "failure_reasons": [],
         }
@@ -397,7 +400,7 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
             "has_valid_refinement": True,
         }
     )
-    assert assessment.weighted_score == 0.025
+    assert assessment.weighted_score == 5.0
     assert summary.has_valid_refinement is True
 
     with pytest.raises(ValueError, match="weighted score"):
@@ -407,6 +410,13 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
                 "weighted_score": 0.5,
             }
         )
+
+    out_of_range = assessment.model_dump(mode="json")
+    out_of_range["experiments"][0]["score"] = 6
+    out_of_range["experiments"][0]["weighted_score"] = 6.0
+    out_of_range["weighted_score"] = 6.0
+    with pytest.raises(ValueError, match="less than or equal to 5"):
+        IdeaAssessment.model_validate(out_of_range)
 
     with pytest.raises(ValueError, match="failed audit"):
         IdeaAssessment.model_validate(
@@ -422,13 +432,13 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
             {
                 **assessment.model_dump(mode="json"),
                 "verdict": "invalid",
-                "threshold": 0.1,
+                "threshold": 5.0,
                 "failure_reasons": [],
             }
         )
 
 
-def test_autoresearch_assessment_aggregates_direction_adjusted_experiment_scores():
+def test_autoresearch_assessment_aggregates_contextual_experiment_scores():
     assessment = IdeaAssessment.model_validate(
         {
             "idea_id": "R01-I01",
@@ -446,8 +456,9 @@ def test_autoresearch_assessment_aggregates_direction_adjusted_experiment_scores
                     "refined_value": 0.88,
                     "absolute_delta": 0.08,
                     "relative_delta": 0.1,
-                    "score": 0.1,
-                    "weighted_score": 0.07,
+                    "score": 4,
+                    "score_rationale": "Clear improvement under the frozen protocol.",
+                    "weighted_score": 2.8,
                     "evidence_paths": ["e1.json"],
                 },
                 {
@@ -459,15 +470,18 @@ def test_autoresearch_assessment_aggregates_direction_adjusted_experiment_scores
                     "refined_value": 1.8,
                     "absolute_delta": -0.2,
                     "relative_delta": -0.1,
-                    "score": 0.1,
-                    "weighted_score": 0.03,
+                    "score": 3,
+                    "score_rationale": "The lower error is a clear contextual improvement.",
+                    "weighted_score": 0.9,
                     "evidence_paths": ["e2.json"],
                 },
             ],
-            "weighted_score": 0.1,
-            "threshold": 0.05,
+            "weighted_score": 3.7,
+            "threshold": 3.5,
             "failure_reasons": [],
         }
     )
 
+    assert assessment.experiments[0].relative_delta == 0.1
+    assert assessment.experiments[0].score == 4
     assert assessment.verdict == "valid"

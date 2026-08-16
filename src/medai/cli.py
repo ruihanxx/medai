@@ -84,7 +84,7 @@ def run(
     assessment_threshold: Optional[float] = typer.Option(
         None,
         "--assessment-threshold",
-        help="Minimum weighted relative-improvement score (default: 0.0)",
+        help="Minimum weighted idea-assessment score on the -5 to 5 scale (default: 0.0)",
     ),
     base_run: Optional[Path] = typer.Option(None, "--base-run", hidden=True),
 ) -> None:

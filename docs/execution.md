@@ -52,8 +52,8 @@ second rental.
 
 Auto Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 through
 10 (default 1),
-accepts a non-negative `--assessment-threshold` for the weighted relative
-improvement score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
+accepts a non-negative `--assessment-threshold` for the weighted -5-through-5
+idea-assessment score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
 and `--smart-replicate`. Auto Research also rejects a base run whose data came
 from `--clouddrive`; cloud datasets are intentionally scoped to their original
 replication instance.

@@ -522,8 +522,9 @@ class ExperimentMetricComparison(StrictModel):
     refined_value: float | None
     absolute_delta: float | None
     relative_delta: float | None
-    score: float | None
-    weighted_score: float | None
+    score: int | None = Field(ge=-5, le=5)
+    score_rationale: str = Field(min_length=1)
+    weighted_score: float | None = Field(ge=-5, le=5)
     evidence_paths: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -566,22 +567,16 @@ class ExperimentMetricComparison(StrictModel):
                 abs_tol=1e-9,
             ):
                 raise ValueError("relative_delta is inconsistent with the metric values")
-            expected_score = expected_relative if self.direction == "higher" else -expected_relative
-            if self.score is None or not math.isclose(
-                self.score,
-                expected_score,
-                rel_tol=1e-6,
-                abs_tol=1e-9,
-            ):
-                raise ValueError("score is inconsistent with metric direction")
-            expected_weighted = expected_score * self.weight
+            if self.score is None:
+                raise ValueError("A complete comparison must define an assessment score")
+            expected_weighted = self.score * self.weight
             if self.weighted_score is None or not math.isclose(
                 self.weighted_score,
                 expected_weighted,
                 rel_tol=1e-6,
                 abs_tol=1e-9,
             ):
-                raise ValueError("weighted_score is inconsistent with score and weight")
+                raise ValueError("weighted_score is inconsistent with the assessment score and weight")
         return self
 
 

@@ -498,7 +498,8 @@ def _configure_fake_agents(
             is_valid = valid_first_idea and idea_id.endswith("I01")
             refined = 0.81 if is_valid else 0.79
             delta = refined - 0.8
-            score = delta / 0.8
+            relative_delta = delta / 0.8
+            score = 4 if is_valid else -2
             Path(context["assessment_path"]).write_text(
                 json.dumps(
                     {
@@ -516,8 +517,13 @@ def _configure_fake_agents(
                                 "baseline_value": 0.8,
                                 "refined_value": refined,
                                 "absolute_delta": delta,
-                                "relative_delta": score,
+                                "relative_delta": relative_delta,
                                 "score": score,
+                                "score_rationale": (
+                                    "Strong contextual improvement"
+                                    if is_valid
+                                    else "The refinement is worse than the replicate"
+                                ),
                                 "weighted_score": score,
                                 "evidence_paths": [
                                     str(config.base_run / "codegen" / "codebase" / "metrics.json"),
@@ -838,6 +844,7 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             "evidence_summary_path": path,
             "base_replication_log": path,
             "base_evidence_summary": path,
+            "base_reproduction_report": path,
             "base_codebase_dir": path,
             "base_replication_dir": path,
             "codebase_dir": path,

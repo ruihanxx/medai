@@ -99,6 +99,14 @@ audit records `refinement_only` and six ordered checks per experiment: data,
 prediction target, input representation, evaluator-facing output, training,
 and evaluation.
 
+Each assessment comparison retains the actual baseline/refinement primary-metric
+values and their absolute and relative deltas. Its `score` is an integer from -5
+through 5 assigned from the experimental evidence and original study context,
+with a non-empty `score_rationale`; it is not a rescaled relative delta.
+`weighted_score` is the frozen experiment weight multiplied by that score, and
+the assessment total is the unrenormalized sum. An unavailable comparison has
+null score fields and makes the total null.
+
 `idea_generation/candidates.json` is the campaign-wide unused-candidate pool.
 It records a monotonic `next_candidate_index`, up to six candidates, and a
 temporary `selected_candidate_ids` list. Each candidate has a stable `C0001`
