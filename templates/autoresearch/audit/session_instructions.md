@@ -13,9 +13,11 @@ Audit refinement `{{ idea_id }}` without modifying its code.
 
 Compare the base and refined code. Confirm that all changes are limited to the
 declared standalone input-representation, model, or training-strategy refinement
-and its minimum wiring. For every experiment in the contracts, check `data`,
-`prediction_target`, `input_representation`, `output`, `training`, and
-`evaluation` exactly once and in that order.
+and its minimum wiring. Confirm that `refine_file_list` contains exactly the
+modified base files, `new_file_list` contains exactly the added files, and every
+`change` accurately describes the corresponding diff. For every experiment in
+the contracts, check `data`, `prediction_target`, `input_representation`,
+`output`, `training`, and `evaluation` exactly once and in that order.
 
 ## Output
 
@@ -61,9 +63,10 @@ fix. A passing audit has no issues or required fixes.
   downstream experiment dataset/cohort/split unchanged, and does not expose
   evaluation examples or unavailable prediction-time information.
 - Confirm that every existing-file change is declared under its matching
-  contract path category, all new files are refinement-owned, model-side changes
-  do not mutate the baseline model, and shared-file changes retain baseline
-  behavior and entry points.
+  contract path category in `refine_file_list`, all added files are declared in
+  `new_file_list` and refinement-owned, model-side changes do not mutate the
+  baseline model, and shared-file changes retain baseline behavior and entry
+  points.
 - Trust the completed replicate contracts; do not reinterpret whether the
   baseline agrees with the paper.
 - Do not edit either codebase.

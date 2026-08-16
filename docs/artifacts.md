@@ -90,11 +90,14 @@ evaluation boundaries; baseline representation, training target, loss, and
 training descriptions; and the existing representation, training, and
 integration paths eligible for declared refinement changes. An implementation
 plan classifies the idea as input-representation, model, and/or training-strategy
-work, lists any new refinement files, and assigns every existing-file change to
-one of those contract path categories. Model refinements require a new file;
-representation- or training-only plans may use none. The audit records
-`refinement_only` and six ordered checks per experiment: data, prediction
-target, input representation, evaluator-facing output, training, and evaluation.
+work. Its `refine_file_list` records every existing file to modify and how;
+`new_file_list` records every file to add and how. Refine paths must come from
+the contract-declared representation, training, or integration paths, while new
+paths must not exist in the base codebase. Paths are unique across both lists,
+at least one list is non-empty, and model refinements require a new file. The
+audit records `refinement_only` and six ordered checks per experiment: data,
+prediction target, input representation, evaluator-facing output, training,
+and evaluation.
 
 `idea_generation/candidates.json` is the campaign-wide unused-candidate pool.
 It records a monotonic `next_candidate_index`, up to six candidates, and a

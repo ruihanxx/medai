@@ -308,20 +308,16 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
             "summary": "Add a calibrated refinement head.",
             "refinement_types": ["model"],
             "refinement_description": "Standalone calibrated model.",
-            "new_refinement_files": ["src/refinement.py"],
-            "experiment_integrations": [
+            "refine_file_list": [
                 {
-                    "experiment_id": "E1",
-                    "refinement_changes": [
-                        {
-                            "path": "run.py",
-                            "aspect": "integration",
-                            "change": "Add model selection.",
-                            "rationale": "Embed the new model.",
-                        }
-                    ],
-                    "baseline_entry_points": ["python run.py --model baseline"],
-                    "refinement_entry_points": ["python run.py --model refinement"],
+                    "file_path": "run.py",
+                    "change": "Add refinement selection while preserving the baseline.",
+                }
+            ],
+            "new_file_list": [
+                {
+                    "file_path": "src/refinement.py",
+                    "change": "Implement the standalone calibrated model.",
                 }
             ],
         }

@@ -279,54 +279,25 @@ def _validate_refinement_implementation(
         ExperimentContracts,
     )
     validate_idea_implementation_plan(contracts, plan)
-    contracts_by_id = {
-        contract.experiment_id: contract for contract in contracts.experiments
+    new_files = {
+        _relative_code_path(item.file_path).as_posix()
+        for item in plan.new_file_list
+    }
+    refine_files = {
+        _relative_code_path(item.file_path).as_posix()
+        for item in plan.refine_file_list
     }
 
-    new_refinement_files = {
-        _relative_code_path(value).as_posix() for value in plan.new_refinement_files
-    }
-    existing_refinement_files = set()
-    for integration in plan.experiment_integrations:
-        contract = contracts_by_id[integration.experiment_id]
-        if integration.baseline_entry_points != contract.baseline_entry_points:
-            raise RuntimeError(
-                f"Implementation changed baseline entry points for "
-                f"{integration.experiment_id}"
-            )
-        contract_paths_by_aspect = {
-            "input_representation": {
-                _relative_code_path(value).as_posix()
-                for value in contract.input_representation_paths
-            },
-            "training_strategy": {
-                _relative_code_path(value).as_posix()
-                for value in contract.training_paths
-            },
-            "integration": {
-                _relative_code_path(value).as_posix()
-                for value in contract.integration_paths
-            },
-        }
-        for change in integration.refinement_changes:
-            path = _relative_code_path(change.path).as_posix()
-            if path not in contract_paths_by_aspect[change.aspect]:
-                raise RuntimeError(
-                    f"Implementation changes undeclared {change.aspect} path for "
-                    f"{integration.experiment_id}: {path}"
-                )
-            existing_refinement_files.add(path)
-
-    for relative in new_refinement_files:
+    for relative in new_files:
         if (base_codebase_dir / relative).exists():
-            raise RuntimeError(f"Refinement file already exists in base code: {relative}")
+            raise RuntimeError(f"New file already exists in base code: {relative}")
         if not (codebase_dir / relative).is_file():
-            raise RuntimeError(f"Declared refinement file is missing: {relative}")
-    for relative in existing_refinement_files:
+            raise RuntimeError(f"Declared new file is missing: {relative}")
+    for relative in refine_files:
         if not (base_codebase_dir / relative).is_file():
-            raise RuntimeError(f"Declared change file is missing from base code: {relative}")
+            raise RuntimeError(f"Refine file is missing from base code: {relative}")
         if not (codebase_dir / relative).is_file():
-            raise RuntimeError(f"Refinement deleted a declared change file: {relative}")
+            raise RuntimeError(f"Refinement deleted a declared refine file: {relative}")
 
     base_files = _codebase_file_hashes(base_codebase_dir)
     refined_files = _codebase_file_hashes(codebase_dir)
@@ -335,7 +306,7 @@ def _validate_refinement_implementation(
         for path in set(base_files) | set(refined_files)
         if base_files.get(path) != refined_files.get(path)
     }
-    allowed_files = new_refinement_files | existing_refinement_files
+    allowed_files = new_files | refine_files
     undeclared = changed_files - allowed_files
     if undeclared:
         raise RuntimeError(
@@ -904,10 +875,9 @@ def _run_experiment_plan(
     transcript_path = plan_dir / "plan_transcript.jsonl"
     contracts_path = config.output / "experiment_setup" / "experiment_contracts.json"
     contracts = load_model(contracts_path, ExperimentContracts)
-    implementation = load_model(implementation_plan_path, IdeaImplementationPlan)
     if pipeline_state.is_stage_completed(stage_name):
         plan = load_model(plan_path, AutoResearchExperimentPlan)
-        validate_autoresearch_experiment_plan(contracts, implementation, plan)
+        validate_autoresearch_experiment_plan(contracts, plan)
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed experiment-plan transcript is missing: {transcript_path}")
         print(f"resume {stage_name} stage: skipped (already completed)")
@@ -942,7 +912,7 @@ def _run_experiment_plan(
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
     plan = load_model(plan_path, AutoResearchExperimentPlan)
-    validate_autoresearch_experiment_plan(contracts, implementation, plan)
+    validate_autoresearch_experiment_plan(contracts, plan)
     pipeline_state.complete_stage(stage_name, [str(plan_path), str(transcript_path)])
     return plan_path
 
@@ -963,27 +933,28 @@ def _resolve_experiment_output(value: str, codebase_dir: Path, experiment_dir: P
 
 def _validate_experiment_artifacts(
     plan_path: Path,
-    implementation_plan_path: Path,
+    contracts_path: Path,
     log_path: Path,
     evidence_path: Path,
     codebase_dir: Path,
     experiment_dir: Path,
 ) -> list[str]:
     plan = load_model(plan_path, AutoResearchExperimentPlan)
-    implementation = load_model(implementation_plan_path, IdeaImplementationPlan)
+    contracts = load_model(contracts_path, ExperimentContracts)
     log = load_model(log_path, AutoResearchExperimentLog)
     validate_autoresearch_experiment_log(plan, log)
     load_model(evidence_path, EvidenceSummary)
     managed = {log_path.resolve(), evidence_path.resolve()}
     outputs = [str(log_path), str(evidence_path)]
-    integrations = {
-        integration.experiment_id: integration
-        for integration in implementation.experiment_integrations
+    contracts_by_id = {
+        contract.experiment_id: contract for contract in contracts.experiments
     }
     for experiment in log.experiments:
         baseline_commands = {
             command.strip()
-            for command in integrations[experiment.experiment_id].baseline_entry_points
+            for command in contracts_by_id[
+                experiment.experiment_id
+            ].baseline_entry_points
         }
         for outcome in experiment.step_outcomes:
             if outcome.command_executed.strip() in baseline_commands:
@@ -1035,7 +1006,7 @@ def _run_experiment(
     if pipeline_state.is_stage_completed(stage_name):
         _validate_experiment_artifacts(
             plan_path,
-            implementation_plan_path,
+            config.output / "experiment_setup" / "experiment_contracts.json",
             log_path,
             evidence_path,
             codebase_dir,
@@ -1090,7 +1061,7 @@ def _run_experiment(
         raise RuntimeError(f"Experiment agent modified audited idea code: {idea_id}")
     outputs = _validate_experiment_artifacts(
         plan_path,
-        implementation_plan_path,
+        config.output / "experiment_setup" / "experiment_contracts.json",
         log_path,
         evidence_path,
         codebase_dir,

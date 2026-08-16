@@ -60,20 +60,16 @@ and makes the refinement independently selectable. Before editing code, write
   "summary": "specific standalone refinement",
   "refinement_types": ["training_strategy"],
   "refinement_description": "mechanism, implementation, and executable interface",
-  "new_refinement_files": ["relative/path/to/new_refinement.py"],
-  "experiment_integrations": [
+  "refine_file_list": [
     {
-      "experiment_id": "E1",
-      "refinement_changes": [
-        {
-          "path": "contract-declared existing file",
-          "aspect": "training_strategy",
-          "change": "minimal refinement wiring or scoped implementation change",
-          "rationale": "make the refinement selectable while preserving the baseline"
-        }
-      ],
-      "baseline_entry_points": ["unchanged baseline command"],
-      "refinement_entry_points": ["command that runs only the refinement"]
+      "file_path": "contract-declared/existing_file.py",
+      "change": "minimal change and how it integrates the refinement while preserving baseline behavior"
+    }
+  ],
+  "new_file_list": [
+    {
+      "file_path": "relative/path/to/new_refinement.py",
+      "change": "new file responsibility, implementation, and interface"
     }
   ]
 }
@@ -81,18 +77,20 @@ and makes the refinement independently selectable. Before editing code, write
 
 #### Plan constraints
 
-- Include every frozen experiment exactly once and in contract order.
 - List each applicable refinement type once. Allowed values are
   `input_representation`, `model`, and `training_strategy`.
-- Declare every new refinement file and every existing file that will change.
-  Existing-file changes may use only the matching contract-declared
-  `input_representation_paths`, `training_paths`, or `integration_paths`, with
-  aspect `input_representation`, `training_strategy`, or `integration`.
-- A model refinement must use at least one new file and must not replace or
-  mutate the baseline model. A representation- or training-only refinement may
-  use no new file when its implementation fits entirely within declared paths.
-- Record unchanged baseline entry points and distinct refinement-only entry
-  points for every experiment. Do not plan a full experiment run.
+- Put every existing file that will change in `refine_file_list`. These paths
+  may come only from the contract-declared `input_representation_paths`,
+  `training_paths`, or `integration_paths` across the frozen experiments.
+- Put every file that will be added in `new_file_list`. A model refinement must
+  add at least one new file and must not replace or mutate the baseline model.
+- File paths must be unique and cannot appear in both lists. At least one list
+  must be non-empty.
+- Each `change` must state exactly how the existing file will change or what the
+  new file will implement, including its role in integrating the refinement
+  into the relevant frozen experiments while preserving baseline behavior.
+- Account for every frozen experiment across the declared file changes. Do not
+  plan a full experiment run.
 
 ### 3. Implement
 
@@ -104,9 +102,9 @@ experiment.
 
 #### Implement constraints
 
-- Modify only the declared new files and declared contract-eligible existing
-  files inside `{{ codebase_dir }}`. Keep the implementation plan synchronized
-  with the final code; never use a plan update to conceal an out-of-scope edit.
+- Modify only files in `refine_file_list` and add only files in `new_file_list`
+  inside `{{ codebase_dir }}`. Keep the implementation plan synchronized with
+  the final code; never use a plan update to conceal an out-of-scope edit.
 - Preserve baseline behavior and keep every baseline entry point runnable.
 - Do not change the downstream dataset, cohort membership, train/validation/test
   assignment, prediction-time information availability, final prediction

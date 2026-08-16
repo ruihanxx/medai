@@ -14,9 +14,10 @@ experiment.
 
 ## Task
 
-For each experiment, plan only the commands required to run and evaluate the
-audited refinement through its declared experiment entry point. The completed
-replicate run is the baseline; do not plan any baseline command.
+For each experiment, inspect the audited code and implementation file lists,
+identify the refinement-only entry point, and plan only the commands required
+to run and evaluate it. The completed replicate run is the baseline; do not
+plan any baseline command.
 
 ## Output
 

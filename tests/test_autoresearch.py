@@ -329,18 +329,15 @@ def _configure_fake_agents(
         elif template_name.endswith("codegen/session_instructions.md"):
             if idea_id.endswith("I02"):
                 refinement_types = ["training_strategy"]
-                change_aspect = "training_strategy"
-                new_refinement_files = []
+                new_files = []
             elif idea_id.endswith("I03"):
                 refinement_types = ["input_representation"]
-                change_aspect = "input_representation"
-                new_refinement_files = ["refinement.py"]
+                new_files = ["refinement.py"]
             else:
                 refinement_types = ["model"]
-                change_aspect = "integration"
-                new_refinement_files = ["refinement.py"]
-            for refinement_file in new_refinement_files:
-                Path(working_dir, refinement_file).write_text(
+                new_files = ["refinement.py"]
+            for new_file in new_files:
+                Path(working_dir, new_file).write_text(
                     f"IDEA_ID = {idea_id!r}\n",
                     encoding="utf-8",
                 )
@@ -358,23 +355,18 @@ def _configure_fake_agents(
                         "summary": "Add refinement.",
                         "refinement_types": refinement_types,
                         "refinement_description": "Standalone refinement.",
-                        "new_refinement_files": new_refinement_files,
-                        "experiment_integrations": [
+                        "refine_file_list": [
                             {
-                                "experiment_id": "E1",
-                                "refinement_changes": [
-                                    {
-                                        "path": "baseline.py",
-                                        "aspect": change_aspect,
-                                        "change": "Select the refinement.",
-                                        "rationale": "Keep experiment code unchanged.",
-                                    }
-                                ],
-                                "baseline_entry_points": ["python baseline.py"],
-                                "refinement_entry_points": [
-                                    "python baseline.py --model refined"
-                                ],
+                                "file_path": "baseline.py",
+                                "change": "Select the refinement for E1 while preserving baseline behavior.",
                             }
+                        ],
+                        "new_file_list": [
+                            {
+                                "file_path": new_file,
+                                "change": "Implement the standalone refinement.",
+                            }
+                            for new_file in new_files
                         ],
                     }
                 ),

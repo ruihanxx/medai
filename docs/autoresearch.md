@@ -41,10 +41,11 @@ replicate codebase. The copies exclude Git metadata, virtual environments, and
 caches;
 changes never accumulate across ideas or flow back to the base run. Codegen
 adds model refinements in new files and may add representation or training
-refinement files, then makes only the minimal declared changes in
-contract-recorded representation, training, and integration paths needed to
-embed the idea into every experiment. A deterministic changed-file check
-rejects edits outside those files. An independent audit then checks the
+refinement files. Its implementation plan separately declares existing files to
+refine and files to add, with a change description for each, then codegen makes
+only those minimal changes. Existing paths must come from the contract-recorded
+representation, training, or integration boundary. A deterministic changed-file
+check rejects edits outside the two lists. An independent audit then checks the
 refinement scope plus each experiment's data, prediction target, representation,
 evaluator-facing output, training, and evaluation boundary. One failed audit
 permits one repair and re-audit; a second failure creates an invalid assessment

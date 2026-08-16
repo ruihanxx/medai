@@ -377,18 +377,9 @@ class ExperimentContracts(StrictModel):
         return self
 
 
-class IdeaChangePoint(StrictModel):
-    path: str = Field(min_length=1)
-    aspect: Literal["input_representation", "training_strategy", "integration"]
+class IdeaFileChange(StrictModel):
+    file_path: str = Field(min_length=1)
     change: str = Field(min_length=1)
-    rationale: str = Field(min_length=1)
-
-
-class IdeaExperimentIntegration(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    refinement_changes: list[IdeaChangePoint] = Field(min_length=1)
-    baseline_entry_points: list[str] = Field(min_length=1)
-    refinement_entry_points: list[str] = Field(min_length=1)
 
 
 RefinementType = Literal["input_representation", "model", "training_strategy"]
@@ -399,28 +390,29 @@ class IdeaImplementationPlan(StrictModel):
     summary: str = Field(min_length=1)
     refinement_types: list[RefinementType] = Field(min_length=1)
     refinement_description: str = Field(min_length=1)
-    new_refinement_files: list[str]
-    experiment_integrations: list[IdeaExperimentIntegration] = Field(min_length=1)
+    refine_file_list: list[IdeaFileChange]
+    new_file_list: list[IdeaFileChange]
 
     @model_validator(mode="after")
-    def unique_refinement_fields_and_experiment_ids(self) -> "IdeaImplementationPlan":
+    def unique_refinement_fields(self) -> "IdeaImplementationPlan":
         if len(self.refinement_types) != len(set(self.refinement_types)):
             raise ValueError("refinement_types must be unique")
-        if len(self.new_refinement_files) != len(set(self.new_refinement_files)):
-            raise ValueError("new_refinement_files must be unique")
-        if "model" in self.refinement_types and not self.new_refinement_files:
-            raise ValueError("A model refinement must declare a new refinement file")
-        experiment_ids = [integration.experiment_id for integration in self.experiment_integrations]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("Implementation experiment IDs must be unique")
-        changed_refinement_types = {
-            change.aspect
-            for integration in self.experiment_integrations
-            for change in integration.refinement_changes
-            if change.aspect != "integration"
-        }
-        if not changed_refinement_types.issubset(self.refinement_types):
-            raise ValueError("Every representation or training change must declare its type")
+        refine_paths = [item.file_path for item in self.refine_file_list]
+        new_paths = [item.file_path for item in self.new_file_list]
+        if len(refine_paths) != len(set(refine_paths)):
+            raise ValueError("refine_file_list paths must be unique")
+        if len(new_paths) != len(set(new_paths)):
+            raise ValueError("new_file_list paths must be unique")
+        overlap = set(refine_paths) & set(new_paths)
+        if overlap:
+            raise ValueError(
+                f"Files cannot appear in both refine_file_list and new_file_list: "
+                f"{sorted(overlap)}"
+            )
+        if not refine_paths and not new_paths:
+            raise ValueError("An implementation plan must declare at least one file change")
+        if "model" in self.refinement_types and not new_paths:
+            raise ValueError("A model refinement must declare a new file")
         return self
 
 
@@ -765,10 +757,23 @@ def validate_idea_implementation_plan(
     contracts: ExperimentContracts,
     plan: IdeaImplementationPlan,
 ) -> None:
-    expected = [experiment.experiment_id for experiment in contracts.experiments]
-    actual = [integration.experiment_id for integration in plan.experiment_integrations]
-    if actual != expected:
-        raise ValueError("Implementation plan must integrate the refinement into every experiment")
+    permitted_paths = {
+        path
+        for contract in contracts.experiments
+        for path in (
+            *contract.input_representation_paths,
+            *contract.training_paths,
+            *contract.integration_paths,
+        )
+    }
+    invalid_paths = {
+        item.file_path for item in plan.refine_file_list
+    } - permitted_paths
+    if invalid_paths:
+        raise ValueError(
+            "Implementation plan refines paths outside the frozen boundary: "
+            f"{sorted(invalid_paths)}"
+        )
 
 
 def validate_codegen_audit(
@@ -795,29 +800,25 @@ def validate_codegen_audit(
 
 def validate_autoresearch_experiment_plan(
     contracts: ExperimentContracts,
-    implementation: IdeaImplementationPlan,
     plan: AutoResearchExperimentPlan,
 ) -> None:
     expected = [experiment.experiment_id for experiment in contracts.experiments]
     actual = [experiment.experiment_id for experiment in plan.experiments]
     if actual != expected:
         raise ValueError("Auto Research experiment plan must cover every experiment in order")
-    integrations = {
-        integration.experiment_id: integration
-        for integration in implementation.experiment_integrations
+    contracts_by_id = {
+        contract.experiment_id: contract for contract in contracts.experiments
     }
     for experiment in plan.experiments:
         commands = {step.command_hint.strip() for step in experiment.steps}
-        integration = integrations[experiment.experiment_id]
-        baseline_commands = {command.strip() for command in integration.baseline_entry_points}
+        baseline_commands = {
+            command.strip()
+            for command in contracts_by_id[
+                experiment.experiment_id
+            ].baseline_entry_points
+        }
         if commands & baseline_commands:
             raise ValueError(f"Auto Research plan reruns a baseline: {experiment.experiment_id}")
-        refinement_commands = {command.strip() for command in integration.refinement_entry_points}
-        if not commands & refinement_commands:
-            raise ValueError(
-                f"Auto Research plan is missing a refinement entry point: "
-                f"{experiment.experiment_id}"
-            )
 
 
 def validate_autoresearch_experiment_log(
