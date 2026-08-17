@@ -16,6 +16,7 @@ def test_help_lists_required_inputs():
     assert result.exit_code == 0
     assert "--replicate" in result.stdout
     assert "--autoresearch" in result.stdout
+    assert "completed local replication" not in result.stdout
     assert "--paper" in result.stdout
     assert "--output" in result.stdout
     assert "--provider" in result.stdout

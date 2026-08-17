@@ -33,7 +33,7 @@ def run(
     autoresearch: bool = typer.Option(
         False,
         "--autoresearch",
-        help="Run Auto Research from a completed local replication",
+        help="Run Auto Research from a completed replication",
     ),
     paper: Optional[Path] = typer.Option(None, "--paper", help="Path to paper.pdf"),
     output: Path = typer.Option(
