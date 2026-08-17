@@ -904,15 +904,18 @@ def test_autoresearch_plan_cloud_pull_handoff_resumes_same_codex_session(
     prompt_path.write_text("plan\n", encoding="utf-8")
     transcript_path = tmp_path / "plan.jsonl"
     calls = []
+    events = []
 
     def fake_agent(**kwargs):
         calls.append(kwargs)
+        events.append("resume-agent" if kwargs.get("resume_session_id") else "initial-agent")
         command_path = kwargs.get("output_last_message_path")
         if command_path is not None:
             command_path.write_text('{"command":"monitor"}\n', encoding="utf-8")
         return kwargs.get("resume_session_id") or "session-1"
 
     def fake_command(command, *, codebase_dir, log_path, result_path):
+        events.append("monitor")
         result = {"command": command, "exit_code": 0, "duration_seconds": 1.0}
         result_path.write_text(json.dumps(result), encoding="utf-8")
         return result
@@ -922,6 +925,10 @@ def test_autoresearch_plan_cloud_pull_handoff_resumes_same_codex_session(
     monkeypatch.setattr(
         "medai.autoresearch._cloud_drive_materialization_completed",
         lambda _config: True,
+    )
+    monkeypatch.setattr(
+        "medai.autoresearch.power_off_run_computation_instance",
+        lambda _config: events.append("power-off"),
     )
     monkeypatch.setattr(
         "medai.autoresearch.render_prompt",
@@ -940,6 +947,7 @@ def test_autoresearch_plan_cloud_pull_handoff_resumes_same_codex_session(
     assert len(calls) == 2
     assert calls[0].get("resume_session_id") is None
     assert calls[1]["resume_session_id"] == "session-1"
+    assert events == ["initial-agent", "monitor", "power-off", "resume-agent"]
 
 
 def test_autoresearch_reuses_base_cloud_inventory(tmp_path: Path):

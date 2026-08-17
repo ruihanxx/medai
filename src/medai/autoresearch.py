@@ -1026,6 +1026,7 @@ def _run_plan_cloud_pull_handoff(
         )
         command_index += 1
 
+    power_off_run_computation_instance(config)
     completion_prompt_path = render_prompt(
         "autoresearch/plan/cloud_pull_complete_instructions.md",
         prompt_dir / "plan_cloud_pull_complete.md",

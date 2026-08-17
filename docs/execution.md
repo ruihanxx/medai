@@ -134,7 +134,8 @@ Cloud-backed Auto Research creates its campaign instance lazily at the first
 audited idea that reaches experiment planning and reuses the same recorded
 instance for all ideas and rounds. Direct Codex planning uses the opted-in
 prepare/foreground-monitor/same-session-resume handoff for initial
-materialization. Every Codex experiment command is run locally in the
+materialization, with power-off before the planning session resumes. Every Codex
+experiment command is run locally in the
 foreground: orchestration powers the instance on immediately before the
 command, powers it off in `finally`, validates downloaded artifacts, and only
 then resumes the same agent session. Other agent providers retain their

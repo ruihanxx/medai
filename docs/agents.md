@@ -37,8 +37,9 @@
   to prepare and power off an initialized remote instance, then local
   orchestration runs the returned monitor command and resumes the same session
   after its terminal result. Its cloud data remains unavailable until provider
-  state is completed. Auto Research planning uses the same prepare, local
-  monitor, and resume boundary. Its experiment agent hands off one foreground
+  state is completed. Auto Research planning uses the same prepare and local
+  monitor boundary, powers off after validation, and only then resumes. Its
+  experiment agent hands off one foreground
   command; orchestration powers on only for that command, powers off before
   artifact validation and agent resume, and repeats until all required local
   artifacts validate. The prompt permits file inspection, code edits, and

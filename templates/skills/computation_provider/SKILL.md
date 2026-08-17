@@ -52,8 +52,8 @@ A drive may set `cloud_pull_handoff: true` when its reference defines a safe
 two-step preparation and local-monitor procedure. A resumable Codex codegen or
 Auto Research planning session may use that opt-in: the agent completes the
 reference's active-instance preparation and power-off step, then local
-orchestration runs the returned foreground monitor command before resuming that
-same session.
+orchestration runs the returned foreground monitor command, powers off again
+after validation, and resumes that same session.
 
 ## Local Configs
 

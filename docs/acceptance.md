@@ -48,7 +48,7 @@ candidate pool, six-candidate review, three-candidate selection, selected-idea
 removal, and reuse of the remaining candidates in later rounds. Cloud-backed
 coverage verifies inherited provider/drive configuration without a local data
 mount, copied base inventory, base-resource preference through the selected
-provider reference, initial prepare/local-monitor/same-session resume, one
+provider reference, initial prepare/local-monitor/power-off/same-session resume, one
 campaign instance across ideas and rounds, per-command power-on and `finally`
 power-off before agent resume, replacement resume with a fresh offline pull and
 inventory verification, failure-only power-off, and final-only release.

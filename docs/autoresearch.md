@@ -92,7 +92,7 @@ directory, and completed read-only dataset target.
 When direct Codex and the selected drive support offline handoff, the planning
 agent prepares the instance and returns one foreground monitor command. Local
 orchestration runs it without an active agent process, validates the copied base
-inventory, then resumes the same planning session to write the existing
+inventory, powers off, then resumes the same planning session to write the existing
 three-field `remote_compute` object. During experiments the Codex agent returns
 one foreground command at a time. Orchestration starts the instance immediately
 before each command, streams and persists its result, powers off in `finally`,
