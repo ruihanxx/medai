@@ -74,22 +74,36 @@ after its last completed experiment. MedAI rejects resume when the paper,
 input paths, provider/model, reasoning effort, or smart-replication setting no
 longer matches the recorded run.
 
-To start or resume Auto Research from a completed replication run:
+To start a new Auto Research campaign from a completed replication run:
 
 ```bash
 ./medai \
   --autoresearch \
-  --output runs/<run_id> \
+  --replicate-run runs/<run_id> \
   --max-iter 1
 ```
 
 Auto Research restores the base inputs and provider configuration, skips
-MinerU, and writes only below `runs/<run_id>/autoresearch/`. It creates three
-isolated refinement candidates per round and runs code generation, audit,
-planning, experimentation, and assessment for each candidate. A valid
-refinement ends the loop after the current round; otherwise it continues up to
-`--max-iter` (1-10). The base run must be completed and must describe a
-supervised prediction task.
+MinerU, and creates the next numbered output below
+`runs/<run_id>/autoresearch/campaign_NNN/`. It creates three isolated refinement
+candidates per round and runs code generation, audit, planning, experimentation,
+and assessment for each candidate. A valid refinement ends the loop after the
+current round; otherwise it continues up to `--max-iter` (1-10). The base run
+must be completed and must describe a supervised prediction task.
+
+To resume a campaign, pass its existing output explicitly:
+
+```bash
+./medai \
+  --autoresearch \
+  --replicate-run runs/<run_id> \
+  --output runs/<run_id>/autoresearch/campaign_001 \
+  --max-iter 1
+```
+
+An explicit `--output` path that does not exist or is empty starts a campaign
+there. A non-empty explicit output resumes only when it contains a valid MedAI
+`manifest.json`.
 
 Auto Research inherits the base provider, model, and reasoning effort unless
 explicitly overridden. A `codex-siliconflow` campaign must receive

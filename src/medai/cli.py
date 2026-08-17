@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +28,24 @@ app = typer.Typer(
 )
 
 
+def _new_autoresearch_output(replicate_run: Path) -> Path:
+    root = replicate_run / "autoresearch"
+    root.mkdir(parents=True, exist_ok=True)
+    indices = [
+        int(match.group(1))
+        for path in root.iterdir()
+        if path.is_dir() and (match := re.fullmatch(r"campaign_(\d+)", path.name))
+    ]
+    index = max(indices, default=0) + 1
+    while True:
+        output = root / f"campaign_{index:03d}"
+        try:
+            output.mkdir()
+            return output
+        except FileExistsError:
+            index += 1
+
+
 @app.callback(invoke_without_command=True)
 def run(
     replicate: bool = typer.Option(False, "--replicate", help="Run paper replication"),
@@ -36,10 +55,15 @@ def run(
         help="Run Auto Research from a completed replication",
     ),
     paper: Optional[Path] = typer.Option(None, "--paper", help="Path to paper.pdf"),
-    output: Path = typer.Option(
-        ...,
+    output: Optional[Path] = typer.Option(
+        None,
         "--output",
-        help="Replication output, or completed base run for Auto Research",
+        help="Replication output or explicit Auto Research campaign output",
+    ),
+    replicate_run: Optional[Path] = typer.Option(
+        None,
+        "--replicate-run",
+        help="Completed replication run used as the Auto Research base",
     ),
     provider: Optional[str] = typer.Option(
         None,
@@ -87,7 +111,6 @@ def run(
         "--assessment-threshold",
         help="Minimum weighted idea-assessment score on the -5 to 5 scale (default: 0.0)",
     ),
-    base_run: Optional[Path] = typer.Option(None, "--base-run", hidden=True),
 ) -> None:
     try:
         if replicate == autoresearch:
@@ -96,13 +119,15 @@ def run(
         if replicate:
             if paper is None:
                 raise ValueError("--replicate requires --paper")
+            if output is None:
+                raise ValueError("--replicate requires --output")
             if (
                 max_iter is not None
                 or assessment_threshold is not None
-                or base_run is not None
+                or replicate_run is not None
             ):
                 raise ValueError(
-                    "--max-iter, --assessment-threshold, and --base-run require "
+                    "--max-iter, --assessment-threshold, and --replicate-run require "
                     "--autoresearch"
                 )
             config: RunConfig | AutoResearchConfig = RunConfig.create(
@@ -132,8 +157,14 @@ def run(
                     "--autoresearch does not accept --paper, --repo, --data, "
                     "--clouddrive, or --smart-replicate"
                 )
-            resolved_base_run = base_run or output
-            resolved_output = output if base_run else output / "autoresearch"
+            if replicate_run is None:
+                raise ValueError("--autoresearch requires --replicate-run")
+            resolved_base_run = replicate_run.expanduser().resolve()
+            resolved_output = (
+                output.expanduser().resolve()
+                if output is not None
+                else _new_autoresearch_output(resolved_base_run)
+            )
             config = AutoResearchConfig.create(
                 base_run=resolved_base_run,
                 output=resolved_output,

@@ -48,6 +48,9 @@ compact agent-written metrics text and selection of only strict prediction
 experiments when a paper also contains statistical analysis. They also cover the
 campaign-wide candidate pool, six-candidate review, three-candidate selection,
 selected-idea removal, and reuse of the remaining candidates in later rounds.
+Launcher and CLI coverage verifies independent `--replicate-run` and `--output`
+arguments, monotonic default `campaign_NNN` allocation, and explicit-output
+resume.
 Cloud-backed coverage verifies inherited provider/drive configuration without a
 local data mount, copied base inventory, base-resource preference through the
 selected provider reference, initial

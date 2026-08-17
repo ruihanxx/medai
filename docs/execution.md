@@ -50,8 +50,13 @@ different eligible offer, with at most two additional create attempts. An
 uncertain creation or unconfirmed release remains terminal and never permits a
 second rental.
 
-Auto Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 through
-10 (default 1),
+Auto Research requires `--replicate-run runs/<run_id>` and accepts an optional
+campaign `--output`. Without `--output`, the launcher atomically creates the
+next directory under `runs/<run_id>/autoresearch/campaign_NNN`, using one-based
+zero-padded monotonically increasing numbers. An explicit output path that does
+not exist or is empty starts a campaign there; an explicit non-empty output
+resumes only when it contains `manifest.json`. Auto Research accepts
+`--max-iter` from 1 through 10 (default 1),
 accepts a non-negative `--assessment-threshold` for the weighted -5-through-5
 idea-assessment score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
 and `--smart-replicate`. A cloud-backed campaign inherits the base run's
@@ -64,25 +69,26 @@ Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. The host `~/.ssh` directory is copied from its read-only
 mount into the container's ephemeral HOME so computation-provider SSH operations
 can use OpenSSH config and identities without modifying host credentials. The
-project `.env` is passed to Docker with `--env-file`, so provider skills must tolerate
-Docker's literal preservation of optional surrounding quotes in credential
-values. A new invocation creates a unique run
-directory under the repository-root `runs/` directory, named from its UTC start
-time and paper filename. Passing `--output runs/<run_id>` mounts that existing
-directory and resumes it.
+project `.env` is passed to Docker with `--env-file`, so provider skills must
+tolerate Docker's literal preservation of optional surrounding quotes in
+credential values. A new replication invocation creates a unique run directory
+under the repository-root `runs/` directory, named from its UTC start time and
+paper filename. Passing its existing directory through replication `--output`
+resumes it.
 
 Auto Research restores paper, repository, and data locations from the base
 manifest, skips MinerU, and requires the base run to be completed with all eight
 canonical replicate stages reloadable. The launcher mounts the base run
-read-only at `/workspace/base-run`, mounts only its `autoresearch/` child
+read-only at `/workspace/base-run`, mounts only the selected campaign output
 writable at `/workspace/autoresearch`, and remounts recorded local source data
 read-only. Cloud-backed campaigns mount no host data directory. A missing local
 source data path is an explicit error. The campaign inherits the base agent
 provider, model, reasoning effort, and remote provider/drive selection unless an
 allowed CLI value overrides the agent field. `codex-siliconflow` still requires
-a newly supplied secret configuration. Initial implementation permits one
-campaign per base run; reusing it requires the same base fingerprint and
-resolved configuration.
+a newly supplied secret configuration. Multiple campaigns may share one
+read-only base run; each has an independent manifest, artifacts, and remote
+state. Resuming one requires an explicit `--output` plus the same base
+fingerprint and resolved configuration.
 
 The local `medai:local` image is a thin overlay on the canonical Veritas image
 `ghcr.io/chicagohai/veritas:latest` (configurable with the Docker build argument

@@ -57,7 +57,7 @@ runs/<run_id>/
 Auto Research adds this isolated subtree to a completed base run:
 
 ```text
-runs/<run_id>/autoresearch/
+runs/<run_id>/autoresearch/campaign_<NNN>/
 ├── manifest.json
 ├── preflight/resources.json
 ├── eligibility/eligibility.json

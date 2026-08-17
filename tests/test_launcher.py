@@ -302,7 +302,7 @@ def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
     command_log.write_text("", encoding="utf-8")
 
     run = subprocess.run(
-        [str(launcher), "--autoresearch", "--output", str(base_run)],
+        [str(launcher), "--autoresearch", "--replicate-run", str(base_run)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -312,12 +312,63 @@ def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
 
     assert run.returncode == 0, run.stderr
     calls = command_log.read_text(encoding="utf-8")
+    campaign_001 = base_run / "autoresearch" / "campaign_001"
     assert "mineru -p" not in calls
     assert f"src={base_run},dst=/workspace/base-run,readonly" in calls
-    assert f"src={base_run / 'autoresearch'},dst=/workspace/autoresearch" in calls
-    assert "--autoresearch --base-run /workspace/base-run" in calls
+    assert f"src={campaign_001},dst=/workspace/autoresearch" in calls
+    assert "--autoresearch --replicate-run /workspace/base-run" in calls
     assert "--assessment-threshold 0.0" in calls
     assert "dst=/workspace/data" not in calls
+
+    (campaign_001 / "manifest.json").write_text("{}\n", encoding="utf-8")
+    resumed = subprocess.run(
+        [
+            str(launcher),
+            "--autoresearch",
+            "--replicate-run",
+            str(base_run),
+            "--output",
+            str(campaign_001),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert resumed.returncode == 0, resumed.stderr
+    assert f"Resuming Auto Research output: {campaign_001}" in resumed.stdout
+
+    next_campaign = subprocess.run(
+        [str(launcher), "--autoresearch", "--replicate-run", str(base_run)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert next_campaign.returncode == 0, next_campaign.stderr
+    campaign_002 = base_run / "autoresearch" / "campaign_002"
+    assert campaign_002.is_dir()
+    assert f"Auto Research output: {campaign_002}" in next_campaign.stdout
+
+    invalid_output = subprocess.run(
+        [
+            str(launcher),
+            "--autoresearch",
+            "--replicate-run",
+            str(base_run),
+            "--output",
+            str(base_run),
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert invalid_output.returncode == 2
+    assert "separate from the read-only base run" in invalid_output.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")

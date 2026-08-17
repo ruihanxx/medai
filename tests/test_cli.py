@@ -19,6 +19,7 @@ def test_help_lists_required_inputs():
     assert "completed local replication" not in result.stdout
     assert "--paper" in result.stdout
     assert "--output" in result.stdout
+    assert "--replicate-run" in result.stdout
     assert "--provider" in result.stdout
     assert "--data" in result.stdout
     assert "--clouddrive" in result.stdout
@@ -414,7 +415,7 @@ def test_release_failure_keeps_completed_run_and_is_not_retried(
     assert PipelineState(output).state["status"] == "completed"
 
 
-def test_autoresearch_cli_uses_base_output_and_inherited_provider(
+def test_autoresearch_cli_allocates_and_resumes_campaign_output(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -441,20 +442,43 @@ def test_autoresearch_cli_uses_base_output_and_inherited_provider(
         "medai.cli.create_autoresearch_workflow",
         lambda: FakeWorkflow(),
     )
+    monkeypatch.setattr("medai.cli.prepare_autoresearch_resume", lambda config: None)
     monkeypatch.setattr("medai.cli.release_run_computation_instance", lambda config: None)
 
-    result = runner.invoke(
+    first = runner.invoke(
         app,
-        ["--autoresearch", "--output", str(base_run)],
+        ["--autoresearch", "--replicate-run", str(base_run)],
     )
 
-    assert result.exit_code == 0, result.stdout
-    assert len(invoked) == 1
+    campaign_001 = base_run / "autoresearch" / "campaign_001"
+    assert first.exit_code == 0, first.stdout
     assert invoked[0].base_run == base_run
-    assert invoked[0].output == base_run / "autoresearch"
+    assert invoked[0].output == campaign_001
     assert invoked[0].provider == "codex"
     assert invoked[0].max_iter == 1
     assert invoked[0].assessment_threshold == 0.0
+
+    resumed = runner.invoke(
+        app,
+        [
+            "--autoresearch",
+            "--replicate-run",
+            str(base_run),
+            "--output",
+            str(campaign_001),
+        ],
+    )
+    assert resumed.exit_code == 0, resumed.stdout
+    assert f"Resuming Auto Research run: {campaign_001}" in resumed.stdout
+    assert invoked[1].output == campaign_001
+    assert PipelineState(campaign_001).state["resume_count"] == 1
+
+    second_campaign = runner.invoke(
+        app,
+        ["--autoresearch", "--replicate-run", str(base_run)],
+    )
+    assert second_campaign.exit_code == 0, second_campaign.stdout
+    assert invoked[2].output == base_run / "autoresearch" / "campaign_002"
 
 
 def test_autoresearch_failure_powers_off_without_releasing(tmp_path: Path, monkeypatch):
@@ -484,10 +508,20 @@ def test_autoresearch_failure_powers_off_without_releasing(tmp_path: Path, monke
         lambda config: cleanup_calls.append(("release", config.output)),
     )
 
-    result = runner.invoke(app, ["--autoresearch", "--output", str(base_run)])
+    campaign = base_run / "autoresearch" / "campaign_001"
+    result = runner.invoke(
+        app,
+        [
+            "--autoresearch",
+            "--replicate-run",
+            str(base_run),
+            "--output",
+            str(campaign),
+        ],
+    )
 
     assert result.exit_code == 1
-    assert cleanup_calls == [("power-off", base_run / "autoresearch")]
+    assert cleanup_calls == [("power-off", campaign)]
 
 
 def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
@@ -556,7 +590,7 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
         app,
         [
             "--autoresearch",
-            "--output",
+            "--replicate-run",
             str(base_run),
             "--max-iter",
             "0",

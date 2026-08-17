@@ -380,6 +380,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--data")
     parser.add_argument("--clouddrive", action="store_true")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--replicate-run", type=Path)
     parser.add_argument("--provider")
     parser.add_argument("--siliconflow-config", type=Path)
     parser.add_argument("--codex-model")
@@ -436,14 +437,57 @@ def _resolve_output(requested: Optional[Path], runs_root: Path, paper: Path) -> 
 
 def _resolve_base_run(requested: Optional[Path], runs_root: Path) -> Path:
     if requested is None:
-        raise LauncherError("--autoresearch requires --output pointing to a base run")
+        raise LauncherError("--autoresearch requires --replicate-run")
     base_run = requested.expanduser().resolve()
     if not base_run.is_dir() or not base_run.is_relative_to(runs_root):
-        raise LauncherError(f"--output must be an existing directory under {runs_root}")
+        raise LauncherError(
+            f"--replicate-run must be an existing directory under {runs_root}"
+        )
     if not (base_run / "manifest.json").is_file():
-        raise LauncherError(f"--output does not contain manifest.json: {base_run}")
+        raise LauncherError(f"--replicate-run does not contain manifest.json: {base_run}")
     print(f"Auto Research base run: {base_run}", flush=True)
     return base_run
+
+
+def _new_autoresearch_output(base_run: Path) -> Path:
+    root = base_run / "autoresearch"
+    root.mkdir(parents=True, exist_ok=True)
+    indices = [
+        int(match.group(1))
+        for path in root.iterdir()
+        if path.is_dir() and (match := re.fullmatch(r"campaign_(\d+)", path.name))
+    ]
+    index = max(indices, default=0) + 1
+    while True:
+        output = root / f"campaign_{index:03d}"
+        try:
+            output.mkdir()
+            print(f"Auto Research output: {output}", flush=True)
+            return output
+        except FileExistsError:
+            index += 1
+
+
+def _resolve_autoresearch_output(requested: Optional[Path], base_run: Path) -> Path:
+    if requested is None:
+        return _new_autoresearch_output(base_run)
+    output = requested.expanduser().resolve()
+    if output == base_run:
+        raise LauncherError(
+            "Auto Research output must be separate from the read-only base run"
+        )
+    if output.exists() and not output.is_dir():
+        raise LauncherError(f"--output must be a directory: {output}")
+    output.mkdir(parents=True, exist_ok=True)
+    if any(output.iterdir()):
+        if not (output / "manifest.json").is_file():
+            raise LauncherError(
+                f"Auto Research output is not empty and has no manifest.json: {output}"
+            )
+        print(f"Resuming Auto Research output: {output}", flush=True)
+    else:
+        print(f"Auto Research output: {output}", flush=True)
+    return output
 
 
 def _detect_mineru_device(python: Path) -> str:
@@ -485,6 +529,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             raise LauncherError("--max-iter requires --autoresearch")
         if args.assessment_threshold is not None:
             raise LauncherError("--assessment-threshold requires --autoresearch")
+        if args.replicate_run is not None:
+            raise LauncherError("--replicate-run requires --autoresearch")
         paper = _required_file(args.paper, "--paper")
         if paper.suffix.casefold() != ".pdf":
             raise LauncherError(f"--paper must be a PDF: {paper}")
@@ -530,7 +576,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
 
         runs_root = (project_root / "runs").resolve()
         runs_root.mkdir(parents=True, exist_ok=True)
-        base_run = _resolve_base_run(args.output, runs_root)
+        base_run = _resolve_base_run(args.replicate_run, runs_root)
         manifest_path = base_run / "manifest.json"
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -602,15 +648,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         output = _resolve_output(args.output, runs_root, paper)
     else:
         assert base_run is not None
-        autoresearch_output = base_run / "autoresearch"
-        autoresearch_output.mkdir(exist_ok=True)
-        if any(autoresearch_output.iterdir()) and not (
-            autoresearch_output / "manifest.json"
-        ).is_file():
-            raise LauncherError(
-                "Auto Research output is not empty and has no manifest.json: "
-                f"{autoresearch_output}"
-            )
+        autoresearch_output = _resolve_autoresearch_output(args.output, base_run)
         output = autoresearch_output
 
     with ExitStack() as stack:
@@ -709,7 +747,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             )
             cli_args = [
                 "--autoresearch",
-                "--base-run",
+                "--replicate-run",
                 "/workspace/base-run",
                 "--provider",
                 provider,
