@@ -612,6 +612,93 @@ def test_vastai_power_on_waits_through_exited_when_control_plane_is_running(
     ]
 
 
+def test_vastai_autoresearch_pool_creates_member_when_retained_gpu_is_unavailable(
+    tmp_path: Path,
+):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["provider_state"]["cloud_drive"] = {
+        "completed": True,
+        "status": "completed",
+        "drive": "google-drive",
+        "dataset": "dataset-a",
+        "source_path": "medai/dataset-a",
+        "target_path": "/workspace/medai/test-run/data/dataset-a",
+    }
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps({"inputs": {"workflow": "autoresearch"}, "resume_count": 0}),
+        encoding="utf-8",
+    )
+    replacement = offer("replacement")
+    ssh_environment, _ = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
+
+    def manage_original(requests):
+        if requests[-1]["body"] == {"state": "running"}:
+            return {
+                "success": False,
+                "msg": "Required resources are currently unavailable, state change queued.",
+            }
+        return {"success": True}
+
+    with vast_api(
+        {
+            ("GET", "/api/v0/instances/instance-1/"): {
+                "instances": {"actual_status": "stopped", "cur_state": "stopped"}
+            },
+            ("PUT", "/api/v0/instances/instance-1/"): manage_original,
+            ("POST", "/api/v0/bundles"): {"offers": [replacement]},
+            ("PUT", "/api/v0/asks/replacement/"): {
+                "success": True,
+                "new_contract": "instance-2",
+            },
+            ("GET", "/api/v0/instances/instance-2/"): {
+                "instances": {
+                    "actual_status": "running",
+                    "cur_state": "running",
+                    "ssh_host": "host",
+                    "ssh_port": 22,
+                }
+            },
+        }
+    ) as (base_url, requests):
+        completed = run_adapter(
+            ["power-on", "--state", str(state_path)],
+            {
+                **adapter_environment(base_url),
+                **ssh_environment,
+                "VASTAI_MAX_CAMPAIGN_INSTANCES": "3",
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result == {
+        "created": True,
+        "instance_id": "instance-2",
+        "materialization_required": True,
+        "pool_size": 2,
+        "status": "running",
+        "switched": True,
+    }
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved["provider_state"]["instance_id"] == "instance-2"
+    assert [
+        entry["instance_id"] for entry in saved["provider_state"]["instance_pool"]
+    ] == ["instance-1", "instance-2"]
+    assert saved["provider_state"]["instance_pool"][0]["cloud_drive"]["completed"] is True
+    assert saved["provider_state"]["instance_pool"][1]["cloud_drive"]["completed"] is False
+    assert [
+        request["body"]
+        for request in requests
+        if request["path"] == "/api/v0/instances/instance-1/"
+        and request["method"] == "PUT"
+    ] == [{"state": "running"}, {"state": "stopped"}]
+
+
 def test_vastai_release_stops_then_confirms_irreversible_destroy(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
     vast_state(state_path)
@@ -644,6 +731,96 @@ def test_vastai_release_stops_then_confirms_irreversible_destroy(tmp_path: Path)
     assert completed.returncode == 0, completed.stderr
     assert json.loads(state_path.read_text(encoding="utf-8"))["released"] is True
     assert [item["method"] for item in requests] == ["GET", "PUT", "GET", "DELETE", "GET", "GET"]
+
+
+def test_vastai_autoresearch_release_destroys_every_pool_member(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    vast_state(state_path)
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    provider_state = state["provider_state"]
+    first = {
+        name: provider_state[name]
+        for name in (
+            "instance_id",
+            "label",
+            "selected_offer",
+            "creation_uncertain",
+        )
+    }
+    first["failed_create_retries"] = 0
+    first["released"] = False
+    second = {
+        **first,
+        "instance_id": "instance-2",
+        "label": "medai-test-run-pool-002",
+        "selected_offer": {**first["selected_offer"], "id": "secondary"},
+    }
+    provider_state.update(
+        {
+            "instance_pool_enabled": True,
+            "instance_pool": [first, second],
+            "active_pool_index": 0,
+            "active_instance_released": False,
+        }
+    )
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "status": "completed",
+                "inputs": {"workflow": "autoresearch"},
+                "resume_count": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    first_responses = iter(
+        [
+            {"instances": {"actual_status": "stopped", "cur_state": "stopped"}},
+            (404, {"msg": "not found"}),
+        ]
+    )
+    second_responses = iter(
+        [
+            {"instances": {"actual_status": "running", "cur_state": "running"}},
+            {"instances": {"actual_status": "stopped", "cur_state": "stopped"}},
+            (404, {"msg": "not found"}),
+        ]
+    )
+    with vast_api(
+        {
+            ("GET", "/api/v0/instances/instance-1/"): lambda _: next(
+                first_responses
+            ),
+            ("GET", "/api/v0/instances/instance-2/"): lambda _: next(
+                second_responses
+            ),
+            ("PUT", "/api/v0/instances/instance-2/"): {"success": True},
+            ("DELETE", "/api/v0/instances/instance-1/"): {"success": True},
+            ("DELETE", "/api/v0/instances/instance-2/"): {"success": True},
+        }
+    ) as (base_url, requests):
+        completed = run_adapter(
+            ["release", "--state", str(state_path)],
+            {
+                **adapter_environment(base_url),
+                "VASTAI_MAX_CAMPAIGN_INSTANCES": "1",
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    saved = json.loads(state_path.read_text(encoding="utf-8"))
+    assert saved["released"] is True
+    assert all(
+        entry["released"] is True
+        for entry in saved["provider_state"]["instance_pool"]
+    )
+    assert [
+        request["path"] for request in requests if request["method"] == "DELETE"
+    ] == [
+        "/api/v0/instances/instance-1/",
+        "/api/v0/instances/instance-2/",
+    ]
 
 
 def test_vastai_release_keeps_ownership_when_empty_show_conflicts_with_listing(tmp_path: Path):

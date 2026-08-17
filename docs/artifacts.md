@@ -77,6 +77,7 @@ runs/<run_id>/autoresearch/campaign_<NNN>/
 │   │   ├── plan/cloud_pull/commands/  # opted-in Codex cloud handoff only
 │   │   ├── experiment/experiment_log.json
 │   │   ├── experiment/evidence_summary.json
+│   │   ├── experiment/environment/{setup.sh,environment.json,setup.log}
 │   │   ├── experiment/commands/  # remote Codex experiments only
 │   │   └── assessment/assessment.json
 │   └── round_summary.json
@@ -239,7 +240,10 @@ attempts remain in `instance_history`.
 Power-off leaves top-level `released` false; only successful irreversible release
 changes it to true. Provider-owned history and resource identifiers remain
 non-secret. Credentials, hashes, access tokens, and drive secrets are never
-state fields.
+state fields. A provider that supports Auto Research pooling records its bounded
+member list and active member inside this same canonical file. The active
+provider fields remain the only target for provider actions; release is complete
+only after every owned pool member is confirmed destroyed.
 
 Each replication rollback archive is immutable by convention: an existing
 `resume_<NNN>` target makes resume fail rather than overwrite history.

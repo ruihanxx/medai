@@ -14,7 +14,9 @@ The required local experiment artifacts are not yet complete:
 
 Read the result and relevant log sections, then return exactly one next
 non-empty foreground Bash command using the required output schema. Local
-orchestration will power on the same instance only while executing that command,
-power it off at terminal completion, and resume this session again. Do not run
-or monitor remote work directly in this turn, modify audited code, create or
-release an instance, rematerialize data, or download raw dataset content.
+orchestration will select a usable campaign instance, synchronize the local
+mother code and environment definition, keep it powered on only while executing
+that command, power it off at terminal completion, and resume this session
+again. Do not run or monitor remote work directly in this turn, modify audited
+code, create or release an instance, rematerialize data, or download raw dataset
+content.

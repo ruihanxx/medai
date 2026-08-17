@@ -136,20 +136,23 @@ attempt. Normal release occurs only after the report is validated and the run is
 completed. A release failure is a persistent `cleanup_warning`, not a pipeline
 failure, and reopening that completed run does not retry it.
 
-Cloud-backed Auto Research creates its campaign instance lazily at the first
-audited idea that reaches experiment planning and reuses the same recorded
-instance for all ideas and rounds. Direct Codex planning uses the opted-in
-prepare/foreground-monitor/same-session-resume handoff for initial
-materialization, with power-off before the planning session resumes. Every Codex
-experiment command is run locally in the
-foreground: orchestration powers the instance on immediately before the
-command, powers it off in `finally`, validates downloaded artifacts, and only
-then resumes the same agent session. Other agent providers retain their
-single-turn experiment behavior. Explicit resume reconciles once; a single
-replacement repeats prepare and local offline monitoring against the copied
-base inventory, then powers off before agent execution. Failures power off and
-preserve the instance. Release occurs only after final-report validation and
-campaign completion, with release errors recorded as cleanup warnings.
+Cloud-backed Auto Research creates its first campaign instance lazily at the
+first audited idea that reaches experiment planning. Direct Codex planning uses
+the opted-in prepare/foreground-monitor/same-session-resume handoff for initial
+materialization, with power-off before the planning session resumes. Every
+Codex experiment command is run locally in the foreground. Before each command,
+orchestration selects a usable member from the
+provider-owned bounded campaign pool. A provider-confirmed capacity conflict may
+add one member within that bound without destroying retained members. A newly
+selected member repeats inventory-verified cloud materialization, receives the
+local audited mother code and local idempotent mother-environment definition,
+and reconstructs its runtime before the command. Orchestration powers all pool
+members off in `finally`, validates downloaded artifacts, and only then resumes
+the same agent session. Other agent providers retain their single-turn
+experiment behavior. Explicit resume reconciles the pool before agent work.
+Failures power off and preserve every owned member. Release occurs only after
+final-report validation and campaign completion and attempts every pool member;
+any remaining member produces a cleanup warning.
 
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a

@@ -136,16 +136,19 @@
   `remote_compute/instance.json` records the selected provider and common
   lifecycle state; each provider reference defines its provider-specific
   selection procedure, operations, and state.
-- A cloud-backed Auto Research campaign owns one lazily created instance across
+- A cloud-backed Auto Research campaign owns one bounded instance pool across
   every idea and round. Its selected provider reference reads the completed
   base state's actual accelerator model, count, and memory capacities, searches
   the exact model first, and permits only the reference's stronger fallback.
   Planning reuses the copied base inventory and completed read-only target.
-  Experiment agents may upload only audited idea code and download only models,
-  metrics, logs, and aggregate evidence. They never download raw or row-level
-  data, create another instance, rematerialize data, or release the instance.
-  Failure powers off without release; only final-report validation and campaign
-  completion permit orchestration release.
+  Before every remote command, orchestration selects a usable retained member,
+  may add a member only after provider-confirmed capacity unavailability, and
+  synchronizes the local audited mother code plus the local idempotent
+  mother-environment definition. Experiment agents never manage pool membership,
+  rematerialize data, or release instances. They may download only models,
+  metrics, logs, and aggregate evidence, never raw or row-level data. Failure
+  powers off without release; only final-report validation and campaign
+  completion permit orchestration to release every member.
 - Before an instance is created, the selected provider reference must validate
   the requested resource and image against that provider's supported pool. If
   the paper's exact GPU is absent, selection may use only the closest documented
@@ -185,7 +188,6 @@
   replication requires re-upload and environment reconstruction. A resumed
   replication/report attempt is archived and restarted from replication step 1;
   agents must not reuse its old step log as a checkpoint. Explicit Auto Research
-  resume is also orchestration-owned. A single replacement independently runs
-  drive preparation and local offline monitoring, verifies the copied base
-  inventory, and powers off before a new agent session; no prior process-local
-  session ID is reused.
+  resume is also orchestration-owned. Pool selection and expansion independently
+  run drive preparation and inventory verification before use; no prior
+  process-local session ID is reused.

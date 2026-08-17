@@ -34,8 +34,9 @@ refinement variant.
 Remote compute is mandatory for this cloud-backed campaign. Read
 `{{ skills_dir }}/computation_provider/SKILL.md`, the selected provider
 reference, and the selected drive reference before any provider operation.
-Reuse the campaign-owned instance when its state already exists; never create
-one instance per idea or round.
+Reuse the campaign-owned state and its selected pool member when state already
+exists; never create one instance per idea or round. Pool expansion is reserved
+for orchestration after a provider-confirmed capacity conflict.
 
 When no campaign state exists, read the completed Replicate remote state using
 the provider-specific state description in the selected reference. Search for

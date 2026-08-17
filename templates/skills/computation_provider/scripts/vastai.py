@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import copy
 import hashlib
 import json
 import os
@@ -26,8 +27,26 @@ NO_INVENTORY_MARKERS = (
     "already rented",
     "offer is no longer available",
 )
+CAPACITY_UNAVAILABLE_MARKER = "required resources are currently unavailable"
 CLOUD_COPY_TIMEOUT_SECONDS = 3600
 INVENTORY_FILENAME = "cloud-inventory.v1.json"
+POOL_INSTANCE_FIELDS = (
+    "instance_id",
+    "label",
+    "selected_offer",
+    "primary_offer",
+    "fallback_offer",
+    "creation_uncertain",
+    "failed_create_retries",
+    "creation_failed",
+    "creation_failure",
+    "created_for_resume_count",
+    "cloud_drive",
+    "unavailable_reason",
+    "released_at_unix",
+    "last_capacity_failure",
+    "last_connection_failure",
+)
 SSH_KEY_TYPES = {
     "ecdsa-sha2-nistp256",
     "ecdsa-sha2-nistp384",
@@ -231,6 +250,7 @@ def _successful(payload: Any) -> dict[str, Any]:
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
+    _sync_active_pool_entry(state)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -286,6 +306,34 @@ def load_state(path: Path) -> dict[str, Any]:
         raise RuntimeError("Vast state has an invalid provider_state.failed_create_retries")
     if provider_state.get("creation_uncertain") is not True:
         _required_string(provider_state, "instance_id", "provider_state")
+    if _pool_enabled(state):
+        pool = provider_state.get("instance_pool")
+        index = provider_state.get("active_pool_index")
+        if (
+            not isinstance(pool, list)
+            or not pool
+            or isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < 0
+            or index >= len(pool)
+        ):
+            raise RuntimeError("Vast campaign instance pool has an invalid structure")
+        labels: list[str] = []
+        instance_ids: list[str] = []
+        for entry in pool:
+            if not isinstance(entry, dict) or not isinstance(entry.get("released"), bool):
+                raise RuntimeError("Vast campaign instance pool member is invalid")
+            labels.append(_required_string(entry, "label", "instance_pool member"))
+            selected_entry = entry.get("selected_offer")
+            if not isinstance(selected_entry, dict):
+                raise RuntimeError("Vast campaign instance pool member is missing its offer")
+            _offer_record(selected_entry)
+            if entry.get("creation_uncertain") is not True:
+                instance_ids.append(
+                    _required_string(entry, "instance_id", "instance_pool member")
+                )
+        if len(labels) != len(set(labels)) or len(instance_ids) != len(set(instance_ids)):
+            raise RuntimeError("Vast campaign instance pool contains duplicate identities")
     return state
 
 
@@ -486,6 +534,125 @@ def _manifest_resume_count(state_path: Path) -> int | None:
     return value
 
 
+def _manifest_workflow(state_path: Path) -> str | None:
+    manifest_path = state_path.parent.parent / "manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Run manifest is invalid: {manifest_path}") from exc
+    inputs = manifest.get("inputs")
+    workflow = inputs.get("workflow") if isinstance(inputs, dict) else None
+    return workflow if isinstance(workflow, str) else None
+
+
+def _pool_enabled(state: dict[str, Any]) -> bool:
+    return state["provider_state"].get("instance_pool_enabled") is True
+
+
+def _active_released(state: dict[str, Any]) -> bool:
+    if _pool_enabled(state):
+        return state["provider_state"].get("active_instance_released") is True
+    return state.get("released") is True
+
+
+def _pool_entry_from_active(state: dict[str, Any]) -> dict[str, Any]:
+    provider_state = state["provider_state"]
+    entry = {
+        name: copy.deepcopy(provider_state[name])
+        for name in POOL_INSTANCE_FIELDS
+        if name in provider_state
+    }
+    entry["released"] = _active_released(state)
+    return entry
+
+
+def _sync_active_pool_entry(state: dict[str, Any]) -> None:
+    if not _pool_enabled(state):
+        return
+    provider_state = state["provider_state"]
+    pool = provider_state.get("instance_pool")
+    index = provider_state.get("active_pool_index")
+    if (
+        not isinstance(pool, list)
+        or isinstance(index, bool)
+        or not isinstance(index, int)
+        or index < 0
+        or index >= len(pool)
+    ):
+        raise RuntimeError("Vast campaign instance pool has an invalid active member")
+    pool[index] = _pool_entry_from_active(state)
+    state["released"] = bool(pool) and all(
+        isinstance(entry, dict) and entry.get("released") is True for entry in pool
+    )
+
+
+def _enable_campaign_pool(state_path: Path, state: dict[str, Any]) -> dict[str, Any]:
+    if _pool_enabled(state) or _manifest_workflow(state_path) != "autoresearch":
+        return state
+    provider_state = state["provider_state"]
+    provider_state["instance_pool_enabled"] = True
+    provider_state["active_pool_index"] = 0
+    provider_state["active_instance_released"] = state.get("released") is True
+    provider_state["instance_pool"] = [_pool_entry_from_active(state)]
+    save_state(state_path, state)
+    return state
+
+
+def _activate_pool_member(
+    state_path: Path, state: dict[str, Any], index: int
+) -> dict[str, Any]:
+    _sync_active_pool_entry(state)
+    provider_state = state["provider_state"]
+    pool = provider_state["instance_pool"]
+    if index < 0 or index >= len(pool) or not isinstance(pool[index], dict):
+        raise RuntimeError("Vast campaign instance pool member is invalid")
+    entry = copy.deepcopy(pool[index])
+    for name in POOL_INSTANCE_FIELDS:
+        provider_state.pop(name, None)
+    for name in POOL_INSTANCE_FIELDS:
+        if name in entry:
+            provider_state[name] = entry[name]
+    provider_state["active_pool_index"] = index
+    provider_state["active_instance_released"] = entry.get("released") is True
+    state["released"] = all(
+        isinstance(candidate, dict) and candidate.get("released") is True
+        for candidate in pool
+    )
+    save_state(state_path, state)
+    return state
+
+
+def _discard_active_pool_member(
+    state_path: Path, state: dict[str, Any], restore_index: int
+) -> dict[str, Any]:
+    provider_state = state["provider_state"]
+    pool = provider_state["instance_pool"]
+    active_index = provider_state["active_pool_index"]
+    if active_index != len(pool) - 1 or restore_index >= active_index:
+        raise RuntimeError("Vast campaign pool cannot discard a non-terminal member")
+    pool.pop()
+    entry = copy.deepcopy(pool[restore_index])
+    for name in POOL_INSTANCE_FIELDS:
+        provider_state.pop(name, None)
+    for name in POOL_INSTANCE_FIELDS:
+        if name in entry:
+            provider_state[name] = entry[name]
+    provider_state["active_pool_index"] = restore_index
+    provider_state["active_instance_released"] = entry.get("released") is True
+    state["released"] = all(
+        isinstance(candidate, dict) and candidate.get("released") is True
+        for candidate in pool
+    )
+    save_state(state_path, state)
+    return state
+
+
+def _pool_limit() -> int:
+    return _positive_integer("VASTAI_MAX_CAMPAIGN_INSTANCES", "3")
+
+
 def _history_from_released_state(
     state_path: Path, state: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], int | None, str]:
@@ -554,6 +721,8 @@ def _activate_instance(state_path: Path, state: dict[str, Any], instance_id: str
     provider_state = state["provider_state"]
     provider_state["instance_id"] = str(instance_id)
     provider_state["creation_uncertain"] = False
+    if _pool_enabled(state):
+        provider_state["active_instance_released"] = False
     state["released"] = False
     state.pop("released_at_unix", None)
     save_state(state_path, state)
@@ -574,6 +743,11 @@ def _is_explicit_no_inventory(error: VastApiError) -> bool:
     return error.status in {400, 404, 409} and any(
         marker in error.detail.casefold() for marker in NO_INVENTORY_MARKERS
     )
+
+
+def _is_capacity_unavailable(error: VastApiError) -> bool:
+    detail = error.detail.casefold()
+    return CAPACITY_UNAVAILABLE_MARKER in detail
 
 
 def _create_offer(
@@ -718,6 +892,8 @@ def create_instance(args: argparse.Namespace) -> str:
         failed["provider_state"]["creation_failure"] = str(exc)
         save_state(args.state, failed)
         raise
+    saved = _enable_campaign_pool(args.state, load_state(args.state))
+    save_state(args.state, saved)
     return instance_id
 
 
@@ -775,7 +951,7 @@ def _wait_for_status(
 def _ssh_command(
     state: dict[str, Any], action: str, arguments: list[str]
 ) -> subprocess.CompletedProcess[str]:
-    if state.get("released") is True:
+    if _active_released(state):
         raise RuntimeError("Vast instance has already been released")
     instance = show_instance(state)
     direct_host = instance.get("public_ipaddr")
@@ -838,9 +1014,9 @@ def remote_exec(state: dict[str, Any], command: list[str]) -> str:
     return completed.stdout.strip()
 
 
-def power_on_instance(args: argparse.Namespace, *, known_status: str | None = None) -> str:
+def _power_on_active(args: argparse.Namespace, *, known_status: str | None = None) -> str:
     state = load_state(args.state)
-    if state.get("released") is True:
+    if _active_released(state):
         raise RuntimeError("Vast instance has already been released")
     status = known_status or instance_status(state)
     if status == "running":
@@ -852,9 +1028,19 @@ def power_on_instance(args: argparse.Namespace, *, known_status: str | None = No
     return _wait_for_status(state, "running", 840, 10)
 
 
-def power_off_instance(args: argparse.Namespace) -> str:
+def power_on_instance(args: argparse.Namespace, *, known_status: str | None = None) -> str:
+    state = _enable_campaign_pool(args.state, load_state(args.state))
+    if not _pool_enabled(state):
+        return _power_on_active(args, known_status=known_status)
+    return json.dumps(
+        _acquire_campaign_instance(args, initial_status=known_status),
+        sort_keys=True,
+    )
+
+
+def _power_off_active(args: argparse.Namespace) -> str:
     state = load_state(args.state)
-    if state.get("released") is True:
+    if _active_released(state):
         return "released"
     status = instance_status(state)
     if status == "stopped":
@@ -864,6 +1050,37 @@ def power_off_instance(args: argparse.Namespace) -> str:
     instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
     _successful(request("PUT", f"/api/v0/instances/{instance_id}/", {"state": "stopped"}))
     return _wait_for_status(state, "stopped", 240, 5)
+
+
+def power_off_instance(args: argparse.Namespace) -> str:
+    state = _enable_campaign_pool(args.state, load_state(args.state))
+    if not _pool_enabled(state):
+        return _power_off_active(args)
+    errors: list[str] = []
+    pool = state["provider_state"]["instance_pool"]
+    original_index = state["provider_state"]["active_pool_index"]
+    for index in range(len(pool)):
+        state = _activate_pool_member(args.state, load_state(args.state), index)
+        if _active_released(state):
+            continue
+        instance_id = state["provider_state"].get("instance_id", f"pool member {index + 1}")
+        try:
+            _power_off_active(args)
+        except VastApiError as exc:
+            if exc.status == 404:
+                _mark_released(
+                    args.state,
+                    load_state(args.state),
+                    "provider_confirmed_missing",
+                )
+            else:
+                errors.append(f"{instance_id}: {exc}")
+        except Exception as exc:
+            errors.append(f"{instance_id}: {exc}")
+    _activate_pool_member(args.state, load_state(args.state), original_index)
+    if errors:
+        raise RuntimeError("Could not stop every Vast campaign instance: " + "; ".join(errors))
+    return "stopped"
 
 
 def _manifest_report_completed(state_path: Path) -> bool | None:
@@ -889,16 +1106,23 @@ def _manifest_report_completed(state_path: Path) -> bool | None:
 
 
 def _mark_released(state_path: Path, state: dict[str, Any], reason: str | None = None) -> None:
-    state["released"] = True
-    state["released_at_unix"] = int(time.time())
+    released_at = int(time.time())
+    if _pool_enabled(state):
+        state["provider_state"]["active_instance_released"] = True
+        state["provider_state"]["released_at_unix"] = released_at
+    else:
+        state["released"] = True
+        state["released_at_unix"] = released_at
     if reason:
         state["provider_state"]["unavailable_reason"] = reason
     save_state(state_path, state)
 
 
-def release_instance(args: argparse.Namespace, *, allow_before_report: bool = False) -> None:
+def _release_active_instance(
+    args: argparse.Namespace, *, allow_before_report: bool = False
+) -> None:
     state = load_state(args.state)
-    if state.get("released") is True:
+    if _active_released(state):
         return
     failed_creation = state["provider_state"].get("creation_failed") is True
     if (
@@ -910,7 +1134,7 @@ def release_instance(args: argparse.Namespace, *, allow_before_report: bool = Fa
     instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
     try:
         if not failed_creation or instance_status(state) in {"running", "stopped"}:
-            power_off_instance(args)
+            _power_off_active(args)
     except VastApiError as exc:
         if exc.status != 404:
             raise
@@ -950,6 +1174,26 @@ def release_instance(args: argparse.Namespace, *, allow_before_report: bool = Fa
             _mark_released(args.state, state)
             return
     raise RuntimeError("Vast instance remains visible after destroy")
+
+
+def release_instance(args: argparse.Namespace, *, allow_before_report: bool = False) -> None:
+    state = _enable_campaign_pool(args.state, load_state(args.state))
+    if not _pool_enabled(state):
+        _release_active_instance(args, allow_before_report=allow_before_report)
+        return
+    errors: list[str] = []
+    pool = state["provider_state"]["instance_pool"]
+    for index in range(len(pool)):
+        state = _activate_pool_member(args.state, load_state(args.state), index)
+        if _active_released(state):
+            continue
+        instance_id = state["provider_state"].get("instance_id", f"pool member {index + 1}")
+        try:
+            _release_active_instance(args, allow_before_report=allow_before_report)
+        except Exception as exc:
+            errors.append(f"{instance_id}: {exc}")
+    if errors:
+        raise RuntimeError("Could not release every Vast campaign instance: " + "; ".join(errors))
 
 
 def _ensure_replacement_allowed(state_path: Path, state: dict[str, Any]) -> None:
@@ -1012,6 +1256,266 @@ def _replacement_args(state_path: Path, state: dict[str, Any]) -> argparse.Names
     )
 
 
+def _pool_replacement_offers(
+    state: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    provider_state = state["provider_state"]
+    requested = provider_state["requested"]
+    selected = _offer_record(provider_state["selected_offer"])
+    specification = dict(requested)
+    specification.update(
+        {
+            "gpu_name": selected["gpu_name"],
+            "gpu_count": selected["gpu_count"],
+            "min_gpu_ram_gb": (selected["gpu_ram_mb"] + 1023) // 1024,
+            "min_cpu_ram_gb": (selected["cpu_ram_mb"] + 1023) // 1024,
+            "min_reliability": min(requested["min_reliability"], selected["reliability"]),
+        }
+    )
+    candidates = search_offers(specification)
+    if not candidates:
+        specification["gpu_name"] = None
+        candidates = [
+            candidate
+            for candidate in search_offers(specification)
+            if _stronger_or_equal(candidate, selected)
+        ]
+    if not candidates:
+        raise RuntimeError("No current Vast offer can extend the campaign instance pool")
+    primary = candidates[0]
+    fallback = next(
+        (
+            candidate
+            for candidate in candidates[1:]
+            if _stronger_or_equal(candidate, primary)
+        ),
+        None,
+    )
+    return primary, fallback
+
+
+def _new_pool_cloud_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    cloud = state["provider_state"].get("cloud_drive")
+    if not isinstance(cloud, dict):
+        return None
+    replacement = copy.deepcopy(cloud)
+    replacement["completed"] = False
+    replacement["status"] = "replacement_pending"
+    for name in (
+        "materialized",
+        "completed_at_unix",
+        "copy_requested",
+        "copy_started_at_unix",
+        "cancel_confirmed",
+    ):
+        replacement.pop(name, None)
+    return replacement
+
+
+def _create_pool_member(args: argparse.Namespace, state: dict[str, Any]) -> str:
+    provider_state = state["provider_state"]
+    pool = provider_state["instance_pool"]
+    if len(pool) >= _pool_limit():
+        raise RuntimeError(
+            f"Vast campaign instance pool limit ({_pool_limit()}) is exhausted"
+        )
+    restore_index = provider_state["active_pool_index"]
+    primary, fallback = _pool_replacement_offers(state)
+    ssh_public_key = _configured_ssh_public_key()
+    if ssh_public_key is not None:
+        _validate_account_ssh_key(ssh_public_key)
+    cloud = _new_pool_cloud_state(state)
+    for name in POOL_INSTANCE_FIELDS:
+        provider_state.pop(name, None)
+    provider_state.update(
+        {
+            "label": (
+                f"medai-{provider_state['run_token']}-pool-{len(pool) + 1:03d}"
+            ),
+            "selected_offer": primary,
+            "creation_uncertain": True,
+            "failed_create_retries": 0,
+            "active_pool_index": len(pool),
+            "active_instance_released": False,
+        }
+    )
+    if fallback is not None:
+        provider_state["fallback_offer"] = fallback
+    if cloud is not None:
+        provider_state["cloud_drive"] = cloud
+    pool.append(_pool_entry_from_active(state))
+    state["released"] = False
+    save_state(args.state, state)
+    try:
+        instance_id = _create_offer(args.state, state, primary, ssh_public_key)
+    except VastApiError as exc:
+        if not _is_explicit_no_inventory(exc):
+            raise
+        matches = _instances_by_label(provider_state["label"])
+        if len(matches) == 1:
+            instance_id = _activate_instance(
+                args.state, state, _offer_id(matches[0])
+            )
+        elif len(matches) > 1:
+            raise RuntimeError(
+                "Vast pool create response is ambiguous: multiple instances share its label"
+            )
+        elif fallback is not None:
+            provider_state["primary_offer"] = primary
+            provider_state["selected_offer"] = fallback
+            provider_state.pop("fallback_offer", None)
+            save_state(args.state, state)
+            try:
+                instance_id = _create_offer(
+                    args.state, state, fallback, ssh_public_key
+                )
+            except VastApiError as fallback_error:
+                if not _is_explicit_no_inventory(fallback_error):
+                    raise
+                matches = _instances_by_label(provider_state["label"])
+                if len(matches) == 1:
+                    instance_id = _activate_instance(
+                        args.state, state, _offer_id(matches[0])
+                    )
+                elif len(matches) > 1:
+                    raise RuntimeError(
+                        "Vast pool create response is ambiguous: multiple instances share its label"
+                    )
+                else:
+                    _discard_active_pool_member(
+                        args.state, load_state(args.state), restore_index
+                    )
+                    raise RuntimeError(
+                        "No selected Vast offer remained available for a new pool member"
+                    ) from fallback_error
+        else:
+            _discard_active_pool_member(args.state, load_state(args.state), restore_index)
+            raise RuntimeError(
+                "The selected Vast offer became unavailable before pool creation"
+            ) from exc
+    saved = load_state(args.state)
+    try:
+        _wait_for_status(saved, "running", 600, 10)
+    except RuntimeError as exc:
+        failed = load_state(args.state)
+        failed["provider_state"]["creation_failed"] = True
+        failed["provider_state"]["creation_failure"] = str(exc)
+        save_state(args.state, failed)
+        raise
+    return instance_id
+
+
+def _cancel_queued_start(state: dict[str, Any]) -> None:
+    instance_id = _required_string(
+        state["provider_state"], "instance_id", "provider_state"
+    )
+    try:
+        _successful(
+            request(
+                "PUT",
+                f"/api/v0/instances/{instance_id}/",
+                {"state": "stopped"},
+            )
+        )
+    except VastApiError as exc:
+        if exc.status != 404:
+            raise
+
+
+def _pool_member_ready(state: dict[str, Any]) -> bool:
+    cloud = state["provider_state"].get("cloud_drive")
+    return not isinstance(cloud, dict) or cloud.get("completed") is True
+
+
+def _acquire_campaign_instance(
+    args: argparse.Namespace, *, initial_status: str | None = None
+) -> dict[str, Any]:
+    state = _enable_campaign_pool(args.state, load_state(args.state))
+    provider_state = state["provider_state"]
+    pool = provider_state["instance_pool"]
+    active_index = provider_state["active_pool_index"]
+    order = [active_index, *(index for index in range(len(pool)) if index != active_index)]
+    capacity_failures = 0
+    for position, index in enumerate(order):
+        state = _activate_pool_member(args.state, load_state(args.state), index)
+        if _active_released(state) or state["provider_state"].get("creation_failed") is True:
+            continue
+        if state["provider_state"].get("creation_uncertain") is True:
+            state = _resolve_uncertain_creation(args.state, state)
+        try:
+            status = initial_status if position == 0 and initial_status else instance_status(state)
+            if status == "stopped":
+                _power_on_active(args, known_status=status)
+            elif status != "running":
+                raise RuntimeError(
+                    f"Cannot select Vast campaign instance from status={status}"
+                )
+            state = load_state(args.state)
+            probe = _ssh_command(state, "exec", ["--", "true"])
+            if probe.returncode != 0:
+                state["provider_state"]["last_connection_failure"] = int(time.time())
+                save_state(args.state, state)
+                try:
+                    _power_off_active(args)
+                except Exception:
+                    pass
+                continue
+            return {
+                "created": False,
+                "instance_id": state["provider_state"]["instance_id"],
+                "materialization_required": not _pool_member_ready(state),
+                "pool_size": len(pool),
+                "status": "running",
+                "switched": index != active_index,
+            }
+        except VastApiError as exc:
+            if exc.status == 404:
+                _mark_released(
+                    args.state,
+                    load_state(args.state),
+                    "provider_confirmed_missing",
+                )
+                continue
+            if not _is_capacity_unavailable(exc):
+                raise
+            capacity_failures += 1
+            state = load_state(args.state)
+            state["provider_state"]["last_capacity_failure"] = {
+                "at_unix": int(time.time()),
+                "error": _redact(str(exc)),
+            }
+            save_state(args.state, state)
+            _cancel_queued_start(state)
+    state = load_state(args.state)
+    if capacity_failures == 0:
+        raise RuntimeError("No retained Vast campaign instance is usable")
+    pool_cloud_states = [
+        entry.get("cloud_drive")
+        for entry in state["provider_state"]["instance_pool"]
+        if isinstance(entry, dict)
+    ]
+    if pool_cloud_states and not any(
+        isinstance(cloud, dict) and cloud.get("completed") is True
+        for cloud in pool_cloud_states
+    ):
+        raise RuntimeError(
+            "Cannot extend a Vast campaign pool before its initial cloud data is complete"
+        )
+    instance_id = _create_pool_member(args, state)
+    state = load_state(args.state)
+    probe = _ssh_command(state, "exec", ["--", "true"])
+    if probe.returncode != 0:
+        raise RuntimeError("New Vast campaign instance failed its SSH probe")
+    return {
+        "created": True,
+        "instance_id": instance_id,
+        "materialization_required": not _pool_member_ready(state),
+        "pool_size": len(state["provider_state"]["instance_pool"]),
+        "status": "running",
+        "switched": True,
+    }
+
+
 def _resolve_uncertain_creation(state_path: Path, state: dict[str, Any]) -> dict[str, Any]:
     provider_state = state["provider_state"]
     if provider_state.get("creation_uncertain") is not True:
@@ -1024,7 +1528,14 @@ def _resolve_uncertain_creation(state_path: Path, state: dict[str, Any]) -> dict
 
 
 def reconcile_instance(args: argparse.Namespace) -> dict[str, Any]:
-    state = _resolve_uncertain_creation(args.state, load_state(args.state))
+    state = _enable_campaign_pool(args.state, load_state(args.state))
+    if _pool_enabled(state):
+        acquired = _acquire_campaign_instance(args)
+        return {
+            **acquired,
+            "replaced": acquired["created"],
+        }
+    state = _resolve_uncertain_creation(args.state, state)
     if state.get("released") is True:
         instance_id = create_instance(_replacement_args(args.state, state))
         return {"replaced": True, "instance_id": instance_id, "status": "running"}
@@ -1279,8 +1790,8 @@ def _ensure_cloud_staging_visible(
     if _ssh_command(state, "exec", command).returncode == 0:
         return
     lifecycle_args = argparse.Namespace(state=state_path)
-    power_off_instance(lifecycle_args)
-    power_on_instance(lifecycle_args)
+    _power_off_active(lifecycle_args)
+    _power_on_active(lifecycle_args)
     if _ssh_command(state, "exec", command).returncode != 0:
         raise RuntimeError("Vast cloud-copy staging is not visible after instance restart")
 
@@ -1385,7 +1896,7 @@ def _prepare_cloud_pull(
     if status in {"new", "replacement_pending"}:
         remote_exec(state, ["test", "!", "-e", cloud["staging_path"]])
 
-    power_off_instance(args)
+    _power_off_active(args)
     cloud["handoff_ready"] = True
     cloud["prepared_at_unix"] = int(time.time())
     _update_cloud(args.state, state, cloud, status)
@@ -1394,7 +1905,7 @@ def _prepare_cloud_pull(
 def _restore_cloud_instance(args: argparse.Namespace, state: dict[str, Any]) -> None:
     status = instance_status(state)
     if status == "stopped":
-        power_on_instance(args, known_status=status)
+        _power_on_active(args, known_status=status)
     elif status != "running":
         raise RuntimeError(f"Cannot restore Vast instance from status={status}")
     remote_exec(state, ["true"])
@@ -1513,7 +2024,7 @@ def cloud_pull(args: argparse.Namespace) -> None:
     if drive_provider != "google-drive":
         raise RuntimeError("MEDAI_DRIVE_PROVIDER must be 'google-drive'")
     state = load_state(args.state)
-    if state.get("released") is True:
+    if _active_released(state):
         raise RuntimeError("Vast instance has already been released")
     connection_id = _drive_connection_id()
     cloud = _cloud_state(args.state, state, dataset, connection_id)

@@ -157,12 +157,13 @@ the provider but fails the one harmless SSH probe must be powered off and
 successfully released before one replacement may be created. Persisted lifecycle
 state must guard every release and replacement.
 
-For a cloud-backed Auto Research campaign, create one campaign-owned instance
-only when the first audited idea reaches experiment planning. Reuse its state,
-working directory, and read-only dataset target across every idea and round.
-When the agent uses command handoff, orchestration powers on immediately before
-each foreground experiment command and powers off in `finally` before resuming
-the agent. A failed campaign remains powered off but unreleased. Release only
-after final-report validation and campaign completion. If explicit resume makes
-one bounded replacement, independently repeat offline cloud preparation and
-monitoring against the inherited inventory, then power off before agent work.
+For a cloud-backed Auto Research campaign, create the first campaign-owned
+instance only when the first audited idea reaches experiment planning. A
+provider may maintain a bounded pool in canonical state, select a retained
+usable member before each foreground experiment command, and add one only after
+an unambiguous capacity conflict. Every newly selected member independently
+materializes and verifies the inherited inventory. Orchestration synchronizes
+the local audited mother code and local idempotent mother-environment definition,
+powers every member off in `finally`, and resumes the agent. A failed campaign
+remains powered off but unreleased. Release every owned member only after
+final-report validation and campaign completion.

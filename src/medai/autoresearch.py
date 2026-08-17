@@ -4,8 +4,9 @@ import hashlib
 import json
 import math
 import re
+import shlex
 import shutil
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -56,6 +57,7 @@ from medai.workflow import (
     _cloud_drive_materialization_completed,
     _next_command_index,
     _run_agent_command,
+    _run_computation_provider_action,
     power_off_run_computation_instance,
     power_on_run_computation_instance,
     resolve_replication_output,
@@ -1227,6 +1229,116 @@ def _validate_experiment_artifacts(
     return outputs
 
 
+def _prepare_autoresearch_command_instance(
+    config: AutoResearchConfig,
+    codebase_dir: Path,
+    experiment_dir: Path,
+) -> dict[str, Any]:
+    acquisition = power_on_run_computation_instance(config)
+    state_path = config.output / "remote_compute" / "instance.json"
+    if config.clouddrive and acquisition.get("materialization_required") is True:
+        if config.cloud_dataset is None:
+            raise RuntimeError("Cloud-backed Auto Research is missing its dataset name")
+        _run_computation_provider_action(
+            state_path,
+            "cloud-pull",
+            arguments=["--dataset", config.cloud_dataset],
+            expected_provider=config.computation_provider,
+        )
+        if not _cloud_drive_materialization_completed(config):
+            raise RuntimeError("Selected campaign instance has incomplete cloud data")
+
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Remote computation state is invalid: {state_path}") from exc
+    provider_state = state.get("provider_state")
+    remote_working_dir = (
+        provider_state.get("remote_working_dir")
+        if isinstance(provider_state, dict)
+        else None
+    )
+    remote_root = (
+        PurePosixPath(remote_working_dir)
+        if isinstance(remote_working_dir, str)
+        else None
+    )
+    if (
+        remote_root is None
+        or not remote_root.is_absolute()
+        or len(remote_root.parts) < 4
+        or ".." in remote_root.parts
+    ):
+        raise RuntimeError("Remote computation state is missing its working directory")
+    remote_working_dir = str(remote_root)
+
+    environment_dir = experiment_dir / "environment"
+    setup_path = environment_dir / "setup.sh"
+    manifest_path = environment_dir / "environment.json"
+    if not setup_path.is_file() or not setup_path.read_text(encoding="utf-8").strip():
+        raise RuntimeError("Experiment agent did not write its local environment/setup.sh")
+    try:
+        environment_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "Experiment agent did not write a valid local environment/environment.json"
+        ) from exc
+    if not isinstance(environment_manifest, dict) or not environment_manifest:
+        raise RuntimeError("Experiment environment manifest must be a non-empty JSON object")
+
+    remote_code = f"{remote_working_dir}/codebase"
+    remote_environment_spec = f"{remote_working_dir}/environment-spec"
+    remote_environment = f"{remote_working_dir}/environment"
+    next_code = f"{remote_working_dir}/.codebase.next"
+    next_environment_spec = f"{remote_working_dir}/.environment-spec.next"
+    quoted_next_code = shlex.quote(next_code)
+    quoted_next_environment_spec = shlex.quote(next_environment_spec)
+    quoted_working_dir = shlex.quote(remote_working_dir)
+    _run_computation_provider_action(
+        state_path,
+        "exec",
+        arguments=[
+            "--",
+            "bash",
+            "-lc",
+            f"rm -rf -- {quoted_next_code} {quoted_next_environment_spec}; "
+            f"mkdir -p -- {quoted_working_dir}",
+        ],
+        expected_provider=config.computation_provider,
+    )
+    _run_computation_provider_action(
+        state_path,
+        "upload",
+        arguments=["--source", str(codebase_dir), "--remote", next_code],
+        expected_provider=config.computation_provider,
+    )
+    _run_computation_provider_action(
+        state_path,
+        "upload",
+        arguments=["--source", str(environment_dir), "--remote", next_environment_spec],
+        expected_provider=config.computation_provider,
+    )
+    replace_command = (
+        f"rm -rf -- {shlex.quote(remote_code)} {shlex.quote(remote_environment_spec)}; "
+        f"mv -- {shlex.quote(next_code)} {shlex.quote(remote_code)}; "
+        f"mv -- {shlex.quote(next_environment_spec)} "
+        f"{shlex.quote(remote_environment_spec)}; "
+        f"bash {shlex.quote(remote_environment_spec + '/setup.sh')} "
+        f"{shlex.quote(remote_environment)} {shlex.quote(remote_code)}"
+    )
+    setup_output = _run_computation_provider_action(
+        state_path,
+        "exec",
+        arguments=["--", "bash", "-lc", replace_command],
+        expected_provider=config.computation_provider,
+    )
+    (environment_dir / "setup.log").write_text(
+        setup_output + ("\n" if setup_output else ""),
+        encoding="utf-8",
+    )
+    return acquisition
+
+
 def _run_experiment_command_handoff(
     *,
     config: AutoResearchConfig,
@@ -1289,8 +1401,12 @@ def _run_experiment_command_handoff(
         command = load_model(command_request_path, ReplicationCommand).command
         command_log_path = command_dir / f"command_{command_index:03d}.log"
         result_path = command_dir / f"command_{command_index:03d}_result.json"
-        power_on_run_computation_instance(config)
         try:
+            _prepare_autoresearch_command_instance(
+                config,
+                codebase_dir,
+                experiment_dir,
+            )
             result = _run_agent_command(
                 command,
                 codebase_dir=codebase_dir,
@@ -1405,6 +1521,12 @@ def _run_experiment(
         experiment_dir=experiment_dir,
         experiment_log_path=log_path,
         evidence_summary_path=evidence_path,
+        local_environment_dir=experiment_dir / "environment",
+        remote_environment_dir=(
+            f"{plan.remote_compute.remote_working_dir}/environment"
+            if plan.remote_compute is not None
+            else None
+        ),
         computation_provider_state_path=config.output / "remote_compute" / "instance.json",
     )
     if command_handoff:

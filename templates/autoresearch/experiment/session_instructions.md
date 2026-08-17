@@ -31,8 +31,8 @@ the already audited code.
 
 {% if cloud_drive_enabled %}
 Read `{{ skills_dir }}/computation_provider/SKILL.md`, the selected provider
-reference, and the selected drive reference. Reuse only the campaign instance
-at the supplied state path and the completed `remote_dataset_dir` from the plan.
+reference, and the selected drive reference. Reuse only the pool member selected
+through the supplied campaign state and the completed `remote_dataset_dir` from the plan.
 Upload only the audited idea code. Download only experiment models, metrics,
 logs, and aggregate evidence needed by the local artifacts. Never download raw
 or row-level dataset content, reauthorize or rematerialize the drive, create a
@@ -42,13 +42,36 @@ second instance, or release the instance.
 {% if command_handoff %}
 ## Command handoff protocol
 
+Before returning the first command, create the local mother-environment
+directory `{{ local_environment_dir }}` with both:
+
+- `setup.sh`: an idempotent Bash program accepting the remote environment path
+  as `$1` and the synchronized remote codebase path as `$2`. It must create or
+  validate the complete runtime at `$1` from local dependency definitions and
+  must not read the dataset or run an experiment.
+- `environment.json`: a non-empty JSON object describing the selected language,
+  runtime, dependency inputs, and material divergences from the plan or base
+  evidence. Neither file may contain credentials or copied environment secrets.
+
+Derive this definition from the experiment plan and the validated base evidence
+listed above. Prefer the base run's proven runtime when it satisfies the audited
+dependencies; record any necessary divergence instead of assuming an unavailable
+paper-version executable.
+
+Use only `{{ remote_environment_dir }}` as the experiment runtime. Local
+orchestration synchronizes the audited local codebase and this mother-environment
+definition to every selected campaign instance, then runs `setup.sh` before each
+foreground command. Commands must therefore treat the synchronized remote code
+and environment as authoritative and must not create an unrecorded environment
+elsewhere.
+
 Return exactly one JSON object with one non-empty field:
 `{"command":"<foreground bash command>"}`. Do not directly run or monitor a
 remote experiment or provider command in this agent turn. Local orchestration
-will power on the recorded instance, execute and stream the command from the
-idea codebase, save its combined log and terminal result, power the same
-instance off, then resume this session. Use each resumed result to continue or
-debug until all local experiment artifacts validate.
+will select a usable campaign instance, execute and stream the command from the
+idea codebase, save its combined log and terminal result, power that instance
+off, then resume this session. Use each resumed result to continue or debug
+until all local experiment artifacts validate.
 
 Every returned command must remain in the foreground. Do not use `nohup`, `&`,
 or a detached remote launcher. Use only the provider adapter's reviewed upload,

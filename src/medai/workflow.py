@@ -375,18 +375,30 @@ def reconcile_run_computation_instance(
     return result
 
 
-def power_on_run_computation_instance(config: RunConfig | AutoResearchConfig) -> None:
+def power_on_run_computation_instance(
+    config: RunConfig | AutoResearchConfig,
+) -> dict[str, Any]:
     state_path = config.output / "remote_compute" / "instance.json"
     if not state_path.is_file():
-        return
+        return {"created": False, "materialization_required": False}
     state = _load_computation_provider_state(state_path)
     if not state.get("created_by_run") or state.get("released") is True:
-        return
-    _run_computation_provider_action(
+        return {"created": False, "materialization_required": False}
+    output = _run_computation_provider_action(
         state_path,
         "power-on",
         expected_provider=config.computation_provider,
     )
+    try:
+        result = json.loads(output)
+    except json.JSONDecodeError:
+        result = None
+    if isinstance(result, dict):
+        created = result.get("created")
+        materialization_required = result.get("materialization_required")
+        if isinstance(created, bool) and isinstance(materialization_required, bool):
+            return result
+    return {"created": False, "materialization_required": False}
 
 
 def power_off_run_computation_instance(
@@ -802,7 +814,10 @@ def prepare_autoresearch_resume(config: AutoResearchConfig) -> dict[str, Any]:
         **reconcile_run_computation_instance(config),
     }
     try:
-        if config.clouddrive and reconciliation["replaced"]:
+        if config.clouddrive and (
+            reconciliation["replaced"]
+            or reconciliation.get("materialization_required") is True
+        ):
             if config.cloud_dataset is None:
                 raise RuntimeError("Cloud-backed Auto Research is missing its dataset name")
             _run_computation_provider_action(

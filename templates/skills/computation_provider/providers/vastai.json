@@ -12,7 +12,8 @@
     {"name": "VASTAI_DEFAULT_GPU_COUNT", "secret": false, "required": false, "default": "1"},
     {"name": "VASTAI_MIN_GPU_RAM_GB", "secret": false, "required": false, "default": "24"},
     {"name": "VASTAI_MIN_CPU_RAM_GB", "secret": false, "required": false, "default": "32"},
-    {"name": "VASTAI_MIN_RELIABILITY", "secret": false, "required": false, "default": "0.99"}
+    {"name": "VASTAI_MIN_RELIABILITY", "secret": false, "required": false, "default": "0.99"},
+    {"name": "VASTAI_MAX_CAMPAIGN_INSTANCES", "secret": false, "required": false, "default": "3"}
   ],
   "configuration_fingerprint": [
     "VASTAI_IMAGE",

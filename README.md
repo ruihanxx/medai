@@ -90,6 +90,9 @@ candidates per round and runs code generation, audit, planning, experimentation,
 and assessment for each candidate. A valid refinement ends the loop after the
 current round; otherwise it continues up to `--max-iter` (1-10). The base run
 must be completed and must describe a supervised prediction task.
+For remote experiments, a campaign selects from its bounded instance pool,
+rebuilds each selected member from local mother code and environment metadata,
+and releases every member only after successful final reporting.
 
 To resume a campaign, pass its existing output explicitly:
 

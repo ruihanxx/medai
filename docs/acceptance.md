@@ -54,10 +54,11 @@ resume.
 Cloud-backed coverage verifies inherited provider/drive configuration without a
 local data mount, copied base inventory, base-resource preference through the
 selected provider reference, initial
-prepare/local-monitor/power-off/same-session resume, one
-campaign instance across ideas and rounds, per-command power-on and `finally`
-power-off before agent resume, replacement resume with a fresh offline pull and
-inventory verification, failure-only power-off, and final-only release.
+prepare/local-monitor/power-off/same-session resume, bounded campaign-pool
+selection, provider-confirmed capacity expansion, per-member inventory
+materialization, local mother-code/environment synchronization, per-command
+`finally` power-off before agent resume, resume reconciliation, failure-only
+power-off, and final release of every owned member.
 
 A real cloud-drive E2E is manual and billable. Use an isolated disposable
 instance, run the selected adapter's `cloud-pull` for a disposable dataset,

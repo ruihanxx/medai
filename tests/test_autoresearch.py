@@ -6,6 +6,7 @@ import pytest
 from medai.autoresearch import (
     REQUIRED_BASE_STAGES,
     _copy_base_cloud_inventory,
+    _prepare_autoresearch_command_instance,
     _run_experiment_command_handoff,
     _run_plan_cloud_pull_handoff,
     create_autoresearch_workflow,
@@ -1039,8 +1040,8 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     monkeypatch.setattr("medai.autoresearch._run_agent_command", fake_command)
     monkeypatch.setattr("medai.autoresearch._validate_experiment_artifacts", fake_validate)
     monkeypatch.setattr(
-        "medai.autoresearch.power_on_run_computation_instance",
-        lambda _config: power_events.append("on"),
+        "medai.autoresearch._prepare_autoresearch_command_instance",
+        lambda _config, _codebase, _experiment: power_events.append("on"),
     )
     monkeypatch.setattr(
         "medai.autoresearch.power_off_run_computation_instance",
@@ -1068,6 +1069,99 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     assert power_events == ["on", "off", "on", "off"]
     assert calls[0].get("resume_session_id") is None
     assert calls[1]["resume_session_id"] == "session-1"
+
+
+def test_autoresearch_command_instance_syncs_local_code_and_environment(
+    tmp_path: Path,
+    monkeypatch,
+):
+    output = tmp_path / "autoresearch"
+    state_path = output / "remote_compute" / "instance.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "vastai",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {
+                    "remote_working_dir": "/workspace/medai/campaign/work",
+                    "cloud_drive": {
+                        "completed": True,
+                        "drive": "google-drive",
+                        "dataset": "mimic-iv",
+                        "target_path": "/workspace/medai/campaign/data/mimic-iv",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    codebase_dir = tmp_path / "codebase"
+    codebase_dir.mkdir()
+    (codebase_dir / "model.py").write_text("pass\n", encoding="utf-8")
+    experiment_dir = tmp_path / "experiment"
+    environment_dir = experiment_dir / "environment"
+    environment_dir.mkdir(parents=True)
+    (environment_dir / "setup.sh").write_text("mkdir -p \"$1\"\n", encoding="utf-8")
+    (environment_dir / "environment.json").write_text(
+        json.dumps({"language": "Python", "runtime": "3.10"}),
+        encoding="utf-8",
+    )
+    config = AutoResearchConfig(
+        base_run=tmp_path / "base",
+        output=output,
+        provider="codex",
+        clouddrive=True,
+        computation_provider="vastai",
+        drive_provider="google-drive",
+        cloud_dataset="mimic-iv",
+    )
+    actions = []
+    monkeypatch.setattr(
+        "medai.autoresearch.power_on_run_computation_instance",
+        lambda _config: {"created": True, "materialization_required": True},
+    )
+    monkeypatch.setattr(
+        "medai.autoresearch._cloud_drive_materialization_completed",
+        lambda _config: True,
+    )
+
+    def fake_action(_state_path, action, *, arguments=None, expected_provider=None):
+        actions.append((action, arguments, expected_provider))
+        return ""
+
+    monkeypatch.setattr(
+        "medai.autoresearch._run_computation_provider_action",
+        fake_action,
+    )
+
+    result = _prepare_autoresearch_command_instance(
+        config,
+        codebase_dir,
+        experiment_dir,
+    )
+
+    assert result["created"] is True
+    assert [action for action, _, _ in actions] == [
+        "cloud-pull",
+        "exec",
+        "upload",
+        "upload",
+        "exec",
+    ]
+    assert actions[2][1] == [
+        "--source",
+        str(codebase_dir),
+        "--remote",
+        "/workspace/medai/campaign/work/.codebase.next",
+    ]
+    assert actions[3][1] == [
+        "--source",
+        str(environment_dir),
+        "--remote",
+        "/workspace/medai/campaign/work/.environment-spec.next",
+    ]
 
 
 def test_idea_artifact_rejects_wrong_ids_or_fields():

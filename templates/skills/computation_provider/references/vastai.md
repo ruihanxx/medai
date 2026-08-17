@@ -19,6 +19,7 @@ VASTAI_DEFAULT_GPU_COUNT=1
 VASTAI_MIN_GPU_RAM_GB=24
 VASTAI_MIN_CPU_RAM_GB=32
 VASTAI_MIN_RELIABILITY=0.99
+VASTAI_MAX_CAMPAIGN_INSTANCES=3
 ```
 
 `VASTAI_API_BASE_URL` defaults to `https://console.vast.ai`; set it only for a
@@ -88,6 +89,16 @@ resource details in `remote_compute/instance.json`. The Vast API workflow is
 documented at <https://docs.vast.ai/api-reference/search/search-offers> and
 <https://docs.vast.ai/api-reference/instances/create-instance>.
 
+After the first successful Auto Research rental, the adapter upgrades this
+state to a bounded campaign pool. `VASTAI_MAX_CAMPAIGN_INSTANCES` is a positive
+integer and defaults to three. Before each foreground experiment command the
+adapter tries the active member and then the other retained members. Only the
+explicit Vast response that required resources are unavailable and the state
+change is queued permits a new rental. The adapter cancels that queued start,
+preserves the stopped member and its disk, and creates a uniquely labelled pool
+member from the same resource floors. Unknown, ambiguous, and non-capacity
+failures never expand the pool.
+
 ## State, SSH, and Lifecycle
 
 The adapter owns the state schema. Do not hand-edit it. It records a stable
@@ -119,13 +130,13 @@ python <skill-dir>/scripts/vastai.py reconcile --state <run-state-path>
 python <skill-dir>/scripts/vastai.py release --state <run-state-path>
 ```
 
-`reconcile` starts a stopped instance, probes an active instance once through
-SSH, and permits one replacement per manifest resume count. It may replace only
-after Vast confirms the original is missing or after the adapter has
-successfully stopped and destroyed an SSH-unreachable original. It never
-replaces after an ambiguous API response. A create response without an
-unambiguous instance ID remains `creation_uncertain`; a later resume may adopt
-exactly one instance found by its run label, otherwise it fails explicitly.
+For Replicate, `reconcile` starts a stopped instance, probes it once through SSH,
+and retains the single-instance replacement contract. For Auto Research,
+`power-on` and `reconcile` select a reachable pool member and return structured
+acquisition metadata, including whether cloud materialization is required. A
+create response without an unambiguous instance ID remains
+`creation_uncertain`; a later resume may adopt exactly one instance found by
+that member's unique label, otherwise it fails explicitly.
 
 `create` waits at most 600 seconds for a confirmed instance to reach `running`.
 If that wait fails after state records an unambiguous current-run instance, the
@@ -145,9 +156,12 @@ paused, then starts the same instance and verifies SSH before that session
 resumes.
 
 Power-off and release differ. Stopping retains the container disk and can still
-incur storage charges; destroying is irreversible and deletes that disk. The
-adapter refuses normal release before report and pipeline completion except for
-an unambiguously recorded instance whose create initialization failed. See
+incur storage charges; destroying is irreversible and deletes that disk. Auto
+Research power-off covers every retained pool member and restores the selected
+member in canonical state. Final release attempts every member and reports all
+failures rather than abandoning later members after the first error. The adapter
+refuses normal release before report and pipeline completion except for an
+unambiguously recorded instance whose create initialization failed. See
 <https://docs.vast.ai/api-reference/instances/show-instance>,
 <https://docs.vast.ai/api-reference/instances/manage-instance>,
 <https://docs.vast.ai/api-reference/instances/destroy-instance>, and
