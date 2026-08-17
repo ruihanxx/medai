@@ -14,10 +14,60 @@ refinement variant.
 - Passing audit: `{{ audit_path }}`
 - Audited idea codebase: `{{ codebase_dir }}` (read-only while planning and
   executing the experiment)
+{% if cloud_drive_enabled %}
+- Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
+  available only through the completed read-only target in provider state.
+- Selected provider reference: `{{ computation_provider_reference }}`
+- Selected drive reference: `{{ drive_reference }}`
+- Completed Replicate remote state:
+  `{{ base_computation_provider_state_path }}`
+{% else %}
 - Data: `{{ data_dir or "not supplied" }}` (read-only)
+{% endif %}
 - Experiment output directory: `{{ experiment_dir }}`
 - Remote-compute state, when remote compute was selected:
   `{{ computation_provider_state_path }}`
+
+{% if cloud_drive_enabled %}
+## Remote preparation
+
+Remote compute is mandatory for this cloud-backed campaign. Read
+`{{ skills_dir }}/computation_provider/SKILL.md`, the selected provider
+reference, and the selected drive reference before any provider operation.
+Reuse the campaign-owned instance when its state already exists; never create
+one instance per idea or round.
+
+When no campaign state exists, read the completed Replicate remote state using
+the provider-specific state description in the selected reference. Search for
+its actual selected GPU model first and preserve its recorded count, per-GPU
+memory, and CPU RAM as capacity floors. If no exact-model offer is available,
+follow the selected provider reference's existing stronger-resource fallback
+rule. Never select weaker resources or reduce experiment scale. Create the
+run-owned instance at the current campaign state path above, then materialize
+the inherited dataset. The existing cloud inventory beside the current state is
+the required baseline; materialization must match it exactly.
+{% if cloud_pull_handoff and cloud_materialization_required %}
+
+For this Codex turn, complete the selected drive reference's active-instance
+preparation through its reviewed `cloud-pull --prepare` operation. It must prove
+SSH and owned writable paths, then leave the instance stopped. Return exactly
+one non-empty foreground monitor Bash command using the required output schema.
+Do not run or monitor that command in this turn and do not write the experiment
+plan before local orchestration resumes this same session with completed cloud
+state.
+{% elif cloud_materialization_required %}
+
+Complete the selected drive reference's materialization procedure directly and
+continue only after provider state records the completed read-only target.
+{% else %}
+
+The campaign state already records completed materialization. Reuse it without
+starting, replacing, or rematerializing the instance.
+{% endif %}
+
+Do not inspect raw cloud data while planning. Do not upload, download,
+reauthorize, rematerialize, release, or replace an existing healthy instance.
+{% endif %}
 
 ## Frozen Experiment and Metric Artifacts
 
@@ -177,11 +227,18 @@ Save the plan to `{{ experiment_plan_path }}` with this format:
 }
 ```
 
+{% if cloud_drive_enabled %}
+Add `remote_compute` using the exact current campaign `state_path`, the
+provider-state run-owned working directory, and the completed cloud target as
+`remote_dataset_dir`. It is mandatory. Additional provider and execution fields
+are allowed. Reuse these exact locations in every later idea and round.
+{% else %}
 Add the existing optional `remote_compute` object only when the audited
 implementation requires remote compute and the state already exists. Copy its
 required `state_path`, `remote_working_dir`, and `remote_dataset_dir` fields
 exactly; additional provider and execution fields are allowed. Reuse the
 recorded instance and dataset locations. Do not rent, release, power off,
 reauthorize, rematerialize, upload, or download raw data while planning.
+{% endif %}
 
 Begin your analysis now.

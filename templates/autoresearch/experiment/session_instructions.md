@@ -9,7 +9,14 @@ Execute the planned refinement experiments for `{{ idea_id }}`.
 - Implementation plan: `{{ implementation_plan_path }}`
 - Passing audit: `{{ audit_path }}`
 - Writable idea codebase: `{{ codebase_dir }}`
+{% if cloud_drive_enabled %}
+- Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
+  available only at the completed read-only target in provider state.
+- Selected provider reference: `{{ computation_provider_reference }}`
+- Selected drive reference: `{{ drive_reference }}`
+{% else %}
 - Data: `{{ data_dir or "not supplied" }}`
+{% endif %}
 - Existing baseline log and environment: `{{ base_replication_log }}`,
   `{{ base_evidence_summary }}`
 - Remote-compute state: `{{ computation_provider_state_path }}`
@@ -21,6 +28,33 @@ audited refinement variant through its refinement-only entry point. Never run an
 old existing experiment entry point or rerun or alter the replicated baseline.
 Preserve actual outputs. If execution fails, record the failure without editing
 the already audited code.
+
+{% if cloud_drive_enabled %}
+Read `{{ skills_dir }}/computation_provider/SKILL.md`, the selected provider
+reference, and the selected drive reference. Reuse only the campaign instance
+at the supplied state path and the completed `remote_dataset_dir` from the plan.
+Upload only the audited idea code. Download only experiment models, metrics,
+logs, and aggregate evidence needed by the local artifacts. Never download raw
+or row-level dataset content, reauthorize or rematerialize the drive, create a
+second instance, or release the instance.
+{% endif %}
+
+{% if command_handoff %}
+## Command handoff protocol
+
+Return exactly one JSON object with one non-empty field:
+`{"command":"<foreground bash command>"}`. Do not directly run or monitor a
+remote experiment or provider command in this agent turn. Local orchestration
+will power on the recorded instance, execute and stream the command from the
+idea codebase, save its combined log and terminal result, power the same
+instance off, then resume this session. Use each resumed result to continue or
+debug until all local experiment artifacts validate.
+
+Every returned command must remain in the foreground. Do not use `nohup`, `&`,
+or a detached remote launcher. Use only the provider adapter's reviewed upload,
+exec, and download operations. Do not include power-on, power-off, release, or
+instance-creation actions; those lifecycle transitions belong to orchestration.
+{% endif %}
 
 ## Output
 
@@ -61,3 +95,7 @@ Write `{{ evidence_summary_path }}` using the existing evidence-summary schema.
 - Do not modify any code; every `code_modified` value must be false and every
   `fixes_applied` list must be empty.
 - Do not modify the base run or source data.
+{% if cloud_drive_enabled %}
+- Keep the remote dataset read-only and ensure every cited output has been
+  downloaded into the local idea codebase or experiment directory.
+{% endif %}

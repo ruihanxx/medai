@@ -74,6 +74,14 @@ billable request only after an explicit primary no-inventory response and after
 it confirms that the primary did not create an instance. It never retries an
 ambiguous create response.
 
+For a cloud-backed Auto Research campaign, read the completed Replicate state
+at the supplied base-state path. Its `provider_state.selected_offer` is the
+actual Replicate resource: use `gpu_name` as the first exact search,
+`gpu_count` as the count floor, and the ceiling GiB values of `gpu_ram_mb` and
+`cpu_ram_mb` as the GPU- and CPU-memory floors. The new campaign owns a separate
+state and instance. If the exact model has no eligible inventory, use only the
+stronger fallback procedure above.
+
 The adapter creates an on-demand Docker SSH instance with the explicit image,
 disk size, and a run-owned label. It records non-secret requested and selected
 resource details in `remote_compute/instance.json`. The Vast API workflow is

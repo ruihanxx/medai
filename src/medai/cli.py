@@ -15,6 +15,7 @@ from medai.pipeline_state import (
 from medai.workflow import (
     create_workflow,
     power_off_run_computation_instance,
+    prepare_autoresearch_resume,
     prepare_replication_resume,
     release_run_computation_instance,
 )
@@ -152,9 +153,9 @@ def run(
         skip_release_retry = False
         if (config.output / "manifest.json").exists():
             pipeline_state = PipelineState(config.output)
+            cleanup_stage = "report_agents" if replicate else "final_report"
             skip_release_retry = bool(
-                replicate
-                and pipeline_state.is_stage_completed("report_agents")
+                pipeline_state.is_stage_completed(cleanup_stage)
                 and pipeline_state.state.get("cleanup_warning")
             )
             pipeline_state.resume(inputs)
@@ -168,30 +169,26 @@ def run(
         run_active = True
         if replicate and pipeline_state.state.get("resume_count", 0) > 0:
             prepare_replication_resume(config)
+        elif autoresearch and pipeline_state.state.get("resume_count", 0) > 0:
+            prepare_autoresearch_resume(config)
         result = workflow.invoke({"config": config})
-        if replicate:
-            if not skip_release_retry:
-                try:
-                    release_run_computation_instance(config)
-                except Exception as cleanup_exc:
-                    PipelineState(config.output).record_cleanup_warning(
-                        "release",
-                        str(cleanup_exc),
-                    )
-                    typer.echo(
-                        f"WARNING: replication completed but release failed: {cleanup_exc}",
-                        err=True,
-                    )
-        else:
-            release_run_computation_instance(config)
+        if not skip_release_retry:
+            try:
+                release_run_computation_instance(config)
+            except Exception as cleanup_exc:
+                PipelineState(config.output).record_cleanup_warning(
+                    "release",
+                    str(cleanup_exc),
+                )
+                typer.echo(
+                    f"WARNING: {completion_label.casefold()} completed but release failed: {cleanup_exc}",
+                    err=True,
+                )
     except Exception as exc:
         if "run_active" in locals() and (config.output / "manifest.json").is_file():
             cleanup_error = None
             try:
-                if replicate:
-                    power_off_run_computation_instance(config)
-                else:
-                    release_run_computation_instance(config)
+                power_off_run_computation_instance(config)
             except Exception as cleanup_exc:
                 cleanup_error = str(cleanup_exc)
             message = str(exc)

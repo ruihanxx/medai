@@ -199,8 +199,8 @@ class AutoResearchConfig:
             if self.data is not None:
                 raise ValueError("Cloud-backed Auto Research cannot use local data")
             if (
-                self.computation_provider != "vastai"
-                or self.drive_provider != "google-drive"
+                self.computation_provider is None
+                or self.drive_provider is None
                 or self.computation_provider_config is None
                 or self.computation_provider_reference is None
                 or self.drive_reference is None
@@ -209,7 +209,8 @@ class AutoResearchConfig:
                 or not CLOUD_DATASET_PATTERN.fullmatch(self.cloud_dataset)
             ):
                 raise ValueError(
-                    "Cloud-backed Auto Research requires inherited VastAI and Google Drive configuration"
+                    "Cloud-backed Auto Research requires inherited computation-provider "
+                    "and drive configuration"
                 )
         elif any(
             value is not None
@@ -293,21 +294,20 @@ class AutoResearchConfig:
                 if clouddrive
                 else None
             ),
+            inherited_inputs=base_inputs,
         )
         cloud_dataset = (
             str(base_inputs.get("cloud_dataset", "")).strip() if clouddrive else None
         )
         if clouddrive and (
-            base_inputs.get("computation_provider") != "vastai"
-            or base_inputs.get("drive_provider") != "google-drive"
-            or computation_provider != "vastai"
-            or drive_provider != "google-drive"
+            base_inputs.get("computation_provider") != computation_provider
+            or base_inputs.get("drive_provider") != drive_provider
             or not cloud_dataset
             or base_inputs.get("cloud_source") != cloud_source
         ):
             raise ValueError(
                 "Cloud-backed Auto Research requires the base run and current configuration "
-                "to select VastAI and Google Drive with the same dataset"
+                "to select the same computation provider, drive, and dataset"
             )
         config = cls(
             base_run=resolved_base_run,
@@ -353,7 +353,11 @@ def _load_base_inputs(base_run: Path) -> dict[str, Any]:
 
 
 def _resolve_computation_selection(
-    *, output: Path, clouddrive: bool, cloud_dataset: str | None
+    *,
+    output: Path,
+    clouddrive: bool,
+    cloud_dataset: str | None,
+    inherited_inputs: dict[str, Any] | None = None,
 ) -> tuple[
     str | None,
     dict[str, Any] | None,
@@ -363,6 +367,8 @@ def _resolve_computation_selection(
     str | None,
 ]:
     recorded = _recorded_computation_inputs(output)
+    if not recorded and inherited_inputs is not None:
+        recorded = migrate_legacy_provider_inputs(inherited_inputs)
     configured_provider = environment_value("MEDAI_COMPUTATION_PROVIDER").casefold()
     configured_drive = environment_value("MEDAI_DRIVE_PROVIDER").casefold()
     adapters = load_provider_adapters()

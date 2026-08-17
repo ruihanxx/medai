@@ -12,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 
 from medai.artifacts import load_model, write_json
 from medai.autoresearch_visualization import generate_autoresearch_visualizations
+from medai.computation_providers import get_provider_adapter
 from medai.config import AutoResearchConfig
 from medai.models import (
     AutoResearchExperimentLog,
@@ -28,6 +29,7 @@ from medai.models import (
     IdeaCandidatePool,
     IdeaGenerationArtifact,
     IdeaImplementationPlan,
+    ReplicationCommand,
     ReplicationLog,
     ReplicationPlan,
     RoundSummary,
@@ -50,7 +52,16 @@ from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
 from medai.providers import run_agent
 from medai.resources import detect_resources
-from medai.workflow import resolve_replication_output, skills_dir
+from medai.workflow import (
+    _cloud_drive_materialization_completed,
+    _next_command_index,
+    _run_agent_command,
+    power_off_run_computation_instance,
+    power_on_run_computation_instance,
+    resolve_replication_output,
+    skills_dir,
+    validate_codegen_remote_compute,
+)
 
 REQUIRED_BASE_STAGES = (
     "preflight",
@@ -405,19 +416,11 @@ def _load_base_cloud_state(config: AutoResearchConfig) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Base remote-compute state is invalid: {state_path}") from exc
     provider_state = state.get("provider_state") if isinstance(state, dict) else None
-    selected = (
-        provider_state.get("selected_offer") if isinstance(provider_state, dict) else None
-    )
     cloud = provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
     if (
-        state.get("provider") != "vastai"
+        state.get("provider") != config.computation_provider
         or state.get("created_by_run") is not True
         or state.get("released") is not True
-        or not isinstance(selected, dict)
-        or not isinstance(selected.get("gpu_name"), str)
-        or not isinstance(selected.get("gpu_count"), int)
-        or not isinstance(selected.get("gpu_ram_mb"), int)
-        or not isinstance(selected.get("cpu_ram_mb"), int)
         or not isinstance(cloud, dict)
         or cloud.get("completed") is not True
         or cloud.get("drive") != config.drive_provider
@@ -425,8 +428,8 @@ def _load_base_cloud_state(config: AutoResearchConfig) -> dict[str, Any]:
         or not isinstance(cloud.get("target_path"), str)
     ):
         raise RuntimeError(
-            "Cloud-backed Auto Research requires a released VastAI base instance "
-            "with completed Google Drive state and recorded selected GPU resources"
+            "Cloud-backed Auto Research requires a released base instance with "
+            "completed state for the inherited drive and dataset"
         )
     inventory_path = config.base_run / "remote_compute" / "cloud-inventory.v1.json"
     try:
@@ -441,6 +444,34 @@ def _load_base_cloud_state(config: AutoResearchConfig) -> dict[str, Any]:
     ):
         raise RuntimeError(f"Base cloud inventory is invalid: {inventory_path}")
     return state
+
+
+def _copy_base_cloud_inventory(config: AutoResearchConfig) -> None:
+    if not config.clouddrive:
+        return
+    source = config.base_run / "remote_compute" / "cloud-inventory.v1.json"
+    destination = config.output / "remote_compute" / "cloud-inventory.v1.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file():
+        if destination.read_bytes() != source.read_bytes():
+            raise RuntimeError(
+                "Auto Research cloud inventory differs from its base replicate run"
+            )
+        return
+    shutil.copy2(source, destination)
+
+
+def _autoresearch_cloud_pull_handoff_enabled(config: AutoResearchConfig) -> bool:
+    if (
+        config.provider != "codex"
+        or not config.clouddrive
+        or config.computation_provider is None
+        or config.drive_provider is None
+    ):
+        return False
+    return get_provider_adapter(config.computation_provider).drive(
+        config.drive_provider
+    ).cloud_pull_handoff
 
 
 def autoresearch_preflight_node(state: AutoResearchState) -> dict[str, Any]:
@@ -906,6 +937,114 @@ def _run_codegen_audit(
     return audit, canonical_path
 
 
+def _run_plan_cloud_pull_handoff(
+    *,
+    config: AutoResearchConfig,
+    round_index: int,
+    idea_index: int,
+    codebase_dir: Path,
+    prompt_path: Path,
+    transcript_path: Path,
+) -> None:
+    plan_dir = _idea_dir(config, round_index, idea_index) / "plan"
+    command_dir = plan_dir / "cloud_pull" / "commands"
+    command_dir.mkdir(parents=True, exist_ok=True)
+    prompt_dir = (
+        config.output
+        / "prompts"
+        / f"round_{round_index:03d}"
+        / f"idea_{idea_index:02d}"
+    )
+    command_schema_path = prompt_dir / "plan_cloud_pull_command.schema.json"
+    write_json(command_schema_path, ReplicationCommand.model_json_schema())
+    session_id: str | None = None
+    resume_prompt_path: Path | None = None
+    command_index = _next_command_index(command_dir)
+    while True:
+        command_request_path = command_dir / f"command_{command_index:03d}.json"
+        if session_id is None:
+            session_id = run_agent(
+                provider=config.provider,
+                prompt_path=prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+            )
+            if session_id is None:
+                raise RuntimeError(
+                    "Codex Auto Research cloud-pull preparation did not return a session ID"
+                )
+        else:
+            assert resume_prompt_path is not None
+            run_agent(
+                provider=config.provider,
+                prompt_path=resume_prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+                resume_session_id=session_id,
+            )
+
+        command = load_model(command_request_path, ReplicationCommand).command
+        log_path = command_dir / f"command_{command_index:03d}.log"
+        result_path = command_dir / f"command_{command_index:03d}_result.json"
+        result = _run_agent_command(
+            command,
+            codebase_dir=codebase_dir,
+            log_path=log_path,
+            result_path=result_path,
+        )
+        try:
+            materialized = _cloud_drive_materialization_completed(config)
+            validation_error = "Cloud-drive materialization is incomplete"
+        except RuntimeError as exc:
+            materialized = False
+            validation_error = str(exc)
+        if materialized:
+            break
+        result["artifact_validation_error"] = validation_error
+        write_json(result_path, result)
+        resume_prompt_path = render_prompt(
+            "autoresearch/plan/cloud_pull_result_instructions.md",
+            prompt_dir / f"plan_cloud_pull_resume_{command_index:03d}.md",
+            command_result_path=result_path,
+            command_log_path=log_path,
+            exit_code=result["exit_code"],
+            duration_seconds=result["duration_seconds"],
+            artifact_validation_error=validation_error,
+            computation_provider_state_path=(
+                config.output / "remote_compute" / "instance.json"
+            ),
+        )
+        command_index += 1
+
+    completion_prompt_path = render_prompt(
+        "autoresearch/plan/cloud_pull_complete_instructions.md",
+        prompt_dir / "plan_cloud_pull_complete.md",
+        computation_provider_state_path=(
+            config.output / "remote_compute" / "instance.json"
+        ),
+    )
+    run_agent(
+        provider=config.provider,
+        prompt_path=completion_prompt_path,
+        working_dir=codebase_dir,
+        transcript_path=transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+        resume_session_id=session_id,
+    )
+
+
 def _run_experiment_plan(
     config: AutoResearchConfig,
     round_index: int,
@@ -928,6 +1067,14 @@ def _run_experiment_plan(
     if pipeline_state.is_stage_completed(stage_name):
         plan = load_model(plan_path, AutoResearchExperimentPlan)
         validate_autoresearch_experiment_plan(contracts, plan)
+        validate_codegen_remote_compute(
+            plan,
+            config.output / "remote_compute" / "instance.json",
+            cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+            drive_provider=config.drive_provider,
+            computation_provider=config.computation_provider,
+            require_active=not pipeline_state.is_stage_completed("final_report"),
+        )
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed experiment-plan transcript is missing: {transcript_path}")
         print(f"resume {stage_name} stage: skipped (already completed)")
@@ -936,6 +1083,11 @@ def _run_experiment_plan(
     print(f"enter {stage_name} stage")
     pipeline_state.start_stage(stage_name)
     plan_dir.mkdir(parents=True, exist_ok=True)
+    _copy_base_cloud_inventory(config)
+    cloud_pull_handoff = _autoresearch_cloud_pull_handoff_enabled(config)
+    cloud_materialized = (
+        _cloud_drive_materialization_completed(config) if config.clouddrive else False
+    )
     prompt_path = render_prompt(
         "autoresearch/plan/session_instructions.md",
         config.output
@@ -950,6 +1102,18 @@ def _run_experiment_plan(
         audit_path=audit_path,
         codebase_dir=codebase_dir,
         data_dir=config.data,
+        cloud_drive_enabled=config.clouddrive,
+        cloud_dataset=config.cloud_dataset,
+        drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
+        cloud_pull_handoff=cloud_pull_handoff,
+        cloud_materialization_required=config.clouddrive and not cloud_materialized,
+        base_computation_provider_state_path=(
+            config.base_run / "remote_compute" / "instance.json"
+        ),
+        skills_dir=skills_dir(),
         experiment_dir=experiment_dir,
         experiment_plan_path=plan_path,
         computation_provider_state_path=config.output / "remote_compute" / "instance.json",
@@ -959,19 +1123,43 @@ def _run_experiment_plan(
             (config.output / "preflight" / "resources.json").read_text(encoding="utf-8")
         )["gpus"],
     )
-    run_agent(
-        provider=config.provider,
-        prompt_path=prompt_path,
-        working_dir=codebase_dir,
-        transcript_path=transcript_path,
-        siliconflow_config_path=config.siliconflow_config,
-        codex_model=config.codex_model,
-        codex_reasoning_effort=config.codex_reasoning_effort,
-    )
-    plan = load_model(plan_path, AutoResearchExperimentPlan)
-    validate_autoresearch_experiment_plan(contracts, plan)
-    pipeline_state.complete_stage(stage_name, [str(plan_path), str(transcript_path)])
-    return plan_path
+    try:
+        if cloud_pull_handoff and not cloud_materialized:
+            _run_plan_cloud_pull_handoff(
+                config=config,
+                round_index=round_index,
+                idea_index=idea_index,
+                codebase_dir=codebase_dir,
+                prompt_path=prompt_path,
+                transcript_path=transcript_path,
+            )
+        else:
+            run_agent(
+                provider=config.provider,
+                prompt_path=prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+            )
+        plan = load_model(plan_path, AutoResearchExperimentPlan)
+        validate_autoresearch_experiment_plan(contracts, plan)
+        validate_codegen_remote_compute(
+            plan,
+            config.output / "remote_compute" / "instance.json",
+            cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+            drive_provider=config.drive_provider,
+            computation_provider=config.computation_provider,
+        )
+        pipeline_state.complete_stage(
+            stage_name,
+            [str(plan_path), str(transcript_path)],
+        )
+        return plan_path
+    finally:
+        if config.clouddrive:
+            power_off_run_computation_instance(config)
 
 
 def _resolve_experiment_output(value: str, codebase_dir: Path, experiment_dir: Path) -> Path:
@@ -1039,6 +1227,102 @@ def _validate_experiment_artifacts(
     return outputs
 
 
+def _run_experiment_command_handoff(
+    *,
+    config: AutoResearchConfig,
+    round_index: int,
+    idea_index: int,
+    codebase_dir: Path,
+    experiment_dir: Path,
+    prompt_path: Path,
+    transcript_path: Path,
+    plan_path: Path,
+    log_path: Path,
+    evidence_path: Path,
+) -> list[str]:
+    command_dir = experiment_dir / "commands"
+    command_dir.mkdir(parents=True, exist_ok=True)
+    prompt_dir = (
+        config.output
+        / "prompts"
+        / f"round_{round_index:03d}"
+        / f"idea_{idea_index:02d}"
+    )
+    command_schema_path = prompt_dir / "experiment_command.schema.json"
+    write_json(command_schema_path, ReplicationCommand.model_json_schema())
+    session_id: str | None = None
+    resume_prompt_path: Path | None = None
+    command_index = _next_command_index(command_dir)
+    while True:
+        command_request_path = command_dir / f"command_{command_index:03d}.json"
+        if session_id is None:
+            session_id = run_agent(
+                provider=config.provider,
+                prompt_path=prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+            )
+            if session_id is None:
+                raise RuntimeError(
+                    "Codex Auto Research experiment turn did not return a session ID"
+                )
+        else:
+            assert resume_prompt_path is not None
+            run_agent(
+                provider=config.provider,
+                prompt_path=resume_prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+                resume_session_id=session_id,
+            )
+
+        command = load_model(command_request_path, ReplicationCommand).command
+        command_log_path = command_dir / f"command_{command_index:03d}.log"
+        result_path = command_dir / f"command_{command_index:03d}_result.json"
+        power_on_run_computation_instance(config)
+        try:
+            result = _run_agent_command(
+                command,
+                codebase_dir=codebase_dir,
+                log_path=command_log_path,
+                result_path=result_path,
+            )
+        finally:
+            power_off_run_computation_instance(config)
+        try:
+            return _validate_experiment_artifacts(
+                plan_path,
+                config.output / "experiment_setup" / "experiment_contracts.json",
+                log_path,
+                evidence_path,
+                codebase_dir,
+                experiment_dir,
+            )
+        except (RuntimeError, ValueError) as exc:
+            result["artifact_validation_error"] = str(exc)
+            write_json(result_path, result)
+            resume_prompt_path = render_prompt(
+                "autoresearch/experiment/command_result_instructions.md",
+                prompt_dir / f"experiment_resume_{command_index:03d}.md",
+                command_result_path=result_path,
+                command_log_path=command_log_path,
+                exit_code=result["exit_code"],
+                duration_seconds=result["duration_seconds"],
+                artifact_validation_error=result["artifact_validation_error"],
+            )
+            command_index += 1
+
+
 def _run_experiment(
     config: AutoResearchConfig,
     round_index: int,
@@ -1055,6 +1339,16 @@ def _run_experiment(
     log_path = experiment_dir / "experiment_log.json"
     evidence_path = experiment_dir / "evidence_summary.json"
     transcript_path = experiment_dir / "experiment_transcript.jsonl"
+    plan = load_model(plan_path, AutoResearchExperimentPlan)
+    validate_codegen_remote_compute(
+        plan,
+        config.output / "remote_compute" / "instance.json",
+        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+        drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+        require_active=not pipeline_state.is_stage_completed("final_report"),
+    )
+    command_handoff = config.provider == "codex" and plan.remote_compute is not None
     codebase_fingerprint = _source_code_fingerprint(codebase_dir)
     checkpoints = pipeline_state.get_stage_checkpoints(stage_name)
     audited_fingerprint = checkpoints.get("audited_source_fingerprint")
@@ -1098,6 +1392,14 @@ def _run_experiment(
         audit_path=audit_path,
         codebase_dir=codebase_dir,
         data_dir=config.data,
+        cloud_drive_enabled=config.clouddrive,
+        cloud_dataset=config.cloud_dataset,
+        drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
+        skills_dir=skills_dir(),
+        command_handoff=command_handoff,
         base_replication_log=config.base_run / "replication" / "replication_log.json",
         base_evidence_summary=config.base_run / "replication" / "evidence_summary.json",
         experiment_dir=experiment_dir,
@@ -1105,25 +1407,45 @@ def _run_experiment(
         evidence_summary_path=evidence_path,
         computation_provider_state_path=config.output / "remote_compute" / "instance.json",
     )
-    run_agent(
-        provider=config.provider,
-        prompt_path=prompt_path,
-        working_dir=codebase_dir,
-        transcript_path=transcript_path,
-        siliconflow_config_path=config.siliconflow_config,
-        codex_model=config.codex_model,
-        codex_reasoning_effort=config.codex_reasoning_effort,
-    )
+    if command_handoff:
+        outputs = _run_experiment_command_handoff(
+            config=config,
+            round_index=round_index,
+            idea_index=idea_index,
+            codebase_dir=codebase_dir,
+            experiment_dir=experiment_dir,
+            prompt_path=prompt_path,
+            transcript_path=transcript_path,
+            plan_path=plan_path,
+            log_path=log_path,
+            evidence_path=evidence_path,
+        )
+    else:
+        if plan.remote_compute is not None:
+            power_on_run_computation_instance(config)
+        try:
+            run_agent(
+                provider=config.provider,
+                prompt_path=prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+            )
+        finally:
+            if plan.remote_compute is not None:
+                power_off_run_computation_instance(config)
+        outputs = _validate_experiment_artifacts(
+            plan_path,
+            config.output / "experiment_setup" / "experiment_contracts.json",
+            log_path,
+            evidence_path,
+            codebase_dir,
+            experiment_dir,
+        )
     if _source_code_fingerprint(codebase_dir) != codebase_fingerprint:
         raise RuntimeError(f"Experiment agent modified audited idea code: {idea_id}")
-    outputs = _validate_experiment_artifacts(
-        plan_path,
-        config.output / "experiment_setup" / "experiment_contracts.json",
-        log_path,
-        evidence_path,
-        codebase_dir,
-        experiment_dir,
-    )
     pipeline_state.complete_stage(stage_name, [*outputs, str(transcript_path)])
     return log_path, evidence_path
 

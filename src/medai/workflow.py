@@ -353,7 +353,9 @@ def _run_computation_provider_action(
     return completed.stdout.strip()
 
 
-def reconcile_run_computation_instance(config: RunConfig) -> dict[str, Any]:
+def reconcile_run_computation_instance(
+    config: RunConfig | AutoResearchConfig,
+) -> dict[str, Any]:
     state_path = config.output / "remote_compute" / "instance.json"
     output = _run_computation_provider_action(
         state_path,
@@ -373,7 +375,23 @@ def reconcile_run_computation_instance(config: RunConfig) -> dict[str, Any]:
     return result
 
 
-def power_off_run_computation_instance(config: RunConfig) -> None:
+def power_on_run_computation_instance(config: RunConfig | AutoResearchConfig) -> None:
+    state_path = config.output / "remote_compute" / "instance.json"
+    if not state_path.is_file():
+        return
+    state = _load_computation_provider_state(state_path)
+    if not state.get("created_by_run") or state.get("released") is True:
+        return
+    _run_computation_provider_action(
+        state_path,
+        "power-on",
+        expected_provider=config.computation_provider,
+    )
+
+
+def power_off_run_computation_instance(
+    config: RunConfig | AutoResearchConfig,
+) -> None:
     state_path = config.output / "remote_compute" / "instance.json"
     if not state_path.is_file():
         return
@@ -428,7 +446,9 @@ def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
     ).cloud_pull_handoff
 
 
-def _cloud_drive_materialization_completed(config: RunConfig) -> bool:
+def _cloud_drive_materialization_completed(
+    config: RunConfig | AutoResearchConfig,
+) -> bool:
     if not config.clouddrive or config.cloud_dataset is None:
         return False
     state_path = config.output / "remote_compute" / "instance.json"
@@ -570,7 +590,10 @@ def _run_has_remote_plan(config: RunConfig) -> bool:
     return False
 
 
-def _validate_recorded_remote_state(state_path: Path, config: RunConfig) -> None:
+def _validate_recorded_remote_state(
+    state_path: Path,
+    config: RunConfig | AutoResearchConfig,
+) -> None:
     state = _load_computation_provider_state(state_path)
     if not state.get("created_by_run"):
         raise RuntimeError("Remote computation state lacks current-run ownership")
@@ -765,6 +788,42 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
         return {**reconciliation, "rollback": "codegen"}
 
     return {**reconciliation, "rollback": None}
+
+
+def prepare_autoresearch_resume(config: AutoResearchConfig) -> dict[str, Any]:
+    pipeline_state = PipelineState(config.output)
+    state_path = config.output / "remote_compute" / "instance.json"
+    if pipeline_state.is_stage_completed("final_report") or not state_path.is_file():
+        return {"reconciled": False, "replaced": False}
+
+    _validate_recorded_remote_state(state_path, config)
+    reconciliation = {
+        "reconciled": True,
+        **reconcile_run_computation_instance(config),
+    }
+    try:
+        if config.clouddrive and reconciliation["replaced"]:
+            if config.cloud_dataset is None:
+                raise RuntimeError("Cloud-backed Auto Research is missing its dataset name")
+            _run_computation_provider_action(
+                state_path,
+                "cloud-pull",
+                arguments=["--dataset", config.cloud_dataset, "--prepare"],
+                expected_provider=config.computation_provider,
+            )
+            _run_computation_provider_action(
+                state_path,
+                "cloud-pull",
+                arguments=["--dataset", config.cloud_dataset, "--monitor"],
+                expected_provider=config.computation_provider,
+            )
+            if not _cloud_drive_materialization_completed(config):
+                raise RuntimeError(
+                    "Replacement Auto Research instance has incomplete cloud data"
+                )
+    finally:
+        power_off_run_computation_instance(config)
+    return reconciliation
 
 
 def preflight_node(state: WorkflowState) -> dict[str, str]:

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from medai.config import RunConfig
+from medai.config import AutoResearchConfig, RunConfig
 from medai.models import CodegenPlan
 from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
@@ -12,6 +12,7 @@ from medai.workflow import (
     create_workflow,
     power_off_run_computation_instance,
     preflight_node,
+    prepare_autoresearch_resume,
     prepare_replication_resume,
     release_run_computation_instance,
     replicate_agent_node,
@@ -1626,6 +1627,58 @@ def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     command, kwargs = calls[0]
     assert command[2:] == ["power-off", "--state", str(state_path)]
     assert kwargs["timeout"] == 120
+
+
+def test_autoresearch_resume_replacement_uses_offline_cloud_pull(
+    tmp_path: Path,
+    monkeypatch,
+):
+    output = tmp_path / "autoresearch"
+    state_path = output / "remote_compute" / "instance.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text("{}\n", encoding="utf-8")
+    PipelineState.create(output, {"workflow": "autoresearch"})
+    config = AutoResearchConfig(
+        base_run=tmp_path / "base",
+        output=output,
+        provider="codex",
+        clouddrive=True,
+        computation_provider="vastai",
+        drive_provider="google-drive",
+        cloud_dataset="mimic-iv",
+    )
+    actions = []
+    monkeypatch.setattr(
+        "medai.workflow._validate_recorded_remote_state",
+        lambda *_args: None,
+    )
+    monkeypatch.setattr(
+        "medai.workflow.reconcile_run_computation_instance",
+        lambda _config: {"replaced": True, "status": "running"},
+    )
+
+    def fake_action(_state_path, action, *, arguments=None, expected_provider=None):
+        actions.append((action, arguments, expected_provider))
+        return ""
+
+    monkeypatch.setattr("medai.workflow._run_computation_provider_action", fake_action)
+    monkeypatch.setattr(
+        "medai.workflow._cloud_drive_materialization_completed",
+        lambda _config: True,
+    )
+    monkeypatch.setattr(
+        "medai.workflow.power_off_run_computation_instance",
+        lambda _config: actions.append(("power-off", None, "vastai")),
+    )
+
+    result = prepare_autoresearch_resume(config)
+
+    assert result["replaced"] is True
+    assert actions == [
+        ("cloud-pull", ["--dataset", "mimic-iv", "--prepare"], "vastai"),
+        ("cloud-pull", ["--dataset", "mimic-iv", "--monitor"], "vastai"),
+        ("power-off", None, "vastai"),
+    ]
 
 
 def test_computation_cleanup_dispatches_fake_provider_metadata(tmp_path: Path, monkeypatch):

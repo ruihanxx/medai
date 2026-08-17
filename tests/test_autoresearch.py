@@ -5,6 +5,9 @@ import pytest
 
 from medai.autoresearch import (
     REQUIRED_BASE_STAGES,
+    _copy_base_cloud_inventory,
+    _run_experiment_command_handoff,
+    _run_plan_cloud_pull_handoff,
     autoresearch_preflight_node,
     create_autoresearch_workflow,
 )
@@ -811,6 +814,7 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             "audit_path": path,
             "codebase_dir": path,
             "data_dir": path,
+            "cloud_drive_enabled": False,
             "experiment_dir": path,
             "experiment_plan_path": path,
             "computation_provider_state_path": path,
@@ -826,6 +830,8 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             "audit_path": path,
             "codebase_dir": path,
             "data_dir": None,
+            "cloud_drive_enabled": False,
+            "command_handoff": False,
             "base_replication_log": path,
             "base_evidence_summary": path,
             "computation_provider_state_path": path,
@@ -877,6 +883,194 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
     assert "shape-prescriptive" in plan_prompt
     assert "no pre-authorized reductions" in plan_prompt
     assert "Never include or rerun an old existing or replicated baseline" in plan_prompt
+
+
+def test_autoresearch_plan_cloud_pull_handoff_resumes_same_codex_session(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = AutoResearchConfig(
+        base_run=tmp_path / "base",
+        output=tmp_path / "autoresearch",
+        provider="codex",
+        clouddrive=True,
+        computation_provider="vastai",
+        drive_provider="google-drive",
+        cloud_dataset="mimic-iv",
+    )
+    codebase_dir = tmp_path / "codebase"
+    codebase_dir.mkdir()
+    prompt_path = tmp_path / "plan.md"
+    prompt_path.write_text("plan\n", encoding="utf-8")
+    transcript_path = tmp_path / "plan.jsonl"
+    calls = []
+
+    def fake_agent(**kwargs):
+        calls.append(kwargs)
+        command_path = kwargs.get("output_last_message_path")
+        if command_path is not None:
+            command_path.write_text('{"command":"monitor"}\n', encoding="utf-8")
+        return kwargs.get("resume_session_id") or "session-1"
+
+    def fake_command(command, *, codebase_dir, log_path, result_path):
+        result = {"command": command, "exit_code": 0, "duration_seconds": 1.0}
+        result_path.write_text(json.dumps(result), encoding="utf-8")
+        return result
+
+    monkeypatch.setattr("medai.autoresearch.run_agent", fake_agent)
+    monkeypatch.setattr("medai.autoresearch._run_agent_command", fake_command)
+    monkeypatch.setattr(
+        "medai.autoresearch._cloud_drive_materialization_completed",
+        lambda _config: True,
+    )
+    monkeypatch.setattr(
+        "medai.autoresearch.render_prompt",
+        lambda _template, destination, **_context: destination,
+    )
+
+    _run_plan_cloud_pull_handoff(
+        config=config,
+        round_index=1,
+        idea_index=1,
+        codebase_dir=codebase_dir,
+        prompt_path=prompt_path,
+        transcript_path=transcript_path,
+    )
+
+    assert len(calls) == 2
+    assert calls[0].get("resume_session_id") is None
+    assert calls[1]["resume_session_id"] == "session-1"
+
+
+def test_autoresearch_reuses_base_cloud_inventory(tmp_path: Path):
+    base_run = tmp_path / "base"
+    remote_dir = base_run / "remote_compute"
+    remote_dir.mkdir(parents=True)
+    (remote_dir / "instance.json").write_text(
+        json.dumps(
+            {
+                "provider": "vastai",
+                "created_by_run": True,
+                "released": True,
+                "provider_state": {
+                    "selected_offer": {
+                        "gpu_name": "RTX 4090",
+                        "gpu_count": 2,
+                        "gpu_ram_mb": 24576,
+                        "cpu_ram_mb": 65536,
+                    },
+                    "cloud_drive": {
+                        "completed": True,
+                        "drive": "google-drive",
+                        "dataset": "mimic-iv",
+                        "target_path": "/workspace/data/mimic-iv",
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    inventory = {
+        "dataset": "mimic-iv",
+        "files": [{"path": "table.csv", "size": 1, "sha256": "0" * 64}],
+    }
+    (remote_dir / "cloud-inventory.v1.json").write_text(
+        json.dumps(inventory),
+        encoding="utf-8",
+    )
+    config = AutoResearchConfig(
+        base_run=base_run,
+        output=tmp_path / "autoresearch",
+        provider="codex",
+        clouddrive=True,
+        computation_provider="vastai",
+        drive_provider="google-drive",
+        cloud_dataset="mimic-iv",
+    )
+
+    _copy_base_cloud_inventory(config)
+    assert (
+        config.output / "remote_compute" / "cloud-inventory.v1.json"
+    ).read_text(encoding="utf-8") == (remote_dir / "cloud-inventory.v1.json").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = AutoResearchConfig(
+        base_run=tmp_path / "base",
+        output=tmp_path / "autoresearch",
+        provider="codex",
+        computation_provider="vastai",
+    )
+    codebase_dir = tmp_path / "codebase"
+    experiment_dir = tmp_path / "experiment"
+    codebase_dir.mkdir()
+    experiment_dir.mkdir()
+    prompt_path = tmp_path / "experiment.md"
+    prompt_path.write_text("experiment\n", encoding="utf-8")
+    transcript_path = tmp_path / "experiment.jsonl"
+    calls = []
+    power_events = []
+
+    def fake_agent(**kwargs):
+        calls.append(kwargs)
+        command_path = kwargs["output_last_message_path"]
+        command_path.write_text(
+            json.dumps({"command": f"command-{len(calls)}"}),
+            encoding="utf-8",
+        )
+        return kwargs.get("resume_session_id") or "session-1"
+
+    def fake_command(command, *, codebase_dir, log_path, result_path):
+        result = {"command": command, "exit_code": 0, "duration_seconds": 1.0}
+        result_path.write_text(json.dumps(result), encoding="utf-8")
+        return result
+
+    validations = iter([RuntimeError("outputs missing"), ["complete"]])
+
+    def fake_validate(*_args):
+        result = next(validations)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr("medai.autoresearch.run_agent", fake_agent)
+    monkeypatch.setattr("medai.autoresearch._run_agent_command", fake_command)
+    monkeypatch.setattr("medai.autoresearch._validate_experiment_artifacts", fake_validate)
+    monkeypatch.setattr(
+        "medai.autoresearch.power_on_run_computation_instance",
+        lambda _config: power_events.append("on"),
+    )
+    monkeypatch.setattr(
+        "medai.autoresearch.power_off_run_computation_instance",
+        lambda _config: power_events.append("off"),
+    )
+    monkeypatch.setattr(
+        "medai.autoresearch.render_prompt",
+        lambda _template, destination, **_context: destination,
+    )
+
+    outputs = _run_experiment_command_handoff(
+        config=config,
+        round_index=1,
+        idea_index=1,
+        codebase_dir=codebase_dir,
+        experiment_dir=experiment_dir,
+        prompt_path=prompt_path,
+        transcript_path=transcript_path,
+        plan_path=tmp_path / "plan.json",
+        log_path=tmp_path / "log.json",
+        evidence_path=tmp_path / "evidence.json",
+    )
+
+    assert outputs == ["complete"]
+    assert power_events == ["on", "off", "on", "off"]
+    assert calls[0].get("resume_session_id") is None
+    assert calls[1]["resume_session_id"] == "session-1"
 
 
 def test_idea_artifact_rejects_wrong_ids_or_fields():

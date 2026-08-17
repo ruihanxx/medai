@@ -456,6 +456,39 @@ def test_autoresearch_cli_uses_base_output_and_inherited_provider(
     assert invoked[0].assessment_threshold == 0.0
 
 
+def test_autoresearch_failure_powers_off_without_releasing(tmp_path: Path, monkeypatch):
+    base_run = tmp_path / "base"
+    base_run.mkdir()
+    (base_run / "manifest.json").write_text(
+        json.dumps({"inputs": {"provider": "codex"}}),
+        encoding="utf-8",
+    )
+    cleanup_calls = []
+
+    class FakeWorkflow:
+        def invoke(self, _state):
+            raise RuntimeError("autoresearch failed")
+
+    monkeypatch.setattr(
+        "medai.cli.build_autoresearch_inputs",
+        lambda config: {"workflow": "autoresearch", "provider": config.provider},
+    )
+    monkeypatch.setattr("medai.cli.create_autoresearch_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr(
+        "medai.cli.power_off_run_computation_instance",
+        lambda config: cleanup_calls.append(("power-off", config.output)),
+    )
+    monkeypatch.setattr(
+        "medai.cli.release_run_computation_instance",
+        lambda config: cleanup_calls.append(("release", config.output)),
+    )
+
+    result = runner.invoke(app, ["--autoresearch", "--output", str(base_run)])
+
+    assert result.exit_code == 1
+    assert cleanup_calls == [("power-off", base_run / "autoresearch")]
+
+
 def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
     base_run = tmp_path / "base"
     base_run.mkdir()
@@ -535,8 +568,6 @@ def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):
 def test_autoresearch_inherits_vast_google_drive_base_run(tmp_path: Path, monkeypatch):
     base_run = tmp_path / "base"
     base_run.mkdir()
-    monkeypatch.setenv("MEDAI_COMPUTATION_PROVIDER", "vastai")
-    monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "google-drive")
     monkeypatch.setenv("VAST_API_KEY", "test-key")
     monkeypatch.setenv("VASTAI_IMAGE", "test-image")
     monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "drive-1")

@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import shutil
@@ -282,7 +283,20 @@ def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
     base_run = tmp_path / "runs" / "base"
     base_run.mkdir(parents=True)
     (base_run / "manifest.json").write_text(
-        '{"status":"completed","inputs":{"provider":"codex","data":null}}\n',
+        json.dumps(
+            {
+                "status": "completed",
+                "inputs": {
+                    "provider": "codex",
+                    "clouddrive": True,
+                    "computation_provider": "vastai",
+                    "drive_provider": "google-drive",
+                    "cloud_dataset": "mimic-iv",
+                    "cloud_source": "medai/mimic-iv",
+                },
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     command_log.write_text("", encoding="utf-8")
@@ -303,6 +317,7 @@ def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
     assert f"src={base_run / 'autoresearch'},dst=/workspace/autoresearch" in calls
     assert "--autoresearch --base-run /workspace/base-run" in calls
     assert "--assessment-threshold 0.0" in calls
+    assert "dst=/workspace/data" not in calls
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")
