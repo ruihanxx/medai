@@ -42,9 +42,11 @@
   experiment agent hands off one foreground
   command; orchestration powers on only for that command, powers off before
   artifact validation and agent resume, and repeats until all required local
-  artifacts validate. After the local mother-environment definition first
-  passes remote setup, later agent turns and explicit resumes treat it as
-  immutable; orchestration rejects and restores any attempted replacement.
+  artifacts validate. Later turns and explicit resumes reuse a validated local
+  mother-environment definition by default. The agent may make a minimal change
+  only when a persisted operation result and log demonstrate a dependency or
+  runtime defect; orchestration then treats the changed hashes as an unvalidated
+  revision and must rerun setup successfully before executing the operation.
   The prompt permits file inspection, code edits, and
   lightweight interaction in Codex; long-running experiments, test suites, and
   remote monitoring are handed back as the foreground command. No `--last`,

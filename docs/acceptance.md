@@ -56,7 +56,8 @@ local data mount, copied base inventory, base-resource preference through the
 selected provider reference, initial
 prepare/local-monitor/power-off/same-session resume, bounded campaign-pool
 selection, provider-confirmed capacity expansion, per-member inventory
-materialization, local mother-code/environment synchronization,
+materialization, local mother-code/environment synchronization, hash-bound
+environment validation and failure-driven environment revision,
 orchestration-owned remote execution and confined downloads, per-operation
 `finally` power-off before agent resume, resume reconciliation, failure-only
 power-off, a strict Codex output schema whose nullable operation fields remain

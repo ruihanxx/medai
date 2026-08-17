@@ -1236,20 +1236,40 @@ def _validate_experiment_artifacts(
     return outputs
 
 
-def _validated_mother_environment(experiment_dir: Path) -> dict[Path, bytes] | None:
+def _mother_environment_validation(experiment_dir: Path) -> dict[str, int | str] | None:
     environment_dir = experiment_dir / "environment"
+    try:
+        setup = (environment_dir / "setup.sh").read_bytes()
+        manifest = (environment_dir / "environment.json").read_bytes()
+    except OSError:
+        return None
+    return {
+        "schema_version": 1,
+        "setup_sha256": hashlib.sha256(setup).hexdigest(),
+        "environment_sha256": hashlib.sha256(manifest).hexdigest(),
+    }
+
+
+def _mother_environment_validated(experiment_dir: Path) -> bool:
+    expected = _mother_environment_validation(experiment_dir)
+    if expected is None:
+        return False
+    environment_dir = experiment_dir / "environment"
+    validation_path = environment_dir / "validation.json"
+    if validation_path.is_file():
+        try:
+            return json.loads(validation_path.read_text(encoding="utf-8")) == expected
+        except (OSError, json.JSONDecodeError):
+            return False
     definition_paths = (
         environment_dir / "setup.sh",
         environment_dir / "environment.json",
     )
-    setup_log_path = environment_dir / "setup.log"
     try:
-        validated_at = setup_log_path.stat().st_mtime_ns
-        if any(path.stat().st_mtime_ns > validated_at for path in definition_paths):
-            return None
-        return {path: path.read_bytes() for path in definition_paths}
+        validated_at = (environment_dir / "setup.log").stat().st_mtime_ns
+        return all(path.stat().st_mtime_ns <= validated_at for path in definition_paths)
     except OSError:
-        return None
+        return False
 
 
 def _run_autoresearch_provider_operation(
@@ -1507,6 +1527,16 @@ def _prepare_autoresearch_command_instance(
         setup_output + ("\n" if setup_output else ""),
         encoding="utf-8",
     )
+    validation = _mother_environment_validation(experiment_dir)
+    if validation is None:
+        raise RuntimeError("Experiment mother environment disappeared after remote setup")
+    validation_path = environment_dir / "validation.json"
+    try:
+        current_validation = json.loads(validation_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        current_validation = None
+    if current_validation != validation:
+        write_json(validation_path, validation)
     return {**acquisition, "remote_working_dir": remote_working_dir}
 
 
@@ -1541,51 +1571,36 @@ def _run_experiment_command_handoff(
     command_index = _next_command_index(command_dir)
     while True:
         command_request_path = command_dir / f"command_{command_index:03d}.json"
-        mother_environment = _validated_mother_environment(experiment_dir)
-        try:
+        if session_id is None:
+            session_id = run_agent(
+                provider=config.provider,
+                prompt_path=prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+            )
             if session_id is None:
-                session_id = run_agent(
-                    provider=config.provider,
-                    prompt_path=prompt_path,
-                    working_dir=codebase_dir,
-                    transcript_path=transcript_path,
-                    siliconflow_config_path=config.siliconflow_config,
-                    codex_model=config.codex_model,
-                    codex_reasoning_effort=config.codex_reasoning_effort,
-                    output_schema_path=command_schema_path,
-                    output_last_message_path=command_request_path,
+                raise RuntimeError(
+                    "Codex Auto Research experiment turn did not return a session ID"
                 )
-                if session_id is None:
-                    raise RuntimeError(
-                        "Codex Auto Research experiment turn did not return a session ID"
-                    )
-            else:
-                assert resume_prompt_path is not None
-                run_agent(
-                    provider=config.provider,
-                    prompt_path=resume_prompt_path,
-                    working_dir=codebase_dir,
-                    transcript_path=transcript_path,
-                    siliconflow_config_path=config.siliconflow_config,
-                    codex_model=config.codex_model,
-                    codex_reasoning_effort=config.codex_reasoning_effort,
-                    output_schema_path=command_schema_path,
-                    output_last_message_path=command_request_path,
-                    resume_session_id=session_id,
-                )
-        finally:
-            if mother_environment is not None:
-                changed = any(
-                    not path.is_file() or path.read_bytes() != content
-                    for path, content in mother_environment.items()
-                )
-                if changed:
-                    for path, content in mother_environment.items():
-                        path.parent.mkdir(parents=True, exist_ok=True)
-                        path.write_bytes(content)
-                    raise RuntimeError(
-                        "Experiment agent modified the validated mother environment"
-                    )
+        else:
+            assert resume_prompt_path is not None
+            run_agent(
+                provider=config.provider,
+                prompt_path=resume_prompt_path,
+                working_dir=codebase_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=command_schema_path,
+                output_last_message_path=command_request_path,
+                resume_session_id=session_id,
+            )
 
         operation = load_model(command_request_path, AutoResearchCommand)
         command_log_path = command_dir / f"command_{command_index:03d}.log"
@@ -1687,9 +1702,7 @@ def _run_experiment(
             {"audited_source_fingerprint": codebase_fingerprint},
         )
     experiment_dir.mkdir(parents=True, exist_ok=True)
-    mother_environment_validated = (
-        _validated_mother_environment(experiment_dir) is not None
-    )
+    mother_environment_validated = _mother_environment_validated(experiment_dir)
     prompt_path = render_prompt(
         "autoresearch/experiment/session_instructions.md",
         config.output

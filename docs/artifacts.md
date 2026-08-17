@@ -77,7 +77,7 @@ runs/<run_id>/autoresearch/campaign_<NNN>/
 │   │   ├── plan/cloud_pull/commands/  # opted-in Codex cloud handoff only
 │   │   ├── experiment/experiment_log.json
 │   │   ├── experiment/evidence_summary.json
-│   │   ├── experiment/environment/{setup.sh,environment.json,setup.log}
+│   │   ├── experiment/environment/{setup.sh,environment.json,setup.log,validation.json}
 │   │   ├── experiment/artifacts/  # orchestration-confined remote downloads
 │   │   ├── experiment/commands/  # remote Codex experiments only
 │   │   └── assessment/assessment.json
@@ -175,6 +175,12 @@ confined to the matching local `experiment/artifacts/` directory. Each terminal
 result is followed by pool-wide power-off and local artifact validation before
 the same temporary session is resumed. Explicit CLI resume retains these files
 but does not persist either temporary session ID.
+
+An Auto Research `experiment/environment/validation.json` is orchestration-owned
+and records the SHA-256 hashes of the `setup.sh` and `environment.json` revision
+that most recently passed remote setup. A missing or mismatched marker makes the
+definition unvalidated. An evidence-driven agent repair changes only those two
+definition files; orchestration records the new hashes only after setup succeeds.
 
 Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset

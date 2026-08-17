@@ -7,6 +7,7 @@ import pytest
 from medai.autoresearch import (
     REQUIRED_BASE_STAGES,
     _copy_base_cloud_inventory,
+    _mother_environment_validated,
     _prepare_autoresearch_command_instance,
     _run_autoresearch_provider_operation,
     _run_experiment_command_handoff,
@@ -1021,6 +1022,15 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     experiment_dir = tmp_path / "experiment"
     codebase_dir.mkdir()
     experiment_dir.mkdir()
+    environment_dir = experiment_dir / "environment"
+    environment_dir.mkdir()
+    setup_path = environment_dir / "setup.sh"
+    setup_path.write_text("mkdir -p \"$1\"\n", encoding="utf-8")
+    (environment_dir / "environment.json").write_text(
+        json.dumps({"language": "Python"}),
+        encoding="utf-8",
+    )
+    (environment_dir / "setup.log").write_text("validated\n", encoding="utf-8")
     prompt_path = tmp_path / "experiment.md"
     prompt_path.write_text("experiment\n", encoding="utf-8")
     transcript_path = tmp_path / "experiment.jsonl"
@@ -1030,6 +1040,11 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
 
     def fake_agent(**kwargs):
         calls.append(kwargs)
+        if len(calls) == 2:
+            setup_path.write_text(
+                "mkdir -p \"$1\"\npython -m pip install matplotlib\n",
+                encoding="utf-8",
+            )
         command_path = kwargs["output_last_message_path"]
         command_path.write_text(
             json.dumps(
@@ -1049,7 +1064,7 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
         result = {
             "operation": operation.operation,
             "command": operation.command,
-            "exit_code": 0,
+            "exit_code": 1 if len(operations) == 1 else 0,
             "duration_seconds": 1.0,
         }
         result_path = kwargs["result_path"]
@@ -1116,6 +1131,7 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     )
     assert calls[0].get("resume_session_id") is None
     assert calls[1]["resume_session_id"] == "session-1"
+    assert "matplotlib" in setup_path.read_text(encoding="utf-8")
 
 
 def test_autoresearch_provider_operation_executes_remote_and_downloads_safely(
@@ -1354,6 +1370,24 @@ def test_autoresearch_command_instance_syncs_local_code_and_environment(
         "--remote",
         "/workspace/medai/campaign/work/.environment-spec.next",
     ]
+    first_validation = json.loads(
+        (environment_dir / "validation.json").read_text(encoding="utf-8")
+    )
+    assert _mother_environment_validated(experiment_dir) is True
+
+    (environment_dir / "setup.sh").write_text(
+        "mkdir -p \"$1\"\npython -m pip install matplotlib\n",
+        encoding="utf-8",
+    )
+    assert _mother_environment_validated(experiment_dir) is False
+
+    actions.clear()
+    _prepare_autoresearch_command_instance(config, codebase_dir, experiment_dir)
+    second_validation = json.loads(
+        (environment_dir / "validation.json").read_text(encoding="utf-8")
+    )
+    assert second_validation["setup_sha256"] != first_validation["setup_sha256"]
+    assert _mother_environment_validated(experiment_dir) is True
 
 
 def test_idea_artifact_rejects_wrong_ids_or_fields():

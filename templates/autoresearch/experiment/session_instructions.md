@@ -49,12 +49,15 @@ second instance, or release the instance.
 
 {% if mother_environment_validated %}
 The mother-environment definition at `{{ local_environment_dir }}` has already
-passed remote setup validation. Treat its `setup.sh`, `environment.json`, and
-orchestration-owned `setup.log` as read-only: do not rewrite, replace, delete,
-or regenerate them. Reuse that definition exactly for every resumed operation.
+passed remote setup validation. Reuse it unchanged by default; resume alone is
+not a reason to regenerate it. If a persisted operation result and log expose a
+specific missing dependency or runtime defect, you may make only the necessary
+repair to `setup.sh` and `environment.json`. Do not modify orchestration-owned
+`setup.log` or `validation.json`. The changed definition is unvalidated until
+orchestration synchronizes it and reruns `setup.sh` successfully.
 {% else %}
-Before returning the first command, create the local mother-environment
-directory `{{ local_environment_dir }}` with both:
+Before returning the first command, create or minimally repair the local
+mother-environment directory `{{ local_environment_dir }}` with both:
 
 - `setup.sh`: an idempotent Bash program accepting the remote environment path
   as `$1` and the synchronized remote codebase path as `$2`. It must create or

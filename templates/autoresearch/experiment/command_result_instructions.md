@@ -22,6 +22,14 @@ aggregate-evidence path inside that remote artifact directory and a destination
 inside the declared local artifact directory. Local orchestration will select a
 usable campaign instance, synchronize the local mother code and environment,
 execute the operation, power the pool off at terminal completion, and resume
-this session again. Do not run or monitor remote work directly in this turn,
-modify audited code, create or release an instance, rematerialize data, or
-download raw or row-level dataset content.
+this session again.
+
+Reuse the validated local mother-environment definition unchanged by default.
+If this or an earlier persisted operation result and log demonstrate a specific
+missing dependency or runtime defect, you may make the smallest necessary
+repair to its `setup.sh` and `environment.json`; do not modify orchestration-owned
+`setup.log` or `validation.json`. Orchestration will treat changed hashes as an
+unvalidated environment revision and must rerun setup successfully before the
+next operation. Do not run or monitor remote work directly in this turn, modify
+audited code, create or release an instance, rematerialize data, or download raw
+or row-level dataset content.

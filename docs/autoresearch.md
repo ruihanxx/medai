@@ -121,7 +121,9 @@ behavior.
 
 An explicit resume reconciles the campaign state before workflow execution.
 If an idea's local mother-environment definition has already passed remote setup,
-resume reuses it unchanged; the experiment agent cannot regenerate or replace it.
+resume reuses it unchanged by default. A persisted operation failure may justify
+a minimal agent repair; changed definition hashes invalidate the prior revision,
+and orchestration must synchronize and successfully rerun setup before use.
 Remote command execution uses a provider-bounded campaign instance pool. It
 tries retained members first and adds a member only after an unambiguous
 capacity-unavailable response. Every newly selected member independently
