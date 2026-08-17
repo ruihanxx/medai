@@ -4,17 +4,21 @@ Auto Research has its own manifest, checkpoints, and dynamic stages below the
 base run. Preflight records hardware resources and fingerprints the canonical
 base artifacts and codebase. A paper-only eligibility agent admits supervised
 machine-learning tasks with a defined prediction target and records a concise
-research brief: problem, scientific
-context, proposed method, and datasets. It does not infer experiment contracts.
+research brief: problem, scientific context, proposed method, and datasets. For
+a paper that mixes prediction with statistical analysis, the decision and brief
+cover only the strict prediction task. It does not infer experiment contracts.
 An ineligible campaign writes its decision, records status `ineligible`, and
 stops.
 
 Before idea generation, a result-blind agent reads only the paper and experiment
-definitions, assigns every experiment a positive importance weight summing to
-one. A separate contract agent treats the completed replicate code and plans as
-authoritative. For every experiment it freezes the downstream data/cohort/split,
-prediction outcome and horizon, evaluator-facing output, evaluation procedure,
-metrics, primary metric, and direction. It also records the baseline input
+definitions, selects only strict supervised prediction experiments, and assigns
+each selected experiment a positive importance weight summing to one. Direct
+statistical, association, causal, matching, and effect-estimation experiments
+are excluded. A separate contract agent treats the completed replicate code and
+plans as authoritative. For every selected experiment it freezes the downstream
+data/cohort/split, prediction outcome and horizon, evaluator-facing output,
+evaluation procedure, a compact agent-written metrics sentence, one numeric
+primary metric, and its direction. It also records the baseline input
 representation, training target, loss, training procedure, and the existing
 paths permitted for representation, training, and integration changes. Auto
 Research does not reassess whether the replicate code agrees with the paper;
@@ -49,15 +53,16 @@ evaluator-facing output, training, and evaluation boundary. One failed audit
 permits one repair and re-audit; a second failure creates an invalid assessment
 and skips planning and execution.
 
-The Auto Research plan and log group refinement-only steps by experiment. The
-plan covers every frozen primary metric with shape-prescriptive outputs, uses
-the audited refinement's full training scale and complete frozen evaluation
-protocol, and prohibits pre-authorized reductions. Result-blind weights do not
-permit experiments to be skipped or downsized. Planned outputs stay inside the
-idea codebase or its experiment directory. The experiment stage never reruns
-the replicated baseline and cannot modify the audited source code; execution
-failures remain explicit. Assessment compares each frozen primary metric with
-existing baseline evidence. It retains
+The Auto Research plan and log group refinement-only steps by selected
+prediction experiment. The plan covers every frozen primary metric with
+shape-prescriptive outputs, uses the audited refinement's full training scale
+and complete frozen evaluation protocol, and prohibits pre-authorized
+reductions. Result-blind weights do not permit selected experiments to be
+skipped or downsized. Planned outputs stay inside the idea codebase or its
+experiment directory. The experiment stage never reruns the replicated baseline
+and cannot modify the audited source code; execution failures remain explicit.
+Assessment compares each frozen primary metric with existing baseline evidence.
+It retains
 `relative_delta = (refined - baseline) / abs(baseline)` as objective comparison
 evidence, then assigns each experiment an evidence-bound integer score from -5
 through 5. Zero means no meaningful improvement, -5 means compelling evidence

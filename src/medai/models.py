@@ -355,15 +355,9 @@ class ExperimentContract(StrictModel):
     loss_contract: str = Field(min_length=1)
     training_contract: str = Field(min_length=1)
     evaluation_contract: str = Field(min_length=1)
-    metrics: list[str] = Field(min_length=1)
+    metrics: str = Field(min_length=1)
     primary_metric: str = Field(min_length=1)
     metric_direction: Literal["higher", "lower"]
-
-    @model_validator(mode="after")
-    def primary_metric_is_declared(self) -> "ExperimentContract":
-        if self.primary_metric not in self.metrics:
-            raise ValueError("Experiment primary_metric must appear in metrics")
-        return self
 
 
 class ExperimentContracts(StrictModel):
@@ -705,20 +699,25 @@ def validate_experiment_weights(
     todo: ExperimentTodo,
     weights: ExperimentWeights,
 ) -> None:
-    expected = [experiment.experiment_id for experiment in todo.experiments]
+    available = [experiment.experiment_id for experiment in todo.experiments]
     actual = [experiment.experiment_id for experiment in weights.experiments]
+    expected = [experiment_id for experiment_id in available if experiment_id in actual]
     if actual != expected:
-        raise ValueError("Experiment weights must cover every experiment in order")
+        raise ValueError(
+            "Experiment weights must select known prediction experiments in input order"
+        )
 
 
 def validate_experiment_contracts(
-    todo: ExperimentTodo,
+    weights: ExperimentWeights,
     contracts: ExperimentContracts,
 ) -> None:
-    expected = [experiment.experiment_id for experiment in todo.experiments]
+    expected = [experiment.experiment_id for experiment in weights.experiments]
     actual = [experiment.experiment_id for experiment in contracts.experiments]
     if actual != expected:
-        raise ValueError("Experiment contracts must cover every experiment in order")
+        raise ValueError(
+            "Experiment contracts must cover every weighted prediction experiment"
+        )
 
 
 def validate_candidate_pool_for_selection(pool: IdeaCandidatePool) -> None:

@@ -13,8 +13,13 @@ brief for idea generation.
 Classify the study as eligible only when it trains or evaluates model(s) against
 an explicit prediction target, such as classification, regression, or
 risk/time-to-event prediction. Direct statistical analysis without a predictive
-model is ineligible. For an eligible study, summarize only the research problem,
-its context, the paper's proposed method, and the datasets used.
+model is ineligible. If the paper contains both predictive modeling and direct
+statistical, association, explanatory, or causal analysis, admit only the strict
+prediction task: base the decision and research brief only on the supervised
+prediction target, model, inputs, and evaluation, and exclude the statistical
+analysis from Auto Research. For an eligible study, summarize only that
+prediction problem, its context, the paper's predictive method, and the datasets
+used.
 
 ## Output
 

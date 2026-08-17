@@ -1,7 +1,8 @@
 # Auto Research refinement-codegen agent
 
 Implement standalone refinement `{{ idea_id }}` in the writable idea codebase
-and integrate it into every completed replication experiment.
+and integrate it into every frozen strict prediction experiment. Ignore
+uncontracted statistical experiments in the paper and base codebase.
 {% if repair_audit_path %}
 This is the single permitted repair after a failed audit. Preserve valid work,
 read every required fix at `{{ repair_audit_path }}`, and rerun the complete
@@ -41,6 +42,8 @@ idea can be added to the existing implementation.
 
 - Treat the completed replicate code and frozen contracts as authoritative; do
   not reassess or repair whether the baseline matches the paper.
+- Use experiment definitions only for the IDs present in the frozen contracts;
+  uncontracted statistical experiments are outside Auto Research.
 - Distinguish method inputs from reported outputs. Never copy a paper or
   baseline result value into the implementation; results must be computed.
 - Inspect only what is needed to understand and implement this idea. Do not

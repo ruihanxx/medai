@@ -43,12 +43,15 @@ and codegen remaining a single scientific stage.
 Auto Research mocks cover input-representation, model, and training-strategy
 implementation plans; declared changed-file boundaries; preservation of data,
 final prediction target, evaluator-facing output, and evaluation contracts; and
-the ordered six-aspect refinement audit. They also cover the campaign-wide
-candidate pool, six-candidate review, three-candidate selection, selected-idea
-removal, and reuse of the remaining candidates in later rounds. Cloud-backed
-coverage verifies inherited provider/drive configuration without a local data
-mount, copied base inventory, base-resource preference through the selected
-provider reference, initial prepare/local-monitor/power-off/same-session resume, one
+the ordered six-aspect refinement audit. Artifact and prompt coverage verifies
+compact agent-written metrics text and selection of only strict prediction
+experiments when a paper also contains statistical analysis. They also cover the
+campaign-wide candidate pool, six-candidate review, three-candidate selection,
+selected-idea removal, and reuse of the remaining candidates in later rounds.
+Cloud-backed coverage verifies inherited provider/drive configuration without a
+local data mount, copied base inventory, base-resource preference through the
+selected provider reference, initial
+prepare/local-monitor/power-off/same-session resume, one
 campaign instance across ideas and rounds, per-command power-on and `finally`
 power-off before agent resume, replacement resume with a fresh offline pull and
 inventory verification, failure-only power-off, and final-only release.

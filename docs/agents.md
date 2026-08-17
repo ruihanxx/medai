@@ -51,8 +51,12 @@
   comparisons, hypotheses, changes, commands, and actual round results in
   `smart_replicate_log.json`; it does not expose the paper itself.
 - Auto Research experiment weights are generated before code inspection and do
-  not receive result artifacts. Experiment contracts trust the completed
-  replicate code as the executable source of truth. Auto Research codegen may
+  not receive result artifacts. The weighting agent selects only strict
+  supervised prediction experiments; mixed-paper statistical, association,
+  causal, matching, and effect-estimation experiments are excluded from weights
+  and every downstream Auto Research stage. Experiment contracts trust the
+  completed replicate code as the executable source of truth and record
+  evaluator metrics as one compact agent-written sentence. Auto Research codegen may
   add standalone refinement files and touch only declared input-representation,
   training, and integration paths. It may change representation and training
   targets, objectives, sampling, augmentation, optimization, pretraining, or

@@ -261,7 +261,7 @@ def _configure_fake_agents(
                                 "loss_contract": "binary cross entropy",
                                 "training_contract": "existing training loop",
                                 "evaluation_contract": "existing evaluation",
-                                "metrics": ["accuracy"],
+                                "metrics": "The evaluator computes accuracy.",
                                 "primary_metric": "accuracy",
                                 "metric_direction": "higher",
                             }
@@ -717,7 +717,7 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
                 "prediction_target_contract": "fixed outcome",
                 "output_contract": "prediction score",
                 "evaluation_contract": "frozen evaluator",
-                "metrics": ["AUROC"],
+                "metrics": "The evaluator computes AUROC.",
                 "primary_metric": "AUROC",
                 "metric_direction": "higher",
             }
@@ -744,6 +744,7 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
         },
         "experiment_contracts": {
             "experiments_path": path,
+            "weights_path": path,
             "codegen_plan_path": path,
             "replicate_plan_path": path,
             "base_codebase_dir": path,
@@ -752,6 +753,8 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
         "idea_generation": {
             "paper_markdown": path,
             "eligibility_path": path,
+            "weights_path": path,
+            "contracts_path": path,
             "reproduction_report_path": path,
             "codebase_dir": path,
             "candidates_path": path,
@@ -856,9 +859,19 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
 
     plan_prompt = (tmp_path / "plan.md").read_text(encoding="utf-8")
     assert "Primary metric: `AUROC`" in plan_prompt
+    assert "Metrics: The evaluator computes AUROC." in plan_prompt
     assert "shape-prescriptive" in plan_prompt
     assert "no pre-authorized reductions" in plan_prompt
     assert "Never include or rerun an old existing or replicated baseline" in plan_prompt
+
+    weighting_prompt = (tmp_path / "experiment_weighting.md").read_text(
+        encoding="utf-8"
+    )
+    assert "only its strict prediction experiments" in weighting_prompt
+    contracts_prompt = (tmp_path / "experiment_contracts.md").read_text(
+        encoding="utf-8"
+    )
+    assert "one compact sentence, not a JSON" in contracts_prompt
 
 
 def test_autoresearch_plan_cloud_pull_handoff_resumes_same_codex_session(

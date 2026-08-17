@@ -18,7 +18,9 @@ from medai.models import (
     RoundSummary,
     SkillCorrectionsFile,
     validate_codegen_audit,
+    validate_experiment_contracts,
     validate_experiment_coverage,
+    validate_experiment_weights,
     validate_idea_implementation_plan,
     validate_replication_log,
     validate_replication_plan,
@@ -293,7 +295,7 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
                     "loss_contract": "binary cross entropy",
                     "training_contract": "fixed training loop",
                     "evaluation_contract": "fixed evaluation",
-                    "metrics": ["accuracy"],
+                    "metrics": "The evaluator computes accuracy.",
                     "primary_metric": "accuracy",
                     "metric_direction": "higher",
                 }
@@ -301,6 +303,21 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
         }
     )
     assert weights.experiments[0].weight == 1.0
+    assert contracts.experiments[0].metrics == "The evaluator computes accuracy."
+
+    mixed_payload = todo_payload()
+    mixed_payload["experiments"].append(
+        {
+            "experiment_id": "E2",
+            "description": "Estimate an association with a Cox model.",
+            "computational_demand": "The statistical analysis runs on CPU.",
+            "claims": ["C1"],
+            "artifacts": ["Table 1"],
+        }
+    )
+    mixed_todo = ExperimentTodo.model_validate(mixed_payload)
+    validate_experiment_weights(mixed_todo, weights)
+    validate_experiment_contracts(weights, contracts)
 
     implementation = IdeaImplementationPlan.model_validate(
         {

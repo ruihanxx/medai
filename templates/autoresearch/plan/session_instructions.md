@@ -82,7 +82,7 @@ evaluation protocol. They contain no target result values.
   - Prediction target: {{ experiment.prediction_target_contract }}
   - Evaluator-facing output: {{ experiment.output_contract }}
   - Evaluation protocol: {{ experiment.evaluation_contract }}
-  - Metrics: {{ experiment.metrics | tojson }}
+  - Metrics: {{ experiment.metrics }}
   - Primary metric: `{{ experiment.primary_metric }}`
   - Metric direction: `{{ experiment.metric_direction }}`
   - Result-blind assessment weight: {{ importance.weight }}

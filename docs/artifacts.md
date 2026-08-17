@@ -92,9 +92,13 @@ runs/<run_id>/autoresearch/
 Each Auto Research experiment contract records immutable data, prediction, and
 evaluation boundaries; baseline representation, training target, loss, and
 training descriptions; and the existing representation, training, and
-integration paths eligible for declared refinement changes. An implementation
-plan classifies the idea as input-representation, model, and/or training-strategy
-work. Its `refine_file_list` records every existing file to modify and how;
+integration paths eligible for declared refinement changes. A contract's
+`metrics` field is one compact agent-written sentence naming the
+unchanged evaluator metrics; `primary_metric` separately names the single numeric
+metric used for baseline/refinement assessment. Only strict supervised
+prediction experiments selected by `experiment_weights.json` receive contracts.
+An implementation plan classifies the idea as input-representation, model,
+and/or training-strategy work. Its `refine_file_list` records every existing file to modify and how;
 `new_file_list` records every file to add and how. Refine paths must come from
 the contract-declared representation, training, or integration paths, while new
 paths must not exist in the base codebase. Paths are unique across both lists,

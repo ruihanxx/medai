@@ -9,10 +9,16 @@ Assign result-blind scientific importance weights to the paper's experiments.
 
 ## Task
 
-Read only the paper and experiment definitions. Before any refinement is
+Read only the paper and experiment definitions. First select only experiments
+that strictly train or evaluate a supervised model against an explicit
+classification, regression, or risk/time-to-event prediction target. Exclude
+direct statistical, association, explanatory, causal, matching, and effect-
+estimation analyses that do not evaluate predictions, even when they are central
+to the paper. If the paper mixes prediction and statistical analysis, continue
+with only its strict prediction experiments. Before any refinement is
 implemented or any baseline/refinement result is considered, assign each
-experiment a positive importance weight based on how central it is to the
-paper's stated problem and proposed method.
+selected experiment a positive importance weight based on how central it is to
+the paper's prediction problem and proposed predictive method.
 
 ## Output
 
@@ -32,7 +38,10 @@ Write `{{ weights_path }}`:
 
 ## Constraints
 
-- Include every experiment exactly once and in input order.
+- Include every selected strict prediction experiment exactly once and in input
+  order; do not include excluded statistical experiments.
+- Select at least one experiment; the preceding eligibility decision guarantees
+  that the paper contains a strict prediction task.
 - All weights must be positive and sum to exactly 1.
 - Do not read or use result values, replication logs, reports, or generated code.
 - Do not rank experiments by their reported performance.

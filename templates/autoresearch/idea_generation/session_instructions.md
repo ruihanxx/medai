@@ -9,6 +9,8 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 
 - Paper Markdown: `{{ paper_markdown }}`
 - Eligibility and research brief: `{{ eligibility_path }}`
+- Selected strict prediction experiments and weights: `{{ weights_path }}`
+- Frozen prediction experiment contracts: `{{ contracts_path }}`
 - Base reproduction report: `{{ reproduction_report_path }}`
 - Completed base codebase: `{{ codebase_dir }}`
 - Shared candidate pool: `{{ candidates_path }}` (may not exist in round 1)
@@ -19,7 +21,10 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 Use the research brief to establish the target problem and relevant research
 line, then propose standalone refinements to input representation, model design,
 or training strategy that can be embedded into the already replicated
-experiments.
+prediction experiments selected in the weights and contracts artifacts. If the
+paper or base code also contains statistical, association, explanatory, causal,
+matching, or effect-estimation analyses, do not propose ideas for them and do
+not use them as refinement targets.
 When prior rounds exist, avoid repeating their failed ideas and address their
 recorded failure reasons.
 

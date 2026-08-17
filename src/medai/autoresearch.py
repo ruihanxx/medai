@@ -610,7 +610,7 @@ def autoresearch_experiment_setup_node(state: AutoResearchState) -> dict[str, An
     contracts_transcript_path = setup_dir / "experiment_contracts_transcript.jsonl"
     if pipeline_state.is_stage_completed("experiment_contracts"):
         contracts = load_model(contracts_path, ExperimentContracts)
-        validate_experiment_contracts(experiments, contracts)
+        validate_experiment_contracts(weights, contracts)
         _validate_contract_code_paths(
             contracts,
             config.base_run / "codegen" / "codebase",
@@ -631,6 +631,7 @@ def autoresearch_experiment_setup_node(state: AutoResearchState) -> dict[str, An
         "autoresearch/experiment_contracts/session_instructions.md",
         config.output / "prompts" / "experiment_setup" / "contracts.md",
         experiments_path=experiments_path,
+        weights_path=weights_path,
         codegen_plan_path=base_codebase_dir / "codegen_plan.json",
         replicate_plan_path=config.base_run / "plan" / "replicate_plan.json",
         base_codebase_dir=base_codebase_dir,
@@ -648,7 +649,7 @@ def autoresearch_experiment_setup_node(state: AutoResearchState) -> dict[str, An
     if _codebase_fingerprint(base_codebase_dir) != before:
         raise RuntimeError("Experiment-contract agent modified the base codebase")
     contracts = load_model(contracts_path, ExperimentContracts)
-    validate_experiment_contracts(experiments, contracts)
+    validate_experiment_contracts(weights, contracts)
     _validate_contract_code_paths(contracts, base_codebase_dir)
     pipeline_state.complete_stage(
         "experiment_contracts",
@@ -687,6 +688,10 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
         config.output / "prompts" / f"round_{round_index:03d}" / "idea_generation.md",
         paper_markdown=config.base_run / "preprocessing" / "paper.md",
         eligibility_path=config.output / "eligibility" / "eligibility.json",
+        weights_path=config.output / "experiment_setup" / "experiment_weights.json",
+        contracts_path=(
+            config.output / "experiment_setup" / "experiment_contracts.json"
+        ),
         reproduction_report_path=config.base_run / "report" / "reproduction_report.md",
         codebase_dir=config.base_run / "codegen" / "codebase",
         candidates_path=candidates_path,
