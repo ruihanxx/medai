@@ -74,15 +74,19 @@ runs/<run_id>/autoresearch/
 │   │   ├── codegen/implementation_plan.json
 │   │   ├── audit/audit.json
 │   │   ├── plan/experiment_plan.json
+│   │   ├── plan/cloud_pull/commands/  # opted-in Codex cloud handoff only
 │   │   ├── experiment/experiment_log.json
 │   │   ├── experiment/evidence_summary.json
+│   │   ├── experiment/commands/  # remote Codex experiments only
 │   │   └── assessment/assessment.json
 │   └── round_summary.json
 ├── report/auto_research_report.md
 ├── report/idea_metric_comparison.png
 ├── report/idea_status_overview.png
 ├── prompts/
-└── remote_compute/instance.json
+└── remote_compute/
+    ├── instance.json
+    └── cloud-inventory.v1.json  # cloud-backed campaigns only
 ```
 
 Each Auto Research experiment contract records immutable data, prediction, and
@@ -151,6 +155,14 @@ cloud-state validation error when the same Codex session must prepare and hand
 off another monitor command. These command artifacts survive an explicit CLI
 resume, but the temporary Codex session ID does not.
 
+Auto Research planning cloud handoff stores the same request/log/result triplet
+under each idea's `plan/cloud_pull/commands/`; its schema and resume prompts are
+under the campaign `prompts/` tree. Remote Codex experiments store one such
+triplet per foreground command under `experiment/commands/`. Each terminal
+result is followed by power-off and local artifact validation before the same
+temporary session is resumed. Explicit CLI resume retains these files but does
+not persist either temporary session ID.
+
 Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset
 document, it may add an object containing exactly `"file name"` and
@@ -204,6 +216,12 @@ Replication manifest inputs distinguish local and cloud data. A cloud run sets
 `computation_provider_config` contains only metadata-declared non-secret values.
 Local runs set the cloud fields to false/null and retain the existing `data` and
 `data_source` behavior. Secrets are never persistent artifacts.
+
+A cloud-backed Auto Research manifest inherits the same public cloud fields and
+keeps local `data` null. Its base fingerprint additionally binds the released
+base `remote_compute/instance.json` and `cloud-inventory.v1.json`. The inventory
+is copied byte-for-byte into the campaign before materialization and is the
+required baseline for the initial instance and any one resume replacement.
 
 `remote_compute/instance.json` has a provider-owned `provider_state` whose
 schema is defined by the selected adapter. Its common envelope records the

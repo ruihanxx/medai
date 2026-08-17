@@ -49,10 +49,11 @@ support for a provider, drive, or capability that metadata and its selected
 reference do not document.
 
 A drive may set `cloud_pull_handoff: true` when its reference defines a safe
-two-step preparation and local-monitor procedure. Only a resumable Codex
-codegen session uses that opt-in: the agent completes the reference's active
-instance preparation and power-off step, then local orchestration runs the
-returned foreground monitor command before resuming that same session.
+two-step preparation and local-monitor procedure. A resumable Codex codegen or
+Auto Research planning session may use that opt-in: the agent completes the
+reference's active-instance preparation and power-off step, then local
+orchestration runs the returned foreground monitor command before resuming that
+same session.
 
 ## Local Configs
 
@@ -155,3 +156,13 @@ release case is resume reconciliation: an instance that is still recorded by
 the provider but fails the one harmless SSH probe must be powered off and
 successfully released before one replacement may be created. Persisted lifecycle
 state must guard every release and replacement.
+
+For a cloud-backed Auto Research campaign, create one campaign-owned instance
+only when the first audited idea reaches experiment planning. Reuse its state,
+working directory, and read-only dataset target across every idea and round.
+When the agent uses command handoff, orchestration powers on immediately before
+each foreground experiment command and powers off in `finally` before resuming
+the agent. A failed campaign remains powered off but unreleased. Release only
+after final-report validation and campaign completion. If explicit resume makes
+one bounded replacement, independently repeat offline cloud preparation and
+monitoring against the inherited inventory, then power off before agent work.

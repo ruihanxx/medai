@@ -28,15 +28,20 @@
   existing transcript is preserved as `<name>.attempt-<N>.jsonl`. Transcript
   files are diagnostic records and are never used as the agent's structured
   result.
-- Codex replication and opted-in cloud codegen are the exceptions to the
-  one-turn agent pattern. Their initial turns and explicit-session resume turns
+- Codex replication, opted-in cloud codegen and Auto Research planning, and
+  remote Auto Research experiments are the exceptions to the one-turn agent
+  pattern. Their initial turns and explicit-session resume turns
   append to one transcript and use the sole structured response
   `{"command":"<non-empty bash command>"}`. Replication validates its canonical
   artifacts after each local command. Cloud codegen first uses the active agent
   to prepare and power off an initialized remote instance, then local
   orchestration runs the returned monitor command and resumes the same session
   after its terminal result. Its cloud data remains unavailable until provider
-  state is completed. The prompt permits file inspection, code edits, and
+  state is completed. Auto Research planning uses the same prepare, local
+  monitor, and resume boundary. Its experiment agent hands off one foreground
+  command; orchestration powers on only for that command, powers off before
+  artifact validation and agent resume, and repeats until all required local
+  artifacts validate. The prompt permits file inspection, code edits, and
   lightweight interaction in Codex; long-running experiments, test suites, and
   remote monitoring are handed back as the foreground command. No `--last`,
   status field, or completion sentinel is used.
@@ -126,6 +131,16 @@
   `remote_compute/instance.json` records the selected provider and common
   lifecycle state; each provider reference defines its provider-specific
   selection procedure, operations, and state.
+- A cloud-backed Auto Research campaign owns one lazily created instance across
+  every idea and round. Its selected provider reference reads the completed
+  base state's actual accelerator model, count, and memory capacities, searches
+  the exact model first, and permits only the reference's stronger fallback.
+  Planning reuses the copied base inventory and completed read-only target.
+  Experiment agents may upload only audited idea code and download only models,
+  metrics, logs, and aggregate evidence. They never download raw or row-level
+  data, create another instance, rematerialize data, or release the instance.
+  Failure powers off without release; only final-report validation and campaign
+  completion permit orchestration release.
 - Before an instance is created, the selected provider reference must validate
   the requested resource and image against that provider's supported pool. If
   the paper's exact GPU is absent, selection may use only the closest documented
@@ -164,5 +179,8 @@
   action. Codegen receives `infrastructure_resume` only when a replacement before
   replication requires re-upload and environment reconstruction. A resumed
   replication/report attempt is archived and restarted from replication step 1;
-  agents must not reuse its old step log as a checkpoint. Auto Research agents
-  retain their existing behavior.
+  agents must not reuse its old step log as a checkpoint. Explicit Auto Research
+  resume is also orchestration-owned. A single replacement independently runs
+  drive preparation and local offline monitoring, verifies the copied base
+  inventory, and powers off before a new agent session; no prior process-local
+  session ID is reused.

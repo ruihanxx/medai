@@ -54,9 +54,11 @@ Auto Research requires `--output runs/<run_id>`, accepts `--max-iter` from 1 thr
 10 (default 1),
 accepts a non-negative `--assessment-threshold` for the weighted -5-through-5
 idea-assessment score (default `0.0`), and rejects `--paper`, `--repo`, `--data`,
-and `--smart-replicate`. Auto Research also rejects a base run whose data came
-from `--clouddrive`; cloud datasets are intentionally scoped to their original
-replication instance.
+and `--smart-replicate`. A cloud-backed campaign inherits the base run's
+computation provider, drive, dataset, and source. It requires the base instance
+to be released and its completed cloud inventory to remain reloadable; the
+campaign owns a separate instance and copies the inventory as its immutable
+materialization baseline.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
 Paper, repository, data, provider configuration, and CLI credentials are
 mounted read-only. The host `~/.ssh` directory is copied from its read-only
@@ -73,12 +75,14 @@ Auto Research restores paper, repository, and data locations from the base
 manifest, skips MinerU, and requires the base run to be completed with all eight
 canonical replicate stages reloadable. The launcher mounts the base run
 read-only at `/workspace/base-run`, mounts only its `autoresearch/` child
-writable at `/workspace/autoresearch`, and remounts the recorded source data
-read-only. A missing source data path is an explicit error. The campaign
-inherits the base provider, model, and reasoning effort unless a CLI value
-overrides that field. `codex-siliconflow` still requires a newly supplied secret
-configuration. Initial implementation permits one campaign per base run;
-reusing it requires the same base fingerprint and resolved configuration.
+writable at `/workspace/autoresearch`, and remounts recorded local source data
+read-only. Cloud-backed campaigns mount no host data directory. A missing local
+source data path is an explicit error. The campaign inherits the base agent
+provider, model, reasoning effort, and remote provider/drive selection unless an
+allowed CLI value overrides the agent field. `codex-siliconflow` still requires
+a newly supplied secret configuration. Initial implementation permits one
+campaign per base run; reusing it requires the same base fingerprint and
+resolved configuration.
 
 The local `medai:local` image is a thin overlay on the canonical Veritas image
 `ghcr.io/chicagohai/veritas:latest` (configurable with the Docker build argument
@@ -103,13 +107,15 @@ The `codex` provider accepts `--codex-model` and
 `MEDAI_CODEX_MODEL` and `MEDAI_CODEX_REASONING_EFFORT` in the project `.env`.
 The resolved values are recorded in `manifest.json`.
 
-Remote-compute configuration comes only from the environment. Set
-`MEDAI_COMPUTATION_PROVIDER` and, for `--clouddrive`, `MEDAI_DRIVE_PROVIDER`.
+Remote-compute secrets and local adapter configuration come only from the
+environment. New replicate runs may select with `MEDAI_COMPUTATION_PROVIDER`
+and, for `--clouddrive`, `MEDAI_DRIVE_PROVIDER`.
 When these selectors are omitted, MedAI uses the recorded resume selection or
-exactly one fully configured adapter. The selected computation-provider skill
-metadata defines its required variables, defaults, supported drives, source
-mapping, action timeouts, and non-secret configuration fingerprint. Secrets are
-never placed in manifests, command arguments, prompts, or logs.
+the cloud-backed Auto Research base selection, then exactly one fully configured
+adapter. The selected computation-provider skill metadata defines its required
+variables, defaults, supported drives, source mapping, action timeouts, and
+non-secret configuration fingerprint. Secrets are never placed in manifests,
+command arguments, prompts, or logs.
 
 Replicate failure cleanup powers off a run-created remote instance without
 releasing it. On explicit resume the CLI reconciles the canonical state once
@@ -122,8 +128,21 @@ replication attempt whether the instance was reused or replaced. Cloud data is
 materialized idempotently before every replication
 attempt. Normal release occurs only after the report is validated and the run is
 completed. A release failure is a persistent `cleanup_warning`, not a pipeline
-failure, and reopening that completed run does not retry it. Auto Research
-cleanup behavior is unchanged.
+failure, and reopening that completed run does not retry it.
+
+Cloud-backed Auto Research creates its campaign instance lazily at the first
+audited idea that reaches experiment planning and reuses the same recorded
+instance for all ideas and rounds. Direct Codex planning uses the opted-in
+prepare/foreground-monitor/same-session-resume handoff for initial
+materialization. Every Codex experiment command is run locally in the
+foreground: orchestration powers the instance on immediately before the
+command, powers it off in `finally`, validates downloaded artifacts, and only
+then resumes the same agent session. Other agent providers retain their
+single-turn experiment behavior. Explicit resume reconciles once; a single
+replacement repeats prepare and local offline monitoring against the copied
+base inventory, then powers off before agent execution. Failures power off and
+preserve the instance. Release occurs only after final-report validation and
+campaign completion, with release errors recorded as cleanup warnings.
 
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a

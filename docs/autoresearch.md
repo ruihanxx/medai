@@ -78,6 +78,38 @@ ideas finish before routing: any valid idea ends iteration, otherwise a new
 round begins until `max_iter` is reached. Later rounds receive prior ideas,
 audit/assessment verdicts, and failure-reason paths.
 
+For a cloud-backed base run, preflight requires completed drive state on an
+already released base instance and a non-empty per-file inventory. The campaign
+copies that inventory byte-for-byte, mounts no local data, and owns a distinct
+remote state. The first audited idea that reaches planning creates the sole
+campaign instance. The selected provider reference reads the base provider
+state's actual selected resources, searches for the exact accelerator model
+first, preserves its count and memory capacities as floors, and uses only its
+documented stronger fallback when exact inventory is unavailable. Every later
+idea and round must reuse the same state path, instance, remote working
+directory, and completed read-only dataset target.
+
+When direct Codex and the selected drive support offline handoff, the planning
+agent prepares the instance and returns one foreground monitor command. Local
+orchestration runs it without an active agent process, validates the copied base
+inventory, then resumes the same planning session to write the existing
+three-field `remote_compute` object. During experiments the Codex agent returns
+one foreground command at a time. Orchestration starts the instance immediately
+before each command, streams and persists its result, powers off in `finally`,
+validates the experiment log, evidence summary, and declared local outputs, and
+only then either finishes or resumes that same session. Only audited idea code
+is uploaded; only models, metrics, logs, and aggregate evidence are downloaded.
+Raw or row-level data never leaves the remote target. Other agent providers keep
+their single-turn experiment behavior.
+
+An explicit resume reconciles the campaign state before workflow execution. If
+one bounded replacement is required, local orchestration independently runs
+prepare and offline monitor, verifies the copied base inventory on the new
+instance, and powers it off before a new agent session begins. Ambiguous copy,
+inventory, or old-instance release state is terminal and cannot create another
+replacement. A failed campaign powers off but retains its instance; only a
+validated final report and completed campaign permit release.
+
 Dynamic stages are named `round_001.idea_01.<stage>`. Completed stages are
 skipped only after their artifacts reload and validate; retries retain provider
 transcripts. The campaign manifest records the base fingerprint, resolved
