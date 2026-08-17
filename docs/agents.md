@@ -42,7 +42,10 @@
   experiment agent hands off one foreground
   command; orchestration powers on only for that command, powers off before
   artifact validation and agent resume, and repeats until all required local
-  artifacts validate. The prompt permits file inspection, code edits, and
+  artifacts validate. After the local mother-environment definition first
+  passes remote setup, later agent turns and explicit resumes treat it as
+  immutable; orchestration rejects and restores any attempted replacement.
+  The prompt permits file inspection, code edits, and
   lightweight interaction in Codex; long-running experiments, test suites, and
   remote monitoring are handed back as the foreground command. No `--last`,
   status field, or completion sentinel is used.

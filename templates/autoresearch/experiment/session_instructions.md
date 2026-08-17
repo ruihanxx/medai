@@ -47,6 +47,12 @@ second instance, or release the instance.
 {% if command_handoff %}
 ## Command handoff protocol
 
+{% if mother_environment_validated %}
+The mother-environment definition at `{{ local_environment_dir }}` has already
+passed remote setup validation. Treat its `setup.sh`, `environment.json`, and
+orchestration-owned `setup.log` as read-only: do not rewrite, replace, delete,
+or regenerate them. Reuse that definition exactly for every resumed operation.
+{% else %}
 Before returning the first command, create the local mother-environment
 directory `{{ local_environment_dir }}` with both:
 
@@ -62,6 +68,7 @@ Derive this definition from the experiment plan and the validated base evidence
 listed above. Prefer the base run's proven runtime when it satisfies the audited
 dependencies; record any necessary divergence instead of assuming an unavailable
 paper-version executable.
+{% endif %}
 
 Use only `{{ remote_environment_dir }}` as the experiment runtime. Local
 orchestration synchronizes the audited local codebase and this mother-environment

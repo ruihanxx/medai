@@ -120,6 +120,8 @@ remote target. Other agent providers keep their single-turn experiment
 behavior.
 
 An explicit resume reconciles the campaign state before workflow execution.
+If an idea's local mother-environment definition has already passed remote setup,
+resume reuses it unchanged; the experiment agent cannot regenerate or replace it.
 Remote command execution uses a provider-bounded campaign instance pool. It
 tries retained members first and adds a member only after an unambiguous
 capacity-unavailable response. Every newly selected member independently
