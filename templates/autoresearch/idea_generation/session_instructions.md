@@ -11,16 +11,15 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 - Eligibility and research brief: `{{ eligibility_path }}`
 - Base reproduction report: `{{ reproduction_report_path }}`
 - Completed base codebase: `{{ codebase_dir }}`
-- Required idea-generation skill: `{{ idea_generation_skill }}`
 - Shared candidate pool: `{{ candidates_path }}` (may not exist in round 1)
 - Prior round idea, audit, assessment, and failure-reason paths: `{{ prior_rounds_json }}`
 
 ## Task
 
-Read and follow the required idea-generation skill. Use the research brief to
-establish the target problem and relevant research line, then propose standalone
-refinements to input representation, model design, or training strategy that can
-be embedded into the already replicated experiments.
+Use the research brief to establish the target problem and relevant research
+line, then propose standalone refinements to input representation, model design,
+or training strategy that can be embedded into the already replicated
+experiments.
 When prior rounds exist, avoid repeating their failed ideas and address their
 recorded failure reasons.
 

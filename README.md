@@ -89,9 +89,7 @@ isolated refinement candidates per round and runs code generation, audit,
 planning, experimentation, and assessment for each candidate. A valid
 refinement ends the loop after the current round; otherwise it continues up to
 `--max-iter` (1-10). The base run must be completed and must describe a
-supervised prediction task. The runtime also requires
-`templates/skills/idea-generation/SKILL.md`; its absence is reported as an
-explicit preflight failure.
+supervised prediction task.
 
 Auto Research inherits the base provider, model, and reasoning effort unless
 explicitly overridden. A `codex-siliconflow` campaign must receive

@@ -478,11 +478,8 @@ def autoresearch_preflight_node(state: AutoResearchState) -> dict[str, Any]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
     resources_path = config.output / "preflight" / "resources.json"
-    idea_skill = skills_dir() / "idea-generation" / "SKILL.md"
     if pipeline_state.is_stage_completed("preflight"):
         _validate_base_run(config)
-        if not idea_skill.is_file():
-            raise RuntimeError(f"Required idea-generation skill is missing: {idea_skill}")
         try:
             resources = json.loads(resources_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -500,8 +497,6 @@ def autoresearch_preflight_node(state: AutoResearchState) -> dict[str, Any]:
     pipeline_state.start_stage("preflight")
     config.validate()
     _validate_base_run(config)
-    if not idea_skill.is_file():
-        raise RuntimeError(f"Required idea-generation skill is missing: {idea_skill}")
     for name in (
         "preflight",
         "eligibility",
@@ -694,7 +689,6 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
         eligibility_path=config.output / "eligibility" / "eligibility.json",
         reproduction_report_path=config.base_run / "report" / "reproduction_report.md",
         codebase_dir=config.base_run / "codegen" / "codebase",
-        idea_generation_skill=skills_dir() / "idea-generation" / "SKILL.md",
         candidates_path=candidates_path,
         prior_rounds_json=json.dumps(prior_rounds, ensure_ascii=False, indent=2),
         round_index=round_index,

@@ -2,11 +2,9 @@
 
 Auto Research has its own manifest, checkpoints, and dynamic stages below the
 base run. Preflight records hardware resources and fingerprints the canonical
-base artifacts and codebase. It also requires
-`templates/skills/idea-generation/SKILL.md`; this repository contract does not
-provide that skill, so absence fails before agent execution. A paper-only
-eligibility agent admits supervised machine-learning tasks with a defined
-prediction target and records a concise research brief: problem, scientific
+base artifacts and codebase. A paper-only eligibility agent admits supervised
+machine-learning tasks with a defined prediction target and records a concise
+research brief: problem, scientific
 context, proposed method, and datasets. It does not infer experiment contracts.
 An ineligible campaign writes its decision, records status `ineligible`, and
 stops.

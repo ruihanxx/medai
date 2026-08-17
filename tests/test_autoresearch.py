@@ -8,7 +8,6 @@ from medai.autoresearch import (
     _copy_base_cloud_inventory,
     _run_experiment_command_handoff,
     _run_plan_cloud_pull_handoff,
-    autoresearch_preflight_node,
     create_autoresearch_workflow,
 )
 from medai.config import AutoResearchConfig
@@ -571,13 +570,6 @@ def _configure_fake_agents(
 
 def _prepare_campaign(tmp_path: Path, monkeypatch, max_iter: int) -> AutoResearchConfig:
     base_run = _prepare_base_run(tmp_path)
-    skills = tmp_path / "skills"
-    (skills / "idea-generation").mkdir(parents=True)
-    (skills / "idea-generation" / "SKILL.md").write_text(
-        "---\ndescription: Generate research ideas.\n---\n",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr("medai.autoresearch.skills_dir", lambda: skills)
     config = AutoResearchConfig.create(
         base_run=base_run,
         output=tmp_path / "autoresearch",
@@ -698,7 +690,7 @@ def test_autoresearch_retries_rounds_and_skips_audit_failed_experiments(
     assert PipelineState(config.output).state["status"] == "completed"
 
 
-def test_autoresearch_ineligible_and_missing_skill_stop_before_ideas(
+def test_autoresearch_ineligible_stops_before_ideas(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -713,21 +705,6 @@ def test_autoresearch_ineligible_and_missing_skill_stop_before_ideas(
     create_autoresearch_workflow().invoke({"config": config})
     assert PipelineState(config.output).state["status"] == "ineligible"
     assert not (config.output / "rounds" / "round_001").exists()
-
-    second_root = tmp_path / "missing-skill"
-    second_root.mkdir()
-    second_base = _prepare_base_run(second_root)
-    second_config = AutoResearchConfig.create(
-        base_run=second_base,
-        output=second_root / "autoresearch",
-        provider=None,
-        max_iter=1,
-        siliconflow_config=None,
-    )
-    PipelineState.create(second_config.output, build_autoresearch_inputs(second_config))
-    monkeypatch.setattr("medai.autoresearch.skills_dir", lambda: second_root / "skills")
-    with pytest.raises(RuntimeError, match="idea-generation skill is missing"):
-        autoresearch_preflight_node({"config": second_config})
 
 
 def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
@@ -777,7 +754,6 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
             "eligibility_path": path,
             "reproduction_report_path": path,
             "codebase_dir": path,
-            "idea_generation_skill": path,
             "candidates_path": path,
             "prior_rounds_json": "[]",
             "round_index": 1,
