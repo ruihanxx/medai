@@ -59,7 +59,8 @@ selection, provider-confirmed capacity expansion, per-member inventory
 materialization, local mother-code/environment synchronization,
 orchestration-owned remote execution and confined downloads, per-operation
 `finally` power-off before agent resume, resume reconciliation, failure-only
-power-off, and final release of every owned member.
+power-off, a strict Codex output schema whose nullable operation fields remain
+required, and final release of every owned member.
 
 A real cloud-drive E2E is manual and billable. Use an isolated disposable
 instance, run the selected adapter's `cloud-pull` for a disposable dataset,

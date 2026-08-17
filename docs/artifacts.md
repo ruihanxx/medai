@@ -166,14 +166,15 @@ under each idea's `plan/cloud_pull/commands/`; its schema and resume prompts are
 under the campaign `prompts/` tree. Remote Codex experiments store one
 request/log/result triplet per structured operation under
 `experiment/commands/`. A request contains exactly one `remote_exec` command or
-one `download` source/destination pair. The result records the operation,
-normalized local destination when applicable, exit code, duration, log path,
-and artifact-validation error. Remote results persist beneath the campaign
-`work/artifacts/<idea_id>/` root, while downloads are confined to the matching
-local `experiment/artifacts/` directory. Each terminal result is followed by pool-wide
-power-off and local artifact validation before the same temporary session is
-resumed. Explicit CLI resume retains these files but does not persist either
-temporary session ID.
+one `download` source/destination pair; all four schema properties are required,
+with fields unused by the selected operation set to `null`. The result records
+the operation, normalized local destination when applicable, exit code,
+duration, log path, and artifact-validation error. Remote results persist
+beneath the campaign `work/artifacts/<idea_id>/` root, while downloads are
+confined to the matching local `experiment/artifacts/` directory. Each terminal
+result is followed by pool-wide power-off and local artifact validation before
+the same temporary session is resumed. Explicit CLI resume retains these files
+but does not persist either temporary session ID.
 
 Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset

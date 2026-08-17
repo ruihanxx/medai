@@ -185,9 +185,9 @@ class ReplicationCommand(StrictModel):
 
 class AutoResearchCommand(StrictModel):
     operation: Literal["remote_exec", "download"]
-    command: str | None = None
-    remote: str | None = None
-    destination: str | None = None
+    command: str | None
+    remote: str | None
+    destination: str | None
 
     @model_validator(mode="after")
     def fields_match_operation(self) -> "AutoResearchCommand":

@@ -1036,6 +1036,8 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
                 {
                     "operation": "remote_exec",
                     "command": f"command-{len(calls)}",
+                    "remote": None,
+                    "destination": None,
                 }
             ),
             encoding="utf-8",
@@ -1139,7 +1141,12 @@ def test_autoresearch_provider_operation_executes_remote_and_downloads_safely(
     artifact_dir = tmp_path / "experiment" / "artifacts"
 
     exec_result = _run_autoresearch_provider_operation(
-        AutoResearchCommand(operation="remote_exec", command="python main.py"),
+        AutoResearchCommand(
+            operation="remote_exec",
+            command="python main.py",
+            remote=None,
+            destination=None,
+        ),
         state_path=state_path,
         remote_working_dir="/workspace/medai/campaign/work",
         remote_artifact_dir="/workspace/medai/campaign/work/artifacts/R01-I01",
@@ -1151,6 +1158,7 @@ def test_autoresearch_provider_operation_executes_remote_and_downloads_safely(
     download_result = _run_autoresearch_provider_operation(
         AutoResearchCommand(
             operation="download",
+            command=None,
             remote="results/metrics.json",
             destination="E1/metrics.json",
         ),
@@ -1163,7 +1171,12 @@ def test_autoresearch_provider_operation_executes_remote_and_downloads_safely(
         expected_provider="fake",
     )
     failed_result = _run_autoresearch_provider_operation(
-        AutoResearchCommand(operation="remote_exec", command="exit 7"),
+        AutoResearchCommand(
+            operation="remote_exec",
+            command="exit 7",
+            remote=None,
+            destination=None,
+        ),
         state_path=state_path,
         remote_working_dir="/workspace/medai/campaign/work",
         remote_artifact_dir="/workspace/medai/campaign/work/artifacts/R01-I01",
@@ -1197,6 +1210,16 @@ def test_autoresearch_provider_operation_executes_remote_and_downloads_safely(
     assert failed_result["exit_code"] == 7
 
 
+def test_autoresearch_command_schema_requires_every_nullable_field():
+    schema = AutoResearchCommand.model_json_schema()
+
+    assert set(schema["required"]) == set(schema["properties"])
+    with pytest.raises(ValueError):
+        AutoResearchCommand.model_validate(
+            {"operation": "remote_exec", "command": "python main.py"}
+        )
+
+
 @pytest.mark.parametrize(
     ("remote", "destination"),
     [
@@ -1224,6 +1247,7 @@ def test_autoresearch_download_rejects_paths_outside_owned_roots(
         _run_autoresearch_provider_operation(
             AutoResearchCommand(
                 operation="download",
+                command=None,
                 remote=remote,
                 destination=destination,
             ),

@@ -76,10 +76,10 @@ codebase.
 
 Return exactly one JSON object describing one orchestration-owned operation:
 
-- `{"operation":"remote_exec","command":"<foreground remote Bash>"}` runs the
+- `{"operation":"remote_exec","command":"<foreground remote Bash>","remote":null,"destination":null}` runs the
   command from the synchronized remote codebase. Return only the inner command;
   never wrap it in SSH, a provider adapter, Docker, or another remote launcher.
-- `{"operation":"download","remote":"<path inside the remote artifact directory>","destination":"<path relative to {{ local_artifact_dir }}>"}`
+- `{"operation":"download","command":null,"remote":"<path inside the remote artifact directory>","destination":"<path relative to {{ local_artifact_dir }}>"}`
   downloads one model, metric, log, or aggregate-evidence file or directory.
   A relative remote path resolves beneath `{{ remote_artifact_dir }}` and may
   not escape it. The destination is confined to `{{ local_artifact_dir }}`.
