@@ -208,6 +208,14 @@ exploratory and ablation experiments outside the frozen contracts.
   `{{ experiment_dir }}/`. Do not write them beside the pipeline-managed plan at
   `{{ experiment_plan_path }}`, into another pipeline stage, or into the base
   run.
+- Write every command hint as the inner foreground command to execute from the
+  synchronized remote codebase. Do not include SSH, provider-adapter, Docker,
+  power, instance, upload, download, or lifecycle wrappers; orchestration owns
+  those operations.
+- For remote compute, write persistent command outputs beneath
+  `<remote_working_dir>/artifacts/{{ idea_id }}`. The experiment runtime exposes
+  that exact path as `MEDAI_AUTORESEARCH_ARTIFACT_DIR`; the synchronized remote
+  codebase is replaced before every operation and must contain source only.
 - Never include paper-reported, baseline, target, or threshold result values in
   `expected_outcome`, descriptions, command hints, or setup hints.
 - Write only the requested JSON plan.

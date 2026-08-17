@@ -183,6 +183,30 @@ class ReplicationCommand(StrictModel):
         return value
 
 
+class AutoResearchCommand(StrictModel):
+    operation: Literal["remote_exec", "download"]
+    command: str | None = None
+    remote: str | None = None
+    destination: str | None = None
+
+    @model_validator(mode="after")
+    def fields_match_operation(self) -> "AutoResearchCommand":
+        if self.operation == "remote_exec":
+            if not isinstance(self.command, str) or not self.command.strip():
+                raise ValueError("remote_exec requires a non-empty command")
+            if self.remote is not None or self.destination is not None:
+                raise ValueError("remote_exec accepts only its command")
+        elif (
+            self.command is not None
+            or not isinstance(self.remote, str)
+            or not self.remote.strip()
+            or not isinstance(self.destination, str)
+            or not self.destination.strip()
+        ):
+            raise ValueError("download requires non-empty remote and destination paths")
+        return self
+
+
 class EvidenceEnvironment(StrictModel):
     model_config = ConfigDict(extra="allow")
 

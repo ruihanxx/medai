@@ -140,19 +140,24 @@ Cloud-backed Auto Research creates its first campaign instance lazily at the
 first audited idea that reaches experiment planning. Direct Codex planning uses
 the opted-in prepare/foreground-monitor/same-session-resume handoff for initial
 materialization, with power-off before the planning session resumes. Every
-Codex experiment command is run locally in the foreground. Before each command,
-orchestration selects a usable member from the
+Codex experiment operation is run by local orchestration through the selected
+provider. Before each operation, orchestration selects a usable member from the
 provider-owned bounded campaign pool. A provider-confirmed capacity conflict may
 add one member within that bound without destroying retained members. A newly
 selected member repeats inventory-verified cloud materialization, receives the
 local audited mother code and local idempotent mother-environment definition,
-and reconstructs its runtime before the command. Orchestration powers all pool
-members off in `finally`, validates downloaded artifacts, and only then resumes
-the same agent session. Other agent providers retain their single-turn
-experiment behavior. Explicit resume reconciles the pool before agent work.
-Failures power off and preserve every owned member. Release occurs only after
-final-report validation and campaign completion and attempts every pool member;
-any remaining member produces a cleanup warning.
+and reconstructs its runtime before the operation. `remote_exec` contains only
+inner foreground Bash and orchestration runs it from the synchronized remote
+codebase with a persistent per-idea remote artifact directory; `download` is
+limited to that directory and the local idea `experiment/artifacts/` directory.
+The synchronized codebase contains source only and is replaceable. The agent
+never constructs an SSH or provider-adapter command. Orchestration powers all pool members off in
+`finally`, validates downloaded artifacts, and only then resumes the same agent
+session. Other agent providers retain their single-turn experiment behavior.
+Explicit resume reconciles the pool before agent work. Failures power off and
+preserve every owned member. Release occurs only after final-report validation
+and campaign completion and attempts every pool member; any remaining member
+produces a cleanup warning.
 
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a

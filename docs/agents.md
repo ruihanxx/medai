@@ -146,14 +146,18 @@
   base state's actual accelerator model, count, and memory capacities, searches
   the exact model first, and permits only the reference's stronger fallback.
   Planning reuses the copied base inventory and completed read-only target.
-  Before every remote command, orchestration selects a usable retained member,
+  Before every remote operation, orchestration selects a usable retained member,
   may add a member only after provider-confirmed capacity unavailability, and
   synchronizes the local audited mother code plus the local idempotent
-  mother-environment definition. Experiment agents never manage pool membership,
-  rematerialize data, or release instances. They may download only models,
-  metrics, logs, and aggregate evidence, never raw or row-level data. Failure
-  powers off without release; only final-report validation and campaign
-  completion permit orchestration to release every member.
+  mother-environment definition. Experiment agents return only inner
+  `remote_exec` Bash or a structured `download`; orchestration owns provider
+  invocation and confines downloads to the per-idea remote artifact directory
+  and local `experiment/artifacts/`. Experiment agents never construct SSH or adapter
+  commands, manage pool membership, rematerialize data, or release instances.
+  They may download only models, metrics, logs, and aggregate evidence, never
+  raw or row-level data. Failure powers off without release; only final-report
+  validation and campaign completion permit orchestration to release every
+  member.
 - Before an instance is created, the selected provider reference must validate
   the requested resource and image against that provider's supported pool. If
   the paper's exact GPU is absent, selection may use only the closest documented

@@ -68,20 +68,33 @@ orchestration synchronizes the audited local codebase and this mother-environmen
 definition to every selected campaign instance, then runs `setup.sh` before each
 foreground command. Commands must therefore treat the synchronized remote code
 and environment as authoritative and must not create an unrecorded environment
-elsewhere.
+elsewhere. The synchronized codebase is replaced before every operation, so
+write every persistent remote result beneath `{{ remote_artifact_dir }}`. Each
+`remote_exec` receives this exact path in
+`MEDAI_AUTORESEARCH_ARTIFACT_DIR`; never persist results inside the remote
+codebase.
 
-Return exactly one JSON object with one non-empty field:
-`{"command":"<foreground bash command>"}`. Do not directly run or monitor a
-remote experiment or provider command in this agent turn. Local orchestration
-will select a usable campaign instance, execute and stream the command from the
-idea codebase, save its combined log and terminal result, power that instance
-off, then resume this session. Use each resumed result to continue or debug
-until all local experiment artifacts validate.
+Return exactly one JSON object describing one orchestration-owned operation:
 
-Every returned command must remain in the foreground. Do not use `nohup`, `&`,
-or a detached remote launcher. Use only the provider adapter's reviewed upload,
-exec, and download operations. Do not include power-on, power-off, release, or
-instance-creation actions; those lifecycle transitions belong to orchestration.
+- `{"operation":"remote_exec","command":"<foreground remote Bash>"}` runs the
+  command from the synchronized remote codebase. Return only the inner command;
+  never wrap it in SSH, a provider adapter, Docker, or another remote launcher.
+- `{"operation":"download","remote":"<path inside the remote artifact directory>","destination":"<path relative to {{ local_artifact_dir }}>"}`
+  downloads one model, metric, log, or aggregate-evidence file or directory.
+  A relative remote path resolves beneath `{{ remote_artifact_dir }}` and may
+  not escape it. The destination is confined to `{{ local_artifact_dir }}`.
+
+Do not directly run or monitor either operation in this agent turn. Local
+orchestration selects a usable campaign instance, synchronizes the mother code
+and environment, executes the provider operation while streaming its combined
+log, saves its terminal result, powers the pool off, then resumes this session.
+Use each resumed result to continue or debug until all local experiment
+artifacts validate.
+
+Every `remote_exec` command must remain in the foreground. Do not use `nohup`,
+`&`, a detached remote launcher, provider commands, or power-on, power-off,
+release, instance-creation, upload, or rematerialization actions. Those
+transitions belong to orchestration.
 {% endif %}
 
 ## Output

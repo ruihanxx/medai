@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -7,12 +8,17 @@ from medai.autoresearch import (
     REQUIRED_BASE_STAGES,
     _copy_base_cloud_inventory,
     _prepare_autoresearch_command_instance,
+    _run_autoresearch_provider_operation,
     _run_experiment_command_handoff,
     _run_plan_cloud_pull_handoff,
     create_autoresearch_workflow,
 )
 from medai.config import AutoResearchConfig
-from medai.models import IdeaGenerationArtifact, validate_idea_generation_artifact
+from medai.models import (
+    AutoResearchCommand,
+    IdeaGenerationArtifact,
+    validate_idea_generation_artifact,
+)
 from medai.pipeline_state import (
     PipelineState,
     build_autoresearch_inputs,
@@ -1019,19 +1025,32 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     prompt_path.write_text("experiment\n", encoding="utf-8")
     transcript_path = tmp_path / "experiment.jsonl"
     calls = []
+    operations = []
     power_events = []
 
     def fake_agent(**kwargs):
         calls.append(kwargs)
         command_path = kwargs["output_last_message_path"]
         command_path.write_text(
-            json.dumps({"command": f"command-{len(calls)}"}),
+            json.dumps(
+                {
+                    "operation": "remote_exec",
+                    "command": f"command-{len(calls)}",
+                }
+            ),
             encoding="utf-8",
         )
         return kwargs.get("resume_session_id") or "session-1"
 
-    def fake_command(command, *, codebase_dir, log_path, result_path):
-        result = {"command": command, "exit_code": 0, "duration_seconds": 1.0}
+    def fake_operation(operation, **kwargs):
+        operations.append((operation, kwargs))
+        result = {
+            "operation": operation.operation,
+            "command": operation.command,
+            "exit_code": 0,
+            "duration_seconds": 1.0,
+        }
+        result_path = kwargs["result_path"]
         result_path.write_text(json.dumps(result), encoding="utf-8")
         return result
 
@@ -1044,11 +1063,17 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
         return result
 
     monkeypatch.setattr("medai.autoresearch.run_agent", fake_agent)
-    monkeypatch.setattr("medai.autoresearch._run_agent_command", fake_command)
+    monkeypatch.setattr(
+        "medai.autoresearch._run_autoresearch_provider_operation",
+        fake_operation,
+    )
     monkeypatch.setattr("medai.autoresearch._validate_experiment_artifacts", fake_validate)
     monkeypatch.setattr(
         "medai.autoresearch._prepare_autoresearch_command_instance",
-        lambda _config, _codebase, _experiment: power_events.append("on"),
+        lambda _config, _codebase, _experiment: (
+            power_events.append("on")
+            or {"remote_working_dir": "/workspace/medai/campaign/work"}
+        ),
     )
     monkeypatch.setattr(
         "medai.autoresearch.power_off_run_computation_instance",
@@ -1074,8 +1099,144 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
 
     assert outputs == ["complete"]
     assert power_events == ["on", "off", "on", "off"]
+    assert [operation.command for operation, _ in operations] == [
+        "command-1",
+        "command-2",
+    ]
+    assert all(
+        kwargs["remote_working_dir"] == "/workspace/medai/campaign/work"
+        for _, kwargs in operations
+    )
+    assert all(
+        kwargs["remote_artifact_dir"]
+        == "/workspace/medai/campaign/work/artifacts/R01-I01"
+        for _, kwargs in operations
+    )
     assert calls[0].get("resume_session_id") is None
     assert calls[1]["resume_session_id"] == "session-1"
+
+
+def test_autoresearch_provider_operation_executes_remote_and_downloads_safely(
+    tmp_path: Path,
+    monkeypatch,
+):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text('{"provider":"fake"}\n', encoding="utf-8")
+    adapter_script = tmp_path / "adapter.py"
+    adapter_script.write_text(
+        "import json, sys\n"
+        "print(json.dumps(sys.argv[1:]))\n"
+        "raise SystemExit(7 if sys.argv[-1].endswith('exit 7') else 0)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "medai.autoresearch.get_provider_adapter",
+        lambda _provider: SimpleNamespace(
+            script=adapter_script,
+            action_timeouts={"exec": 60, "download": 60},
+        ),
+    )
+    artifact_dir = tmp_path / "experiment" / "artifacts"
+
+    exec_result = _run_autoresearch_provider_operation(
+        AutoResearchCommand(operation="remote_exec", command="python main.py"),
+        state_path=state_path,
+        remote_working_dir="/workspace/medai/campaign/work",
+        remote_artifact_dir="/workspace/medai/campaign/work/artifacts/R01-I01",
+        artifact_dir=artifact_dir,
+        log_path=tmp_path / "exec.log",
+        result_path=tmp_path / "exec.json",
+        expected_provider="fake",
+    )
+    download_result = _run_autoresearch_provider_operation(
+        AutoResearchCommand(
+            operation="download",
+            remote="results/metrics.json",
+            destination="E1/metrics.json",
+        ),
+        state_path=state_path,
+        remote_working_dir="/workspace/medai/campaign/work",
+        remote_artifact_dir="/workspace/medai/campaign/work/artifacts/R01-I01",
+        artifact_dir=artifact_dir,
+        log_path=tmp_path / "download.log",
+        result_path=tmp_path / "download.json",
+        expected_provider="fake",
+    )
+    failed_result = _run_autoresearch_provider_operation(
+        AutoResearchCommand(operation="remote_exec", command="exit 7"),
+        state_path=state_path,
+        remote_working_dir="/workspace/medai/campaign/work",
+        remote_artifact_dir="/workspace/medai/campaign/work/artifacts/R01-I01",
+        artifact_dir=artifact_dir,
+        log_path=tmp_path / "failed.log",
+        result_path=tmp_path / "failed.json",
+        expected_provider="fake",
+    )
+
+    exec_arguments = json.loads((tmp_path / "exec.log").read_text(encoding="utf-8"))
+    assert exec_result["exit_code"] == 0
+    assert exec_arguments[-4:] == [
+        "--",
+        "bash",
+        "-lc",
+        "mkdir -p -- /workspace/medai/campaign/work/artifacts/R01-I01 && "
+        "cd /workspace/medai/campaign/work/codebase && "
+        "export MEDAI_AUTORESEARCH_ARTIFACT_DIR="
+        "/workspace/medai/campaign/work/artifacts/R01-I01 && python main.py",
+    ]
+    download_arguments = json.loads(
+        (tmp_path / "download.log").read_text(encoding="utf-8")
+    )
+    assert download_result["destination"] == str(artifact_dir / "E1/metrics.json")
+    assert download_arguments[-4:] == [
+        "--remote",
+        "/workspace/medai/campaign/work/artifacts/R01-I01/results/metrics.json",
+        "--destination",
+        str(artifact_dir / "E1/metrics.json"),
+    ]
+    assert failed_result["exit_code"] == 7
+
+
+@pytest.mark.parametrize(
+    ("remote", "destination"),
+    [
+        ("../data/raw.csv", "raw.csv"),
+        ("results/metrics.json", "../metrics.json"),
+    ],
+)
+def test_autoresearch_download_rejects_paths_outside_owned_roots(
+    tmp_path: Path,
+    monkeypatch,
+    remote: str,
+    destination: str,
+):
+    state_path = tmp_path / "instance.json"
+    state_path.write_text('{"provider":"fake"}\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "medai.autoresearch.get_provider_adapter",
+        lambda _provider: SimpleNamespace(
+            script=tmp_path / "unused.py",
+            action_timeouts={"download": 60},
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="must remain inside"):
+        _run_autoresearch_provider_operation(
+            AutoResearchCommand(
+                operation="download",
+                remote=remote,
+                destination=destination,
+            ),
+            state_path=state_path,
+            remote_working_dir="/workspace/medai/campaign/work",
+            remote_artifact_dir=(
+                "/workspace/medai/campaign/work/artifacts/R01-I01"
+            ),
+            artifact_dir=tmp_path / "experiment" / "artifacts",
+            log_path=tmp_path / "download.log",
+            result_path=tmp_path / "download.json",
+            expected_provider="fake",
+        )
 
 
 def test_autoresearch_command_instance_syncs_local_code_and_environment(

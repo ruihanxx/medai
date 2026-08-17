@@ -105,13 +105,18 @@ agent prepares the initial member and returns one foreground monitor command.
 Local orchestration runs it without an active agent process, validates the
 copied base inventory, powers off, then resumes the same planning session to
 write the existing three-field `remote_compute` object. During experiments the
-Codex agent returns one foreground command at a time. Orchestration selects and
-prepares a member immediately before each command, streams and persists its
+Codex agent returns one structured `remote_exec` or `download` operation at a
+time. Orchestration selects and prepares a member immediately before each
+operation. It runs inner foreground Bash from the synchronized remote codebase
+through the provider adapter, exposes a persistent
+`work/artifacts/<idea_id>/` result root, or downloads from that root into the
+local idea `experiment/artifacts/` directory. It streams and persists the
 result, powers the pool off in `finally`, validates the experiment log, evidence
 summary, and declared local outputs, and only then either finishes or resumes
-that same session. Only audited idea code is uploaded; only models, metrics,
-logs, and aggregate evidence are downloaded. Raw or row-level data never leaves
-the remote target. Other agent providers keep their single-turn experiment
+that same session. The agent never constructs SSH, adapter, or lifecycle
+commands. Only audited idea code is uploaded; only models, metrics, logs, and
+aggregate evidence are downloaded. Raw or row-level data never leaves the
+remote target. Other agent providers keep their single-turn experiment
 behavior.
 
 An explicit resume reconciles the campaign state before workflow execution.

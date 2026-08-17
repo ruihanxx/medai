@@ -3,9 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import shlex
 import shutil
+import signal
+import subprocess
+import sys
+import threading
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any, TypedDict
 
@@ -16,6 +22,7 @@ from medai.autoresearch_visualization import generate_autoresearch_visualization
 from medai.computation_providers import get_provider_adapter
 from medai.config import AutoResearchConfig
 from medai.models import (
+    AutoResearchCommand,
     AutoResearchExperimentLog,
     AutoResearchExperimentPlan,
     ClaimsFile,
@@ -1229,6 +1236,154 @@ def _validate_experiment_artifacts(
     return outputs
 
 
+def _run_autoresearch_provider_operation(
+    operation: AutoResearchCommand,
+    *,
+    state_path: Path,
+    remote_working_dir: str,
+    remote_artifact_dir: str,
+    artifact_dir: Path,
+    log_path: Path,
+    result_path: Path,
+    expected_provider: str | None,
+) -> dict[str, Any]:
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Remote computation state is invalid: {state_path}") from exc
+    provider = state.get("provider")
+    if not isinstance(provider, str):
+        raise RuntimeError("Remote computation state is missing its provider")
+    if expected_provider is not None and provider != expected_provider:
+        raise RuntimeError("Remote computation state provider does not match the run configuration")
+    adapter = get_provider_adapter(provider)
+
+    remote_root = PurePosixPath(remote_working_dir)
+    remote_artifact_root = PurePosixPath(remote_artifact_dir)
+    if (
+        not remote_root.is_absolute()
+        or not remote_artifact_root.is_absolute()
+        or remote_artifact_root == remote_root
+        or not remote_artifact_root.is_relative_to(remote_root)
+        or ".." in remote_artifact_root.parts
+    ):
+        raise RuntimeError("Auto Research remote artifact directory is invalid")
+    if operation.operation == "remote_exec":
+        assert operation.command is not None
+        action = "exec"
+        arguments = [
+            "--",
+            "bash",
+            "-lc",
+            f"mkdir -p -- {shlex.quote(str(remote_artifact_root))} && "
+            f"cd {shlex.quote(str(remote_root / 'codebase'))} && "
+            f"export MEDAI_AUTORESEARCH_ARTIFACT_DIR="
+            f"{shlex.quote(str(remote_artifact_root))} && {operation.command}",
+        ]
+        destination: str | None = None
+    else:
+        assert operation.remote is not None
+        assert operation.destination is not None
+        action = "download"
+        requested_remote = PurePosixPath(operation.remote)
+        remote_path = (
+            requested_remote
+            if requested_remote.is_absolute()
+            else remote_artifact_root / requested_remote
+        )
+        if (
+            not remote_path.is_absolute()
+            or remote_path == remote_artifact_root
+            or not remote_path.is_relative_to(remote_artifact_root)
+            or ".." in remote_path.parts
+        ):
+            raise RuntimeError(
+                "Auto Research downloads must remain inside the remote artifact directory"
+            )
+        local_root = artifact_dir.resolve()
+        requested_destination = Path(operation.destination).expanduser()
+        local_path = (
+            requested_destination.resolve()
+            if requested_destination.is_absolute()
+            else (artifact_dir / requested_destination).resolve()
+        )
+        if local_path == local_root or not local_path.is_relative_to(local_root):
+            raise RuntimeError(
+                "Auto Research downloads must remain inside the experiment artifact directory"
+            )
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        arguments = [
+            "--remote",
+            str(remote_path),
+            "--destination",
+            str(local_path),
+        ]
+        destination = str(local_path)
+
+    timeout_seconds = adapter.action_timeouts.get(action)
+    if timeout_seconds is None:
+        raise RuntimeError(f"Computation provider does not support action: {action}")
+    command = [
+        sys.executable,
+        str(adapter.script),
+        action,
+        "--state",
+        str(state_path),
+        *arguments,
+    ]
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    timed_out = threading.Event()
+    with log_path.open("w", encoding="utf-8") as log:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            start_new_session=True,
+        )
+
+        def terminate_on_timeout() -> None:
+            if process.poll() is None:
+                timed_out.set()
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+        timer = threading.Timer(timeout_seconds, terminate_on_timeout)
+        timer.daemon = True
+        timer.start()
+        try:
+            assert process.stdout is not None
+            for line in iter(process.stdout.readline, ""):
+                print(line, end="")
+                log.write(line)
+            exit_code = process.wait()
+        finally:
+            timer.cancel()
+        if timed_out.is_set():
+            message = f"Computation-provider {action} timed out after {timeout_seconds} seconds\n"
+            print(message, end="")
+            log.write(message)
+            exit_code = 124
+
+    result = {
+        "operation": operation.operation,
+        "command": operation.command,
+        "remote": operation.remote,
+        "destination": destination,
+        "exit_code": exit_code,
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "log_path": str(log_path),
+        "artifact_validation_error": None,
+    }
+    write_json(result_path, result)
+    return result
+
+
 def _prepare_autoresearch_command_instance(
     config: AutoResearchConfig,
     codebase_dir: Path,
@@ -1336,7 +1491,7 @@ def _prepare_autoresearch_command_instance(
         setup_output + ("\n" if setup_output else ""),
         encoding="utf-8",
     )
-    return acquisition
+    return {**acquisition, "remote_working_dir": remote_working_dir}
 
 
 def _run_experiment_command_handoff(
@@ -1354,14 +1509,17 @@ def _run_experiment_command_handoff(
 ) -> list[str]:
     command_dir = experiment_dir / "commands"
     command_dir.mkdir(parents=True, exist_ok=True)
+    artifact_dir = experiment_dir / "artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
     prompt_dir = (
         config.output
         / "prompts"
         / f"round_{round_index:03d}"
         / f"idea_{idea_index:02d}"
     )
+    idea_id = expected_idea_ids(round_index)[idea_index - 1]
     command_schema_path = prompt_dir / "experiment_command.schema.json"
-    write_json(command_schema_path, ReplicationCommand.model_json_schema())
+    write_json(command_schema_path, AutoResearchCommand.model_json_schema())
     session_id: str | None = None
     resume_prompt_path: Path | None = None
     command_index = _next_command_index(command_dir)
@@ -1398,20 +1556,26 @@ def _run_experiment_command_handoff(
                 resume_session_id=session_id,
             )
 
-        command = load_model(command_request_path, ReplicationCommand).command
+        operation = load_model(command_request_path, AutoResearchCommand)
         command_log_path = command_dir / f"command_{command_index:03d}.log"
         result_path = command_dir / f"command_{command_index:03d}_result.json"
         try:
-            _prepare_autoresearch_command_instance(
+            acquisition = _prepare_autoresearch_command_instance(
                 config,
                 codebase_dir,
                 experiment_dir,
             )
-            result = _run_agent_command(
-                command,
-                codebase_dir=codebase_dir,
+            result = _run_autoresearch_provider_operation(
+                operation,
+                state_path=config.output / "remote_compute" / "instance.json",
+                remote_working_dir=acquisition["remote_working_dir"],
+                remote_artifact_dir=(
+                    f"{acquisition['remote_working_dir']}/artifacts/{idea_id}"
+                ),
+                artifact_dir=artifact_dir,
                 log_path=command_log_path,
                 result_path=result_path,
+                expected_provider=config.computation_provider,
             )
         finally:
             power_off_run_computation_instance(config)
@@ -1522,6 +1686,12 @@ def _run_experiment(
         experiment_log_path=log_path,
         evidence_summary_path=evidence_path,
         local_environment_dir=experiment_dir / "environment",
+        local_artifact_dir=experiment_dir / "artifacts",
+        remote_artifact_dir=(
+            f"{plan.remote_compute.remote_working_dir}/artifacts/{idea_id}"
+            if plan.remote_compute is not None
+            else None
+        ),
         remote_environment_dir=(
             f"{plan.remote_compute.remote_working_dir}/environment"
             if plan.remote_compute is not None
