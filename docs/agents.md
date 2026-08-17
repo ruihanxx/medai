@@ -63,7 +63,12 @@
   training logic while preserving the fixed downstream data/cohort/split, final
   prediction target, evaluator-facing output, evaluation protocol, and baseline
   behavior. External pretraining must be declared and may not leak or alter the
-  downstream experiment data.
+  downstream experiment data. Auto Research treats replication intermediates
+  as absent unless explicitly supplied: refinements cannot rely on base-run
+  cohort or feature tables, split files, caches, checkpoints, temporary output
+  roots, or model state. Necessary deterministic preprocessing belongs to the
+  refinement-owned execution path from the fixed raw input, without invoking a
+  baseline entry point.
   The experiment stage executes the audited refinement without modifying source
   code or rerunning the baseline.
 - The Auto Research idea agent maintains one campaign-wide candidate-pool JSON.

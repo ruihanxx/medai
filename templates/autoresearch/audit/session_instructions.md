@@ -53,6 +53,13 @@ fix. A passing audit has no issues or required fixes.
 - Confirm that dataset/cohort membership, data splits, prediction-time
   information availability, final prediction outcome/horizon, evaluator-facing
   output, metrics, and evaluation protocol remain unchanged.
+- Treat all replication intermediates as absent unless this prompt explicitly
+  supplies them. Reject a refinement that reads a base-run cohort or feature
+  table, split file, cache, checkpoint, temporary output root, or model state.
+  A refinement may deterministically reconstruct needed preprocessing from the
+  fixed raw inputs in its own execution path, provided it preserves every frozen
+  data, cohort, split, and prediction-time boundary and does not invoke a
+  baseline entry point.
 - Permit declared input-representation changes only when they derive from the
   fixed available inputs without outcome or split leakage.
 - Permit declared training changes, including training targets, loss/objective,

@@ -864,6 +864,13 @@ def test_autoresearch_templates_render_with_strict_context(tmp_path: Path):
     assert "shape-prescriptive" in plan_prompt
     assert "no pre-authorized reductions" in plan_prompt
     assert "Never include or rerun an old existing or replicated baseline" in plan_prompt
+    assert "Assume that replication intermediates were not saved" in plan_prompt
+
+    codegen_prompt = (tmp_path / "codegen.md").read_text(encoding="utf-8")
+    assert "Treat replication intermediates as unavailable by default" in codegen_prompt
+
+    audit_prompt = (tmp_path / "audit.md").read_text(encoding="utf-8")
+    assert "Treat all replication intermediates as absent" in audit_prompt
 
     weighting_prompt = (tmp_path / "experiment_weighting.md").read_text(
         encoding="utf-8"

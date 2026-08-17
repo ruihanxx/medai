@@ -48,6 +48,13 @@ idea can be added to the existing implementation.
   baseline result value into the implementation; results must be computed.
 - Inspect only what is needed to understand and implement this idea. Do not
   modify the read-only base codebase or source data.
+- Treat replication intermediates as unavailable by default. The completed
+  replicate may preserve the codebase, logs, aggregate evidence, and explicitly
+  supplied artifacts, but it does not preserve cohort tables, feature tables,
+  split files, caches, checkpoints, temporary output roots, or model state.
+  The refinement must not depend on any such base-run path. When it needs
+  deterministic preprocessing from the fixed raw inputs, implement that work in
+  the refinement-owned execution path without invoking a baseline entry point.
 - On a repair attempt, diagnose every failed audit check before changing the
   implementation.
 

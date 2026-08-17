@@ -93,6 +93,18 @@ Every frozen experiment must be executed exactly once. The weights are used only
 by the later assessment stage; they never authorize skipping, downsizing, or
 simplifying a lower-weight experiment.
 
+## Replication-intermediate availability
+
+Assume that replication intermediates were not saved. Only the raw dataset, the
+audited idea codebase, and the base artifacts explicitly listed in this prompt
+are available. In particular, do not assume the existence of a base cohort or
+feature table, split file, cache, checkpoint, temporary output root, or model
+state, even when the replicate code once wrote such a path. Do not plan to
+upload or locate one. If the audited refinement needs deterministic
+preprocessing, its refinement-owned entry point must reconstruct it from the
+fixed raw inputs while preserving every frozen cohort, split, and prediction
+boundary; it must not invoke a baseline entry point.
+
 ## Your Task
 
 Explore the audited codebase and implementation file lists. For every frozen

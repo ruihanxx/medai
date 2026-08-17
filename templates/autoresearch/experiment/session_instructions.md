@@ -29,6 +29,11 @@ old existing experiment entry point or rerun or alter the replicated baseline.
 Preserve actual outputs. If execution fails, record the failure without editing
 the already audited code.
 
+Treat replication intermediates as unavailable unless this prompt explicitly
+lists them. Do not look for or require base-run cohort or feature tables, split
+files, caches, checkpoints, temporary output roots, or model state. The audited
+refinement must use the fixed raw input and its own execution path instead.
+
 {% if cloud_drive_enabled %}
 Read `{{ skills_dir }}/computation_provider/SKILL.md`, the selected provider
 reference, and the selected drive reference. Reuse only the pool member selected

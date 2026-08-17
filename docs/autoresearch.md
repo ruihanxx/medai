@@ -61,8 +61,14 @@ shape-prescriptive outputs, uses the audited refinement's full training scale
 and complete frozen evaluation protocol, and prohibits pre-authorized
 reductions. Result-blind weights do not permit selected experiments to be
 skipped or downsized. Planned outputs stay inside the idea codebase or its
-experiment directory. The experiment stage never reruns the replicated baseline
-and cannot modify the audited source code; execution failures remain explicit.
+experiment directory. Auto Research treats all base-replication intermediates
+as absent unless a prompt explicitly provides them: cohort and feature tables,
+split files, caches, checkpoints, temporary output roots, and model state cannot
+be assumed to exist. A refinement that needs deterministic preprocessing must
+reconstruct it in its own execution path from the fixed raw input while
+preserving every frozen data/cohort/split boundary; it cannot invoke a baseline
+entry point. The experiment stage never reruns the replicated baseline and
+cannot modify the audited source code; execution failures remain explicit.
 Assessment compares each frozen primary metric with existing baseline evidence.
 It retains
 `relative_delta = (refined - baseline) / abs(baseline)` as objective comparison
