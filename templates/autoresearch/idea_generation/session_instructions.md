@@ -20,11 +20,13 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 
 Use the research brief to establish the target problem and relevant research
 line, then propose standalone refinements to input representation, model design,
-or training strategy that directly improve the paper's main contribution(s) and
-can be embedded into the already replicated prediction experiments selected in
-the weights and contracts artifacts. If the paper or base code also contains
-statistical, association, explanatory, causal, matching, or effect-estimation
-analyses, do not propose ideas for them and do not use them as refinement targets.
+or training strategy that stay within the methodological category or categories
+of the paper's main contribution(s), address a limitation meaningful in the
+paper's research context, and can be embedded into the already replicated
+prediction experiments selected in the weights and contracts artifacts. If the
+paper or base code also contains statistical, association, explanatory, causal,
+matching, or effect-estimation analyses, do not propose ideas for them and do
+not use them as refinement targets.
 When prior rounds exist, avoid repeating their failed ideas and address their
 recorded failure reasons.
 
@@ -115,9 +117,10 @@ Search only within the contribution-aligned parts of:
 - model
 - training strategy
 
-First identify the paper's main contribution(s) and their supporting evidence.
-Treat them as a hard boundary for idea generation, not merely as a priority.
-Use this map:
+First identify the paper's main contribution(s), the research limitation each
+one addresses, and their supporting evidence. Use the contribution to determine
+the eligible refinement category or categories; do not freeze the paper's exact
+method within an eligible category. Use this map:
 
 - Search **input representation** when a main contribution is a new clinical
   score, index, biomarker,
@@ -125,14 +128,16 @@ Use this map:
   signal, image, text, or tabular preprocessing/encoding; temporal trajectories
   or dynamics; missingness or observation-process encoding; or fixed multimodal
   alignment and feature fusion. Search for a representation that captures the
-  same clinical construct or available raw information more faithfully.
+  same clinical construct or available raw information more faithfully. The new
+  representation may refine the proposed one or replace it with a different
+  construction.
 - Search **model design** when a main contribution is a new prediction
   algorithm, architecture,
   module, ensemble, learned encoder/aggregator/fusion mechanism, prediction head,
   or inductive bias for temporal, spatial, relational, hierarchical, or
-  cross-modal structure. Search locally around the claimed mechanism: relax a
-  rigid assumption, remove a bottleneck, make it adaptive, or simplify it under
-  comparable resources.
+  cross-modal structure. The new model may refine the proposed model A or replace
+  it with a substantially different model B when B addresses a diagnosed
+  paper-context limitation under a controlled comparison.
 - Search **training strategy** when a main contribution is a new training target
   or auxiliary task,
   loss/objective, calibration or regularization procedure, imbalance or
@@ -141,7 +146,8 @@ Use this map:
   learning, distillation,
   domain adaptation/generalization, or robustness, fairness, privacy, or
   federated-learning procedure. Preserve the fixed final prediction target and
-  search for a more aligned, data-efficient, or stable way to learn it.
+  search for a more aligned, data-efficient, or stable way to learn it. The new
+  strategy may refine or replace the paper's original training mechanism.
 
 Classify by the mechanism being changed: features or encodings delivered to the
 predictor are representation; a learnable inference-time structure is model;
@@ -151,21 +157,45 @@ uncertainty, robustness, fairness, privacy, and efficiency may span categories;
 route each concrete mechanism to every main-contribution category it actually
 changes.
 
-Reject any candidate whose proposed improvement mechanism lies outside the main
-contribution(s), even if it could improve predictive performance. A supporting
-component may be used as a fixed control or changed only for minimum integration;
-changing it is not itself a research idea. For example, when the contribution is
-a new clinical index, refine how that index is defined, constructed, or
-represented; do not propose replacing the training model as the improvement.
+The boundary applies to the **category and paper context**, not to the identity
+of the original method. Within an eligible category, both are valid:
+
+- a local refinement that improves, relaxes, adapts, or simplifies the paper's
+  mechanism;
+- a different method that replaces the paper's mechanism while addressing the
+  same research limitation or a paper-evidenced unresolved limitation.
+
+A candidate is meaningful in the paper's context only when it:
+
+- preserves the Paper Anchor and the core clinical/scientific question;
+- makes its primary intervention in an eligible contribution category;
+- targets a limitation, questionable assumption, or failure mode supported by
+  the paper or reproduced experiment, rather than generic upgrade potential;
+- explains why the proposed mechanism addresses that limitation and how a
+  controlled comparison can distinguish the mechanism from scale, compute, or
+  tuning effects.
+
+Reject a candidate whose primary intervention lies outside the eligible
+category or whose only rationale is that a method is newer, larger, or generally
+stronger. A supporting component may be a fixed control or receive the
+scientifically necessary adaptation required to implement and fairly evaluate
+the primary intervention, but its change cannot supply the improvement claim.
+For example, when the contribution is a new clinical index, refine or replace
+the index construction; do not propose replacing the training model as the
+improvement. Conversely, when model design is the contribution, replacing model
+A with a different model B is eligible if the above context and evidence tests
+are met; compatible input wiring or training settings may change as supporting
+adaptations but are not separate ideas.
 
 For a paper with main contributions in multiple categories, search all and only
 those categories, weighted by the paper's claims, ablations, and reproduced
 evidence. For an applied, comparative, or benchmark paper whose novelty is a
 dataset, cohort, task, outcome, evaluation, or clinical validation rather than a
 method, keep that novelty fixed as part of the Paper Anchor. Consider an allowed
-method change only when its mechanism directly strengthens how that anchor
-contribution is operationalized; never substitute a generic model or training
-change for the paper's actual contribution.
+method change only when it addresses a paper-evidenced bottleneck directly tied
+to using or validating that anchor contribution. Derive its eligible category
+from that bottleneck's mechanism; do not invent a generic model or training
+upgrade merely because the paper has no methodological contribution.
 
 {% if round_index > 1 %}
  Learn from the experience of previous rounds at `{{ prior_rounds_json }}`.
@@ -177,30 +207,31 @@ contribution-aligned part(s).
 ### 2. Write down the candidates
 
 Read the shared candidate pool when it exists; it contains unused candidates
-from earlier rounds. Revalidate every carried candidate against the paper's main
-contribution boundary, discard any that no longer qualifies, preserve the other
-useful candidates, revise them using prior-round evidence, and add distinct
-candidates until the pool contains exactly six. In round 1, create the pool with
-`next_candidate_index` set to 1 before allocating IDs. Allocate each new ID from
-that counter, increment it, and never reuse an ID.
+from earlier rounds. Revalidate every carried candidate against the eligible
+contribution categories and paper context, discard any that no longer qualifies,
+preserve the other useful candidates, revise them using prior-round evidence,
+and add distinct candidates until the pool contains exactly six. In round 1,
+create the pool with `next_candidate_index` set to 1 before allocating IDs.
+Allocate each new ID from that counter, increment it, and never reuse an ID.
 
 For each candidate record:
 
-- **Problem**: the specific limitation in a main contribution's mechanism or
-  implementation.
+- **Problem**: the paper-context limitation, questionable assumption, or failure
+  mode to address within an eligible contribution category.
 - **Methods**: plausible ways to address it within the contribution-aligned
   input-representation, model, or training category.
-- **Motivation**: the explicit chain from the paper's main contribution to the
-  diagnosed limitation, proposed intervention, and expected improvement mechanism.
+- **Motivation**: the explicit chain from the contribution category and paper
+  context to the diagnosed limitation, proposed intervention, and expected
+  improvement mechanism.
 - **Evidence**: concrete support from the paper or reproduced experimental
   results, such as an ablation, error pattern, metric, table, figure, or stated limitation.
 
-Reject a candidate if that contribution-to-intervention chain is missing, or if
-its scientific hypothesis is only to improve a supporting component. Do not
-invent a weakness when the available evidence does not support it, and never pad
-the pool with out-of-scope ideas merely to reach six. When prior rounds exist,
-exclude repeated ideas unless their recorded failure has led to a materially
-different contribution-aligned method. Keep all six candidates in
+Reject a candidate if that context-to-intervention chain is missing, or if its
+scientific hypothesis is only to improve a supporting component. Do not invent a
+weakness when the available evidence does not support it, and never pad the pool
+with out-of-scope ideas merely to reach six. When prior rounds exist, exclude
+repeated ideas unless their recorded failure has led to a materially different
+method in an eligible category. Keep all six candidates in
 `{{ candidates_path }}` until the selection step; do not write the candidate
 list to `{{ ideas_path }}`.
 
@@ -208,8 +239,8 @@ list to `{{ ideas_path }}`.
 
 For each of the six problems, search for relevant literature and use it to
 evaluate the proposed methods. Revise the methods when the literature suggests a
-stronger design, or replace them with a better method within the same
-contribution boundary. Then update the motivation and add the supporting
+stronger design, or replace them with a better method within the same eligible
+category and paper context. Then update the motivation and add the supporting
 references and the exact point each reference supports to the evidence. Before
 selection, every candidate must have at least one `paper` or `experiment`
 evidence entry and at least one `literature` entry.
@@ -229,18 +260,18 @@ Literature-search requirements:
 ### 4. Record the ideas in this round
 
 Compare the six reviewed candidates and select exactly three that are the most
-directly aligned with the paper's main contributions, scientifically meaningful,
-best supported, feasible in the replicated codebase, and most likely to improve
-the existing results. Prefer distinct improvements over minor variants of the
-same method.
+aligned with an eligible contribution category and the paper's research context,
+scientifically meaningful, best supported, feasible in the replicated codebase,
+and most likely to improve the existing results. Prefer distinct improvements
+over minor variants of the same method.
 
 Write only these three ideas to `{{ ideas_path }}` using the required schema and IDs:
 
-- `description`: the limitation in a main contribution and the final
-  contribution-aligned method.
-- `motivation`: the explicit chain from the main contribution through paper or
-  experimental evidence and the diagnosed limitation to the expected
-  improvement mechanism.
+- `description`: the paper-context limitation and the final method within an
+  eligible contribution category.
+- `motivation`: the explicit chain from the contribution category and research
+  context through paper or experimental evidence and the diagnosed limitation
+  to the expected improvement mechanism.
 - `provenance`: one object per relevant reference, with `reference` identifying
   the source and `support` stating the specific supported claim or design choice.
 
@@ -257,9 +288,11 @@ the shared pool so they cannot be reused in later rounds.
 
 **Core Question**: What predictive information exists in the raw data but is lost, distorted, or underused before it reaches the model?
 
-Use this section to generate ideas only when input representation is part of the
-paper's main contribution. Otherwise, its questions may diagnose controls or
-integration needs but cannot justify a representation candidate.
+Use this section to generate ideas only when input representation is an eligible
+contribution category. Otherwise, its questions may diagnose controls or
+integration needs but cannot justify a representation candidate. Within this
+category, either improve the paper's representation or replace it with a
+different representation that better addresses the same paper-context problem.
 
 **1.1 Identify the Raw Data Structure**
 Ask:
@@ -432,17 +465,20 @@ improvement.
 **2.0 Confirm Model-Side Eligibility**
 
 Use this section to generate ideas only when architecture or another learned
-model mechanism is part of the paper's main contribution. A structural mismatch
-in a supporting model does not open model search for a representation- or
-training-contribution paper. The use of a simple, complex, or off-the-shelf model
-does not itself establish eligibility. Never replace a supporting model merely
-because another architecture may perform better.
+model mechanism is an eligible contribution category. A structural mismatch in
+a supporting model does not open model search for a representation- or
+training-contribution paper. Within an eligible model category, however, the
+search space includes both local changes to model A and complete replacement by
+a different model B. The use of a simple, complex, or off-the-shelf model does
+not by itself justify replacement; B needs a paper-context mechanism and a
+controlled comparison.
 
-**2.1 Evidence-Controlled Architecture Diagnosis**
+**2.1 Evidence-Controlled Model Diagnosis**
 
-Use model comparisons and component ablations to localize an architectural
-bottleneck. Treat convergence, seed sensitivity, and hyperparameter sensitivity
-as training diagnostics.
+Use model comparisons and component ablations to determine whether the relevant
+limitation is local to one component or concerns the architecture family and its
+inductive bias. Treat convergence, seed sensitivity, and hyperparameter
+sensitivity as training diagnostics.
 
 Ask:
 - Do matched baselines or ablations isolate an architectural limitation?
@@ -459,10 +495,10 @@ Possible implication:
 ```text
 Additional generic model capacity is probably not the primary bottleneck.
 ```
-In that case, generic capacity is not the improvement. Search for a more
-appropriate contribution-specific component or inductive bias rather than
-scaling the architecture. Do not switch to representation or training unless it
-is also a main-contribution category.
+In that case, generic capacity is not the improvement. Search for a
+paper-context-appropriate component, inductive bias, or alternative model family
+rather than scaling the architecture. Do not switch to representation or
+training unless it is also an eligible contribution category.
 
 ---
 
@@ -501,10 +537,13 @@ Ask:
 - Is the prediction head aligned with the target?
 - Which component is most likely to be the bottleneck?
 
-Prefer improvements that modify **one clearly diagnosed component**.
+Prefer a one-component change when it is sufficient to test the hypothesis. A
+complete model replacement is also one valid primary intervention when the
+hypothesis concerns the model family or its inductive bias and cannot be tested
+by a local component change.
 
 
-**2.4 Improve a Proposed Novel Algorithm / Architecture**
+**2.4 Improve or Replace a Proposed Algorithm / Architecture**
 If the paper proposes its own new model or algorithm, explicitly reconstruct:
 
 ```text
@@ -525,8 +564,10 @@ Then ask:
 - Can the method be simplified or made cheaper without losing its advantage?
 - What failure cases remain after the proposed mechanism is introduced?
 - Is there one orthogonal unresolved issue that can be incorporated without redesigning the entire pipeline?
+- Would a different model family address the claimed problem or a remaining
+  failure mode more directly than the proposed mechanism?
 
-Preferred improvement types:
+Local-refinement options:
 
 - better implementation of the same mechanism
 - relax a strong assumption
@@ -539,7 +580,17 @@ Key question:
 ```
 Is the paper's core idea useful but incompletely, rigidly, or inefficiently implemented?
 ```
-This is a **high-priority** search direction because it preserves the original paper's research motivation, maximizes code reuse, and allows targeted ablation of the proposed mechanism.
+Local refinement is valuable because it permits a targeted ablation, but it is
+not mandatory. A substantially different model B is equally eligible when:
+
+- A and B preserve the same Paper Anchor and evaluator-facing output;
+- paper or reproduced evidence identifies the original modeling challenge, a
+  questionable assumption of A, or a remaining failure that matters in the
+  original research context;
+- B has a specific inductive bias or mechanism expected to address that
+  limitation;
+- the comparison controls capacity, compute, and tuning effort well enough to
+  distinguish mechanism from generic scale.
 
 
 **2.5 Incorporate Known Structure or Constraints**
@@ -572,9 +623,10 @@ Training Strategy.
 > Given the current representation and model, is the training process using the available data efficiently and robustly?
 
 Use this section to generate ideas only when a training mechanism is part of the
-paper's main contribution. Otherwise, training questions may check whether a
-comparison is valid, but a loss, optimizer, sampling, augmentation, or
-pretraining change cannot become a candidate.
+eligible contribution categories. Otherwise, training questions may check
+whether a comparison is valid, but a loss, optimizer, sampling, augmentation, or
+pretraining change cannot become a candidate. Within an eligible training
+category, the paper's original strategy may be refined or replaced.
 
 
 **3.1 Evaluate the Learning Objective**
@@ -710,10 +762,10 @@ These are usually secondary search directions unless a specific failure mode mot
 
 ### 4. Cross-Module Diagnostic Questions
 
-Use cross-module reasoning to locate limitations inside the main contribution,
-not to broaden the allowed idea scope. A non-contribution module may be a
-diagnostic, control, or minimum integration dependency, but cannot be the
-candidate's improvement mechanism.
+Use cross-module reasoning to locate limitations meaningful in the paper's
+context, not to broaden the eligible categories. A non-eligible module may be a
+diagnostic, control, or scientifically necessary supporting adaptation, but
+cannot be the candidate's primary improvement mechanism.
 
 **4.1 Robustness and Shortcut Learning**
 
@@ -727,8 +779,7 @@ Ask:
 Route the remedy by mechanism: preprocessing or encoding is representation; an
 invariance-inducing inference module is model; augmentation, reweighting, robust
 objectives, domain adaptation, or federated optimization is training. Retain the
-remedy as a candidate only when the routed category is part of the main
-contribution.
+remedy as a candidate only when the routed category is eligible.
 
 Key question:
 > What dataset-specific correlation could the model be using instead of the intended clinical signal?
@@ -772,8 +823,8 @@ Before proposing an improvement, ask:
 
 > If this component became perfect, could performance meaningfully improve?
 
-Bottleneck analysis may eliminate a candidate direction, but it never makes an
-unrelated, non-contribution direction eligible.
+Bottleneck analysis may eliminate a method, but it does not open a category
+outside the contribution's eligible search space.
 
 Examples:
 
@@ -846,8 +897,8 @@ Assumption:
 > Cross-modal interaction can be captured adequately after independent encoding.
 
 The frozen split and evaluation protocol cannot be changed. Use a questionable
-evaluation assumption only to motivate an allowed representation, model, or
-training remedy within that protocol.
+evaluation assumption only to motivate a remedy in an eligible representation,
+model, or training category within that protocol.
 
 Strong research ideas often come from:
 
@@ -874,10 +925,12 @@ Template:
 
 > Because **X** is currently lost / mis-modeled, modifying **Y** should improve **Z** by mechanism **M**.
 
-If the mechanism cannot be stated clearly, the idea is probably arbitrary model swapping.
+If the mechanism cannot be stated clearly, the idea is probably arbitrary method
+swapping. Replacing the original method completely is valid when the mechanism
+and controlled comparison can be stated clearly.
 
 
-**4.6 What Is the Smallest Principled Intervention?**
+**4.6 What Is the Smallest Sufficient Intervention?**
 
 Ask:
 - Can the hypothesis be tested without redesigning the entire pipeline?
@@ -895,6 +948,11 @@ one diagnosis
 ```
 
 over large-scale pipeline replacement.
+
+"Smallest" means avoiding unrelated changes, not staying structurally close to
+the paper's method. Replacing the entire representation, model, or training
+strategy is one primary modification when that eligible component is the
+hypothesis under test and the rest of the pipeline remains controlled.
 
 
 **4.7 What Experiment Could Falsify the Hypothesis?**

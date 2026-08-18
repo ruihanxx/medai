@@ -31,14 +31,23 @@ training-strategy refinement ideas. The idea agent first develops six
 paper- or experiment-evidenced problem candidates, reviews closely relevant
 literature to revise their methods and rationale, and emits the three strongest
 candidates in a validated JSON idea artifact. Idea scope is bounded by the
-paper's main contributions: every candidate's diagnosed limitation and proposed
-mechanism must directly refine a main contribution. Supporting components may
-serve only as controls or minimum integration dependencies, and unrelated
-representation, model, or training changes cannot be candidates even when they
-might improve performance. A campaign-wide candidate-pool JSON retains unused
+methodological category or categories of the paper's main contributions, not by
+the identity of its exact method. Within an eligible category, an idea may
+locally refine the paper's mechanism or replace it with a substantially different
+method when paper or reproduced evidence identifies a limitation meaningful in
+the original research context and the comparison can separate mechanism from
+scale, compute, and tuning effects. Supporting categories may serve only as
+controls or receive scientifically necessary adaptations for implementing and
+fairly evaluating the eligible primary intervention; they cannot supply the
+improvement claim. When a paper's contribution is an otherwise frozen dataset,
+cohort, task, outcome, evaluation, or clinical validation rather than a method,
+an eligible category may be derived only from a paper-evidenced bottleneck
+directly tied to using or validating that anchor contribution; a generic method
+upgrade is not eligible. A campaign-wide candidate-pool JSON retains unused
 candidates across rounds; each round revalidates carried candidates against
-this boundary, replenishes the pool to six without out-of-scope padding, and
-orchestration removes the three selected candidates after validating them.
+this category-and-context boundary, replenishes the pool to six without
+out-of-scope padding, and orchestration removes the three selected candidates
+after validating them.
 Representation refinements may reconstruct or encode only the fixed
 prediction-time inputs. Training refinements may change
 training targets, loss/objective, sampling and balancing, augmentation,
