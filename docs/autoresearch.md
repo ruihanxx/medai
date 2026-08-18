@@ -116,11 +116,8 @@ result; a failed mother-environment setup is likewise persisted before the
 unexecuted operation is returned to the same agent session for repair. It powers
 the pool off in `finally`, validates the experiment log, evidence summary, and
 declared local outputs, and only then either finishes or resumes that same
-session. The agent never constructs SSH, adapter, or lifecycle
-commands. Only audited idea code is uploaded; only models, metrics, logs, and
-aggregate evidence are downloaded. Raw or row-level data never leaves the
-remote target. Other agent providers keep their single-turn experiment
-behavior.
+session. Agent, orchestration, and transfer permissions follow `agents.md`.
+Other agent providers keep their single-turn experiment behavior.
 
 An explicit resume reconciles the campaign state before workflow execution.
 If an idea's local mother-environment definition has already passed remote setup,

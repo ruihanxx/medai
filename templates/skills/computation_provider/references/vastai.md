@@ -140,12 +140,14 @@ that member's unique label, otherwise it fails explicitly.
 
 `create` waits at most 600 seconds for a confirmed instance to reach `running`.
 If that wait fails after state records an unambiguous current-run instance, the
-adapter marks `creation_failed=true`. Release that instance with the reviewed
-`release` command before searching for and creating a different eligible offer.
-The adapter permits at most two such replacement creates, records them in
-instance history, and rejects reuse of the failed offer. If creation is
-uncertain, release is not confirmed, no different eligible offer exists, or the
-third create attempt fails, stop explicitly without another rental.
+adapter marks `creation_failed=true`, records a non-secret `creation_failure`,
+and keeps released failed attempts in `instance_history`. State records
+`failed_create_retries` from zero through two. Release the failed instance with
+the reviewed `release` command before searching for and creating a different
+eligible offer. The adapter permits at most two such replacement creates and
+rejects reuse of the failed offer. If creation is uncertain, release is not
+confirmed, no different eligible offer exists, or the third create attempt
+fails, stop explicitly without another rental.
 
 For the selected Google Drive command handoff, never stop a merely provisioning
 instance. First complete the reviewed `cloud-pull --prepare` procedure in

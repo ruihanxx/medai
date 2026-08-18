@@ -14,8 +14,12 @@ The LangGraph stages are:
    decision before coding, resolve each using applicable medical knowledge and
    standard medical-research methods, record the executable resolution as a
    code-generation ambiguity, compare local GPU capacity with the paper's
-   full-scale requirements, use the `computation-provider` skill to rent
-   matching configured remote compute when needed, plan files, and write code.
+   full-scale requirements, use the `computation-provider` skill when remote
+   compute is required, plan files, and write code. Paper-stated GPU count and
+   per-GPU VRAM are hard capacity floors; a smaller inferred workload or CPU
+   feasibility cannot substitute when local capacity is below them. A
+   paper-required file absent from the supplied dataset terminates codegen
+   without invention or substitution, and preprocessing audit does not start.
    Cloud-drive mode always selects the configured provider: codegen materializes
    the complete dataset before any data inspection, then records the completed state's
    read-only target as `remote_dataset_dir`.
@@ -68,28 +72,15 @@ agent or technical failure stops the run explicitly. The sole scientific-verdict
 exception is an audit FAIL after all cohort-refinement rounds, which continues
 to planning while retaining the failed report and checkpoint.
 
-A failed remote interaction starts bounded, safe recovery: the agent begins
-with the selected provider reference, may consult official provider
-documentation and use reasoned diagnostics, and must not blindly repeat a
-billable operation. When the provider reference states that no read-only
-inventory query is available, the agent rents the selected resource directly.
-An explicit no-inventory response permits exactly one attempt with a stronger
-eligible GPU that preserves every original requirement; a failed retry is
-terminal. Separately, a provider may permit a confirmed instance whose create
-initialization failed to be released and replaced by a different eligible offer.
-The Vast adapter permits at most two such additional creates and requires the
-failed instance's release to complete before each rental. If recovery remains
-unsuccessful, the invoking Codex agent exits nonzero. When codegen records a
-remote-compute plan, orchestration statically
-validates its current-run state path, remote working directory, and remote
-dataset directory before the stage completes. For cloud runs it also requires
-an active `completed` cloud-drive state and exact agreement between that state's
-target and every codegen/replication plan `remote_dataset_dir`. Additional
-provider metadata is accepted, and other provider-specific lifecycle validation
-occurs at runtime. A
-successful procedure that conflicts with the skill reference is recorded in
-`system_maintenance/skills/corrections.json`, not applied to the repository
-skill during the run.
+A failed remote interaction follows the bounded recovery procedure in the
+metadata-selected provider reference. The agent may consult official provider
+documentation and use reasoned diagnostics but must not guess or blindly repeat
+a billable action. Provider-specific inventory, fallback, failed-create, and
+replacement rules live only in that reference. If recovery remains
+unsuccessful, the invoking agent exits nonzero. Orchestration validates remote
+plans and cloud state against `artifacts.md`; a successful procedure that
+conflicts with the selected reference is recorded in the canonical skill
+correction artifact rather than applied to the repository skill during the run.
 
 Audit PASS proceeds to planning. Audit FAIL enters cohort refinement with the
 failed report and permits changes only to cohort construction, data loading,
@@ -132,7 +123,7 @@ running instance gets one harmless SSH probe. An SSH failure permits replacement
 only after the old instance is successfully powered off and released. A
 provider-confirmed missing instance may be replaced directly, while ambiguous
 API/network errors fail without a second rental. Replacement may try only the
-recorded, distinct stronger fallback after explicit no inventory, and each
+bounded alternatives documented by the selected provider reference, and each
 `resume_count` permits at most one replacement. Missing, corrupt, or incomplete
 remote state fails explicitly.
 
@@ -156,13 +147,9 @@ Each successful cohort refinement records its completed round and source audit
 report; a technical retry reuses that round. Cohort refinement invalidates stale
 planning, replication, and report stages before changing preprocessing.
 
-Replication plans end by downloading and validating required outputs and then
-powering off, not releasing, remote compute. Orchestration repeats that
-idempotent power-off after replication and on every pre-report failure. After
-all report artifacts validate and the pipeline is marked completed, the CLI
-releases the instance. A final release failure leaves the run completed and
-records `cleanup_warning` in the manifest; reopening that completed run does not
-retry release automatically. The only pre-report release is reconciliation of
-an SSH-unreachable old instance before its single replacement. Auto Research
-retains its existing lifecycle. Legacy stored plans are not rewritten; before
-resuming one, its old release step must be changed manually to power-off.
+Replication follows the host-owned lifecycle in `execution.md`: plans finish by
+downloading and validating outputs and then powering off, while release occurs
+only after report validation and pipeline completion. The only earlier release
+is bounded resume reconciliation before one replacement. Legacy stored plans
+are not rewritten; before resuming one, its old release step must be changed
+manually to power-off.

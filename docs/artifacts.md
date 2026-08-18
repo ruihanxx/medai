@@ -133,8 +133,10 @@ object contains exactly an identifiable `reference` and a `support` statement.
 Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
 record a `final` or `validation` role plus a verbatim provenance quote.
 Experiments have unique `experiment_id` values and list their claim IDs, paper
-artifact labels, and a one-sentence `computational_demand` inferred from the
-paper. The replication plan uses ordered steps whose
+artifact labels, and an evidence-bound, one-sentence `computational_demand`.
+That sentence records paper-stated full-scale resources and clearly labels any
+method- or scale-based inference for omitted resources. The replication plan
+uses ordered steps whose
 `verifies` lists collectively cover those claim IDs and artifact labels. The
 replication log covers the plan steps in order, and every result-producing step
 names real output files or directories inside the copied codebase or replication
@@ -171,18 +173,17 @@ with fields unused by the selected operation set to `null`. The result records
 the operation, normalized local destination when applicable, exit code,
 duration, log path, and artifact-validation error. Remote results persist
 beneath the campaign `work/artifacts/<idea_id>/` root, while downloads are
-confined to the matching local `experiment/artifacts/` directory. Each terminal
-result is followed by pool-wide power-off and local artifact validation before
-the same temporary session is resumed. A mother-environment setup failure uses
-the same result/log pair, explicitly records that the requested operation did
-not run, and resumes the same temporary session. Explicit CLI resume retains
-these files but does not persist either temporary session ID.
+confined to the matching local `experiment/artifacts/` directory. A
+mother-environment setup failure uses the same result/log pair and records in
+`artifact_validation_error` that the requested operation did not run. Explicit
+CLI resume retains these files but does not persist either temporary session
+ID.
 
 An Auto Research `experiment/environment/validation.json` is orchestration-owned
 and records the SHA-256 hashes of the `setup.sh` and `environment.json` revision
 that most recently passed remote setup. A missing or mismatched marker makes the
-definition unvalidated. An evidence-driven agent repair changes only those two
-definition files; orchestration records the new hashes only after setup succeeds.
+definition unvalidated; orchestration records new hashes only after setup
+succeeds.
 
 Each run initializes `system_maintenance/dataset/patch.json` as an empty JSON
 array. When code generation naturally encounters an omission in a dataset
@@ -249,10 +250,8 @@ schema is defined by the selected adapter. Its common envelope records the
 provider, current-run ownership, and release state. Cloud runs additionally
 store `provider_state.cloud_drive` with the public fields `drive`, `dataset`,
 `completed`, and `target_path`; adapters may store additional non-secret detail.
-Vast records `failed_create_retries` from zero through two. When a confirmed
-instance fails its create initialization wait, it also records
-`creation_failed=true` and a non-secret `creation_failure`; released failed
-attempts remain in `instance_history`.
+Provider-specific retry, failure, and history fields are defined only by the
+selected adapter and its metadata-selected reference.
 Power-off leaves top-level `released` false; only successful irreversible release
 changes it to true. Provider-owned history and resource identifiers remain
 non-secret. Credentials, hashes, access tokens, and drive secrets are never

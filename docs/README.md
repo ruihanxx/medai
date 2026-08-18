@@ -5,11 +5,11 @@ the contract files whose routing conditions match the change:
 
 | Change area | Read |
 | --- | --- |
-| Host launcher, CLI flags, initialization, provider configuration, MinerU, mounts, or Docker isolation | `execution.md` |
+| Host launcher, CLI flags, initialization, provider configuration, MinerU, mounts, Docker isolation, or orchestration-owned remote lifecycle and cleanup | `execution.md` |
 | Base replication stages, failure behavior, checkpoints, resume, or manifest state | `replication.md` |
 | Auto Research eligibility, idea rounds, audit, experiment, assessment, routing, or campaign state | `autoresearch.md` |
 | Canonical run paths, artifact fields, validation rules, evidence, or report structure | `artifacts.md` |
-| Prompt locations, agent permissions/prohibitions, transcripts, runtime skills, or remote-compute lifecycle | `agents.md` |
+| Prompt locations, agent information/mutation boundaries, transcripts, invocation handoffs, or the runtime-skill interface | `agents.md` |
 | Required local checks or mocked external boundaries | `acceptance.md` |
 
 For a cross-cutting change, read each matching row. Do not load unrelated
@@ -19,13 +19,15 @@ contract files by default.
 
 - `../AGENTS.md`: repository-wide operating rules.
 - `coding_style.md`: coding style maintained by the project owner; do not duplicate it elsewhere.
-- `execution.md`: public host execution and isolation contract.
+- `execution.md`: public host execution, isolation, and orchestration-owned remote-lifecycle contract.
 - `replication.md`: base replication workflow contract.
 - `autoresearch.md`: Auto Research workflow contract.
 - `artifacts.md`: persistent path and artifact-validation contract.
-- `agents.md`: agent, prompt, skill, and external-compute boundaries.
+- `agents.md`: agent, prompt, invocation, and runtime-skill interface boundaries.
 - `acceptance.md`: repository acceptance checks.
 - `../scripts/`: operator-maintained API guides and helpers for external
   services; these are not runtime skills or agent instructions.
+- `../templates/skills/`: runtime skill contracts; metadata-selected provider
+  references are the canonical documentation for provider-specific procedures.
 
 Put each rule in one canonical file. Link to it elsewhere instead of restating it.

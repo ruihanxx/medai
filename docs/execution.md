@@ -44,11 +44,9 @@ then returns one foreground local monitor command. Orchestration runs that
 command without an active Codex process and resumes the same session after its
 terminal result; codegen may inspect data only after provider state records
 completed materialization.
-For Vast, `create` waits at most ten minutes for `running`. A confirmed rented
-instance that fails this initialization is released before codegen selects a
-different eligible offer, with at most two additional create attempts. An
-uncertain creation or unconfirmed release remains terminal and never permits a
-second rental.
+Provider-specific resource selection, create initialization, fallback, and
+retry behavior lives only in the metadata-selected computation-provider
+reference. Host orchestration never infers an undocumented alternative.
 
 Auto Research requires `--replicate-run runs/<run_id>` and accepts an optional
 campaign `--output`. Without `--output`, the launcher atomically creates the
@@ -136,28 +134,13 @@ attempt. Normal release occurs only after the report is validated and the run is
 completed. A release failure is a persistent `cleanup_warning`, not a pipeline
 failure, and reopening that completed run does not retry it.
 
-Cloud-backed Auto Research creates its first campaign instance lazily at the
-first audited idea that reaches experiment planning. Direct Codex planning uses
-the opted-in prepare/foreground-monitor/same-session-resume handoff for initial
-materialization, with power-off before the planning session resumes. Every
-Codex experiment operation is run by local orchestration through the selected
-provider. Before each operation, orchestration selects a usable member from the
-provider-owned bounded campaign pool. A provider-confirmed capacity conflict may
-add one member within that bound without destroying retained members. A newly
-selected member repeats inventory-verified cloud materialization, receives the
-local audited mother code and local idempotent mother-environment definition,
-and reconstructs its runtime before the operation. `remote_exec` contains only
-inner foreground Bash and orchestration runs it from the synchronized remote
-codebase with a persistent per-idea remote artifact directory; `download` is
-limited to that directory and the local idea `experiment/artifacts/` directory.
-The synchronized codebase contains source only and is replaceable. The agent
-never constructs an SSH or provider-adapter command. Orchestration powers all pool members off in
-`finally`, validates downloaded artifacts, and only then resumes the same agent
-session. Other agent providers retain their single-turn experiment behavior.
-Explicit resume reconciles the pool before agent work. Failures power off and
-preserve every owned member. Release occurs only after final-report validation
-and campaign completion and attempts every pool member; any remaining member
-produces a cleanup warning.
+For cloud-backed Auto Research, host orchestration owns pool selection and
+preparation, provider execution, artifact validation, reconciliation,
+power-off, and release. It powers the pool off before resuming an agent and on
+failure, and releases owned members only after final-report validation and
+campaign completion. The campaign state machine and data-materialization flow
+are defined in `autoresearch.md`; agent-facing operation and transfer
+permissions are defined in `agents.md`.
 
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a
