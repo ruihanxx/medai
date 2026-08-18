@@ -112,6 +112,15 @@ they must not rerun any old existing or baseline experiment entry point.
   into the relevant frozen experiments while preserving baseline behavior.
 - Account for every frozen experiment across the declared file changes. Do not
   plan a full experiment run.
+- If a direct implementation could materially increase computation, plan and
+  implement a compute-efficient version with the smallest methodological
+  deviation. Prefer semantics-preserving vectorization, batching, concurrency,
+  or reuse of shared computation. When an exact implementation would use
+  unreasonable resources, an optimized approximation is allowed only if it
+  preserves the idea's core mechanism and every frozen boundary; disclose the
+  deviation in `refinement_description` and the relevant `change` fields. Never
+  reduce frozen experiment scale or omit required evaluation as a compute
+  optimization.
 
 ### 3. Implement
 

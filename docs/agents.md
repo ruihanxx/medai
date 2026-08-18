@@ -103,7 +103,11 @@ input failure, and Smart Replicate workflow are defined in `replication.md`.
   code and plans as executable truth.
 - Codegen edits only the paths declared by its implementation plan and allowed
   by the experiment contract. The permitted refinement semantics and frozen
-  scientific boundaries are defined in `autoresearch.md`.
+  scientific boundaries are defined in `autoresearch.md`. When a direct idea
+  could materially increase computation, codegen prefers semantics-preserving
+  optimizations and may declare a minimal-deviation optimized implementation
+  only to avoid unreasonable resource use; it never reduces frozen experiment
+  scale or required evaluation as an optimization.
 - The experiment-plan agent treats the audited idea codebase as read-only,
   covers every frozen experiment at audited full scale, and maps outputs to
   frozen metrics. It receives no paper, baseline, target, or assessment-threshold
