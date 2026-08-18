@@ -63,8 +63,11 @@
   causal, matching, and effect-estimation experiments are excluded from weights
   and every downstream Auto Research stage. Experiment contracts trust the
   completed replicate code as the executable source of truth and record
-  evaluator metrics as one compact agent-written sentence. Auto Research codegen may
-  add standalone refinement files and touch only declared input-representation,
+  evaluator metrics as one compact agent-written sentence. The assessment agent
+  copies frozen experiment IDs, primary-metric names, directions, weights, and
+  threshold exactly; it may judge evidence and scores but cannot rename,
+  decorate, or reinterpret those fields. Auto Research codegen may add
+  standalone refinement files and touch only declared input-representation,
   training, and integration paths. It may change representation and training
   targets, objectives, sampling, augmentation, optimization, pretraining, or
   training logic while preserving the fixed downstream data/cohort/split, final

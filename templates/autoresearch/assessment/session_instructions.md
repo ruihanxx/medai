@@ -19,6 +19,24 @@ Assess refinement `{{ idea_id }}` using frozen result-blind experiment weights.
 
 ## Task
 
+The assessment does not own experiment identity or configuration. Copy these
+read-only fields without reinterpretation:
+
+- `idea_id`: exactly the supplied idea ID.
+- `experiment_id` and experiment order: exactly as frozen in the weights.
+- `metric_name`: exactly, character for character, from the matching contract's
+  `primary_metric`. Do not add a model, cohort, horizon, unit, display label,
+  parenthetical qualifier, or any other prefix or suffix.
+- `direction`: exactly from the matching contract's `metric_direction`.
+- `weight`: exactly from the matching frozen experiment weight.
+- `threshold`: exactly the supplied passing threshold.
+- `audit_passed`: exactly the verdict represented by the supplied audit.
+
+Treat exact equality, not containment or semantic equivalence, as the check for
+every copied string. Do not edit the frozen contracts or weights. The assessment
+agent owns only evidence mapping, numeric comparisons, protocol-consistency
+judgment, scores and rationales, the summary, verdict, and failure reasons.
+
 For every experiment, find the contract's frozen primary metric in the completed
 replicate evidence and the refinement evidence. Copy only actual numeric values
 and compute:
@@ -75,7 +93,7 @@ Write `{{ assessment_path }}`:
   "experiments": [
     {
       "experiment_id": "E1",
-      "metric_name": "frozen primary metric",
+      "metric_name": "<copy primary_metric exactly>",
       "direction": "higher",
       "weight": 1.0,
       "baseline_value": 0.8,
@@ -97,6 +115,8 @@ Write `{{ assessment_path }}`:
 ## Constraints
 
 - Include every weighted experiment exactly once and in order.
+- Never rename, decorate, normalize, or otherwise change a frozen metric name,
+  direction, weight, experiment ID, or threshold in the assessment.
 - `valid` requires a passing audit, a consistent protocol, a complete weighted
   score, and `weighted_score > threshold`.
 - A complete score at or below the threshold is `invalid`.

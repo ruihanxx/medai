@@ -70,7 +70,8 @@ preserving every frozen data/cohort/split boundary; it cannot invoke a baseline
 entry point. The experiment stage never reruns the replicated baseline and
 cannot modify the audited source code; execution failures remain explicit.
 Assessment compares each frozen primary metric with existing baseline evidence.
-It retains
+It copies the frozen experiment IDs, primary-metric names, directions, weights,
+and campaign threshold exactly rather than renaming or decorating them. It retains
 `relative_delta = (refined - baseline) / abs(baseline)` as objective comparison
 evidence, then assigns each experiment an evidence-bound integer score from -5
 through 5. Zero means no meaningful improvement, -5 means compelling evidence
