@@ -6,6 +6,7 @@ import pytest
 
 from medai.autoresearch import (
     REQUIRED_BASE_STAGES,
+    _AutoResearchEnvironmentSetupError,
     _copy_base_cloud_inventory,
     _mother_environment_validated,
     _prepare_autoresearch_command_instance,
@@ -1037,6 +1038,7 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     calls = []
     operations = []
     power_events = []
+    preparation_count = 0
 
     def fake_agent(**kwargs):
         calls.append(kwargs)
@@ -1085,12 +1087,20 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
         fake_operation,
     )
     monkeypatch.setattr("medai.autoresearch._validate_experiment_artifacts", fake_validate)
+
+    def fake_prepare(_config, _codebase, _experiment):
+        nonlocal preparation_count
+        preparation_count += 1
+        power_events.append("on")
+        if preparation_count == 1:
+            raise _AutoResearchEnvironmentSetupError(
+                "ModuleNotFoundError: No module named 'matplotlib'"
+            )
+        return {"remote_working_dir": "/workspace/medai/campaign/work"}
+
     monkeypatch.setattr(
         "medai.autoresearch._prepare_autoresearch_command_instance",
-        lambda _config, _codebase, _experiment: (
-            power_events.append("on")
-            or {"remote_working_dir": "/workspace/medai/campaign/work"}
-        ),
+        fake_prepare,
     )
     monkeypatch.setattr(
         "medai.autoresearch.power_off_run_computation_instance",
@@ -1115,10 +1125,10 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     )
 
     assert outputs == ["complete"]
-    assert power_events == ["on", "off", "on", "off"]
+    assert power_events == ["on", "off", "on", "off", "on", "off"]
     assert [operation.command for operation, _ in operations] == [
-        "command-1",
         "command-2",
+        "command-3",
     ]
     assert all(
         kwargs["remote_working_dir"] == "/workspace/medai/campaign/work"
@@ -1131,6 +1141,16 @@ def test_autoresearch_experiment_commands_power_cycle_before_agent_resume(
     )
     assert calls[0].get("resume_session_id") is None
     assert calls[1]["resume_session_id"] == "session-1"
+    assert calls[2]["resume_session_id"] == "session-1"
+    setup_result = json.loads(
+        (experiment_dir / "commands" / "command_001_result.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert setup_result["exit_code"] == 1
+    assert "before the requested operation ran" in setup_result[
+        "artifact_validation_error"
+    ]
     assert "matplotlib" in setup_path.read_text(encoding="utf-8")
 
 
@@ -1326,6 +1346,7 @@ def test_autoresearch_command_instance_syncs_local_code_and_environment(
         cloud_dataset="mimic-iv",
     )
     actions = []
+    setup_failure = False
     monkeypatch.setattr(
         "medai.autoresearch.power_on_run_computation_instance",
         lambda _config: {"created": True, "materialization_required": True},
@@ -1337,6 +1358,8 @@ def test_autoresearch_command_instance_syncs_local_code_and_environment(
 
     def fake_action(_state_path, action, *, arguments=None, expected_provider=None):
         actions.append((action, arguments, expected_provider))
+        if setup_failure and action == "exec" and "setup.sh" in arguments[-1]:
+            raise RuntimeError("ModuleNotFoundError: No module named 'matplotlib'")
         return ""
 
     monkeypatch.setattr(
@@ -1381,6 +1404,13 @@ def test_autoresearch_command_instance_syncs_local_code_and_environment(
     )
     assert _mother_environment_validated(experiment_dir) is False
 
+    setup_failure = True
+    actions.clear()
+    with pytest.raises(_AutoResearchEnvironmentSetupError, match="matplotlib"):
+        _prepare_autoresearch_command_instance(config, codebase_dir, experiment_dir)
+    assert _mother_environment_validated(experiment_dir) is False
+
+    setup_failure = False
     actions.clear()
     _prepare_autoresearch_command_instance(config, codebase_dir, experiment_dir)
     second_validation = json.loads(

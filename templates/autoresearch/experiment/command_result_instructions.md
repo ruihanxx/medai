@@ -1,10 +1,10 @@
 # Auto Research experiment command result
 
-The orchestration-owned operation requested by this Codex session reached a
-terminal state. Its result is at `{{ command_result_path }}` and its complete combined
-log is at `{{ command_log_path }}`. It exited with code {{ exit_code }} after
-{{ duration_seconds }} seconds. Local orchestration has powered the campaign
-instance off before resuming this session.
+The orchestration attempt for the operation requested by this Codex session
+reached a terminal state. Its result is at `{{ command_result_path }}` and its
+complete combined log is at `{{ command_log_path }}`. It exited with code
+{{ exit_code }} after {{ duration_seconds }} seconds. Local orchestration has
+powered the campaign instance off before resuming this session.
 
 The required local experiment artifacts are not yet complete:
 
@@ -14,6 +14,8 @@ The required local experiment artifacts are not yet complete:
 
 Read the result and relevant log sections, then return exactly one next
 `remote_exec` or `download` operation using the required output schema. For
+an operation that did not run because setup failed, do not infer its outcome;
+repair the environment when justified and submit the operation again. For
 `remote_exec`, return only foreground Bash that should run inside the
 synchronized remote codebase; never include an SSH, provider-adapter, Docker,
 or lifecycle wrapper, and persist outputs only in the supplied remote artifact

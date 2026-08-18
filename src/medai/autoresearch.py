@@ -98,6 +98,10 @@ class AutoResearchState(TypedDict, total=False):
     report_path: str
 
 
+class _AutoResearchEnvironmentSetupError(RuntimeError):
+    pass
+
+
 def expected_idea_ids(round_index: int) -> list[str]:
     return [f"R{round_index:02d}-I{idea_index:02d}" for idea_index in range(1, 4)]
 
@@ -1517,12 +1521,15 @@ def _prepare_autoresearch_command_instance(
         f"bash {shlex.quote(remote_environment_spec + '/setup.sh')} "
         f"{shlex.quote(remote_environment)} {shlex.quote(remote_code)}"
     )
-    setup_output = _run_computation_provider_action(
-        state_path,
-        "exec",
-        arguments=["--", "bash", "-lc", replace_command],
-        expected_provider=config.computation_provider,
-    )
+    try:
+        setup_output = _run_computation_provider_action(
+            state_path,
+            "exec",
+            arguments=["--", "bash", "-lc", replace_command],
+            expected_provider=config.computation_provider,
+        )
+    except RuntimeError as exc:
+        raise _AutoResearchEnvironmentSetupError(str(exc)) from exc
     (environment_dir / "setup.log").write_text(
         setup_output + ("\n" if setup_output else ""),
         encoding="utf-8",
@@ -1605,6 +1612,8 @@ def _run_experiment_command_handoff(
         operation = load_model(command_request_path, AutoResearchCommand)
         command_log_path = command_dir / f"command_{command_index:03d}.log"
         result_path = command_dir / f"command_{command_index:03d}_result.json"
+        setup_failed = False
+        started = time.monotonic()
         try:
             acquisition = _prepare_autoresearch_command_instance(
                 config,
@@ -1623,30 +1632,49 @@ def _run_experiment_command_handoff(
                 result_path=result_path,
                 expected_provider=config.computation_provider,
             )
+        except _AutoResearchEnvironmentSetupError as exc:
+            setup_failed = True
+            validation_error = (
+                "Mother-environment setup failed before the requested operation "
+                f"ran: {exc}"
+            )
+            command_log_path.write_text(validation_error + "\n", encoding="utf-8")
+            result = {
+                "operation": operation.operation,
+                "command": operation.command,
+                "remote": operation.remote,
+                "destination": operation.destination,
+                "exit_code": 1,
+                "duration_seconds": round(time.monotonic() - started, 3),
+                "log_path": str(command_log_path),
+                "artifact_validation_error": validation_error,
+            }
+            write_json(result_path, result)
         finally:
             power_off_run_computation_instance(config)
-        try:
-            return _validate_experiment_artifacts(
-                plan_path,
-                config.output / "experiment_setup" / "experiment_contracts.json",
-                log_path,
-                evidence_path,
-                codebase_dir,
-                experiment_dir,
-            )
-        except (RuntimeError, ValueError) as exc:
-            result["artifact_validation_error"] = str(exc)
-            write_json(result_path, result)
-            resume_prompt_path = render_prompt(
-                "autoresearch/experiment/command_result_instructions.md",
-                prompt_dir / f"experiment_resume_{command_index:03d}.md",
-                command_result_path=result_path,
-                command_log_path=command_log_path,
-                exit_code=result["exit_code"],
-                duration_seconds=result["duration_seconds"],
-                artifact_validation_error=result["artifact_validation_error"],
-            )
-            command_index += 1
+        if not setup_failed:
+            try:
+                return _validate_experiment_artifacts(
+                    plan_path,
+                    config.output / "experiment_setup" / "experiment_contracts.json",
+                    log_path,
+                    evidence_path,
+                    codebase_dir,
+                    experiment_dir,
+                )
+            except (RuntimeError, ValueError) as exc:
+                result["artifact_validation_error"] = str(exc)
+                write_json(result_path, result)
+        resume_prompt_path = render_prompt(
+            "autoresearch/experiment/command_result_instructions.md",
+            prompt_dir / f"experiment_resume_{command_index:03d}.md",
+            command_result_path=result_path,
+            command_log_path=command_log_path,
+            exit_code=result["exit_code"],
+            duration_seconds=result["duration_seconds"],
+            artifact_validation_error=result["artifact_validation_error"],
+        )
+        command_index += 1
 
 
 def _run_experiment(

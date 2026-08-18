@@ -173,8 +173,10 @@ duration, log path, and artifact-validation error. Remote results persist
 beneath the campaign `work/artifacts/<idea_id>/` root, while downloads are
 confined to the matching local `experiment/artifacts/` directory. Each terminal
 result is followed by pool-wide power-off and local artifact validation before
-the same temporary session is resumed. Explicit CLI resume retains these files
-but does not persist either temporary session ID.
+the same temporary session is resumed. A mother-environment setup failure uses
+the same result/log pair, explicitly records that the requested operation did
+not run, and resumes the same temporary session. Explicit CLI resume retains
+these files but does not persist either temporary session ID.
 
 An Auto Research `experiment/environment/validation.json` is orchestration-owned
 and records the SHA-256 hashes of the `setup.sh` and `environment.json` revision
