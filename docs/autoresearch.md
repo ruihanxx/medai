@@ -30,8 +30,14 @@ Each round generates exactly three standalone input-representation, model, or
 training-strategy refinement ideas. The idea agent first develops six
 paper- or experiment-evidenced problem candidates, reviews closely relevant
 literature to revise their methods and rationale, and emits the three strongest
-candidates in a validated JSON idea artifact. A campaign-wide candidate-pool JSON retains
-unused candidates across rounds; each round replenishes it to six, and
+candidates in a validated JSON idea artifact. Idea scope is bounded by the
+paper's main contributions: every candidate's diagnosed limitation and proposed
+mechanism must directly refine a main contribution. Supporting components may
+serve only as controls or minimum integration dependencies, and unrelated
+representation, model, or training changes cannot be candidates even when they
+might improve performance. A campaign-wide candidate-pool JSON retains unused
+candidates across rounds; each round revalidates carried candidates against
+this boundary, replenishes the pool to six without out-of-scope padding, and
 orchestration removes the three selected candidates after validating them.
 Representation refinements may reconstruct or encode only the fixed
 prediction-time inputs. Training refinements may change

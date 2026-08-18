@@ -20,11 +20,11 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 
 Use the research brief to establish the target problem and relevant research
 line, then propose standalone refinements to input representation, model design,
-or training strategy that can be embedded into the already replicated
-prediction experiments selected in the weights and contracts artifacts. If the
-paper or base code also contains statistical, association, explanatory, causal,
-matching, or effect-estimation analyses, do not propose ideas for them and do
-not use them as refinement targets.
+or training strategy that directly improve the paper's main contribution(s) and
+can be embedded into the already replicated prediction experiments selected in
+the weights and contracts artifacts. If the paper or base code also contains
+statistical, association, explanatory, causal, matching, or effect-estimation
+analyses, do not propose ideas for them and do not use them as refinement targets.
 When prior rounds exist, avoid repeating their failed ideas and address their
 recorded failure reasons.
 
@@ -110,28 +110,31 @@ Keep fixed:
 - prediction setting
 - primary evaluation protocol
 
-Search over:
+Search only within the contribution-aligned parts of:
 - input representation
 - model
 - training strategy
 
-Allocate search effort from the paper's claimed methodological contributions,
-not from model complexity alone. Reconstruct each contribution and its supporting
-evidence, then use this map:
+First identify the paper's main contribution(s) and their supporting evidence.
+Treat them as a hard boundary for idea generation, not merely as a priority.
+Use this map:
 
-- Prioritize **input representation** for a new clinical score, index, biomarker,
+- Search **input representation** when a main contribution is a new clinical
+  score, index, biomarker,
   signature, feature set, or feature-selection/construction method; deterministic
   signal, image, text, or tabular preprocessing/encoding; temporal trajectories
   or dynamics; missingness or observation-process encoding; or fixed multimodal
   alignment and feature fusion. Search for a representation that captures the
   same clinical construct or available raw information more faithfully.
-- Prioritize **model design** for a new prediction algorithm, architecture,
+- Search **model design** when a main contribution is a new prediction
+  algorithm, architecture,
   module, ensemble, learned encoder/aggregator/fusion mechanism, prediction head,
   or inductive bias for temporal, spatial, relational, hierarchical, or
   cross-modal structure. Search locally around the claimed mechanism: relax a
   rigid assumption, remove a bottleneck, make it adaptive, or simplify it under
   comparable resources.
-- Prioritize **training strategy** for a new training target or auxiliary task,
+- Search **training strategy** when a main contribution is a new training target
+  or auxiliary task,
   loss/objective, calibration or regularization procedure, imbalance or
   cost-sensitive method, sampling/curriculum, augmentation, optimization,
   pretraining, transfer, self-supervised, semi-supervised, or multi-task
@@ -145,42 +148,59 @@ predictor are representation; a learnable inference-time structure is model;
 targets, objectives, data exposure, parameter acquisition, and update rules are
 training. Themes such as multimodality, interpretability, clinical knowledge,
 uncertainty, robustness, fairness, privacy, and efficiency may span categories;
-route each concrete mechanism to every category it actually changes.
+route each concrete mechanism to every main-contribution category it actually
+changes.
 
-For a paper with contributions in multiple categories, give substantial search
-effort to all of them, weighted by the paper's claims, ablations, and reproduced
-evidence. Priority is neither an exclusion rule nor a quota of one idea per
-category. For an applied, comparative, or benchmark paper whose novelty is a
+Reject any candidate whose proposed improvement mechanism lies outside the main
+contribution(s), even if it could improve predictive performance. A supporting
+component may be used as a fixed control or changed only for minimum integration;
+changing it is not itself a research idea. For example, when the contribution is
+a new clinical index, refine how that index is defined, constructed, or
+represented; do not propose replacing the training model as the improvement.
+
+For a paper with main contributions in multiple categories, search all and only
+those categories, weighted by the paper's claims, ablations, and reproduced
+evidence. For an applied, comparative, or benchmark paper whose novelty is a
 dataset, cohort, task, outcome, evaluation, or clinical validation rather than a
-method, keep that novelty fixed as part of the Paper Anchor and diagnose the
-three allowed categories without inventing a preferred one.
+method, keep that novelty fixed as part of the Paper Anchor. Consider an allowed
+method change only when its mechanism directly strengthens how that anchor
+contribution is operationalized; never substitute a generic model or training
+change for the paper's actual contribution.
 
 {% if round_index > 1 %}
  Learn from the experience of previous rounds at `{{ prior_rounds_json }}`.
 {% endif %}
 
-Use the hint in the later  `Hint for finding potential improvement` section when you search over the 3 parts.
+Use the later `Hint for finding potential improvement` only for the
+contribution-aligned part(s).
 
 ### 2. Write down the candidates
 
 Read the shared candidate pool when it exists; it contains unused candidates
-from earlier rounds. Preserve useful candidates, revise them using prior-round
-evidence, and add distinct candidates until the pool contains exactly six. In
-round 1, create the pool with `next_candidate_index` set to 1 before allocating
-IDs. Allocate each new ID from that counter, increment it, and never reuse an ID.
+from earlier rounds. Revalidate every carried candidate against the paper's main
+contribution boundary, discard any that no longer qualifies, preserve the other
+useful candidates, revise them using prior-round evidence, and add distinct
+candidates until the pool contains exactly six. In round 1, create the pool with
+`next_candidate_index` set to 1 before allocating IDs. Allocate each new ID from
+that counter, increment it, and never reuse an ID.
 
 For each candidate record:
 
-- **Problem**: the specific limitation in the current method or experiment.
-- **Methods**: all plausible ways to address it through input representation,
-  model design, or training strategy.
-- **Motivation**: why this problem is worth addressing and why the methods could help.
+- **Problem**: the specific limitation in a main contribution's mechanism or
+  implementation.
+- **Methods**: plausible ways to address it within the contribution-aligned
+  input-representation, model, or training category.
+- **Motivation**: the explicit chain from the paper's main contribution to the
+  diagnosed limitation, proposed intervention, and expected improvement mechanism.
 - **Evidence**: concrete support from the paper or reproduced experimental
   results, such as an ablation, error pattern, metric, table, figure, or stated limitation.
 
-Do not invent a weakness when the available evidence does not support it. When
-prior rounds exist, exclude repeated ideas unless their recorded failure has led
-to a materially different method. Keep all six candidates in
+Reject a candidate if that contribution-to-intervention chain is missing, or if
+its scientific hypothesis is only to improve a supporting component. Do not
+invent a weakness when the available evidence does not support it, and never pad
+the pool with out-of-scope ideas merely to reach six. When prior rounds exist,
+exclude repeated ideas unless their recorded failure has led to a materially
+different contribution-aligned method. Keep all six candidates in
 `{{ candidates_path }}` until the selection step; do not write the candidate
 list to `{{ ideas_path }}`.
 
@@ -188,10 +208,11 @@ list to `{{ ideas_path }}`.
 
 For each of the six problems, search for relevant literature and use it to
 evaluate the proposed methods. Revise the methods when the literature suggests a
-stronger design, or replace them with a better method. Then update the motivation
-and add the supporting references and the exact point each reference supports to
-the evidence. Before selection, every candidate must have at least one `paper`
-or `experiment` evidence entry and at least one `literature` entry.
+stronger design, or replace them with a better method within the same
+contribution boundary. Then update the motivation and add the supporting
+references and the exact point each reference supports to the evidence. Before
+selection, every candidate must have at least one `paper` or `experiment`
+evidence entry and at least one `literature` entry.
 
 Literature-search requirements:
 
@@ -208,15 +229,18 @@ Literature-search requirements:
 ### 4. Record the ideas in this round
 
 Compare the six reviewed candidates and select exactly three that are the most
-scientifically meaningful, best supported, feasible in the replicated codebase,
-and most likely to improve the existing results. Prefer distinct improvements
-over minor variants of the same method.
+directly aligned with the paper's main contributions, scientifically meaningful,
+best supported, feasible in the replicated codebase, and most likely to improve
+the existing results. Prefer distinct improvements over minor variants of the
+same method.
 
 Write only these three ideas to `{{ ideas_path }}` using the required schema and IDs:
 
-- `description`: the diagnosed problem and the final proposed method.
-- `motivation`: why it was selected, the paper or experimental evidence, and the
-  expected improvement mechanism.
+- `description`: the limitation in a main contribution and the final
+  contribution-aligned method.
+- `motivation`: the explicit chain from the main contribution through paper or
+  experimental evidence and the diagnosed limitation to the expected
+  improvement mechanism.
 - `provenance`: one object per relevant reference, with `reference` identifying
   the source and `support` stating the specific supported claim or design choice.
 
@@ -232,6 +256,10 @@ the shared pool so they cannot be reused in later rounds.
 ### 1. Input Representation / Feature Construction
 
 **Core Question**: What predictive information exists in the raw data but is lost, distorted, or underused before it reaches the model?
+
+Use this section to generate ideas only when input representation is part of the
+paper's main contribution. Otherwise, its questions may diagnose controls or
+integration needs but cannot justify a representation candidate.
 
 **1.1 Identify the Raw Data Structure**
 Ask:
@@ -401,15 +429,14 @@ Pure scaling is not a method-improvement direction. Increasing parameter count,
 tuning budget, or training time alone SHOULD NOT be treated as a method
 improvement.
 
-**2.0 Confirm Model-Side Priority**
+**2.0 Confirm Model-Side Eligibility**
 
-Use the contribution map in Workflow step 1. Give model search high priority
-when architecture or a learned model mechanism is a paper contribution, or when
-paper/reproduction evidence identifies a structural mismatch. The use of a
-simple, complex, or off-the-shelf model does not by itself establish priority.
-Do not default to replacing a simple model with a larger one; require a specific
-structure the current architecture cannot exploit, and compare alternatives at
-approximately matched capacity, compute, and tuning effort.
+Use this section to generate ideas only when architecture or another learned
+model mechanism is part of the paper's main contribution. A structural mismatch
+in a supporting model does not open model search for a representation- or
+training-contribution paper. The use of a simple, complex, or off-the-shelf model
+does not itself establish eligibility. Never replace a supporting model merely
+because another architecture may perform better.
 
 **2.1 Evidence-Controlled Architecture Diagnosis**
 
@@ -432,8 +459,10 @@ Possible implication:
 ```text
 Additional generic model capacity is probably not the primary bottleneck.
 ```
-In that case, prioritize representation, training objective, or a more
-appropriate inductive bias rather than simply scaling the architecture.
+In that case, generic capacity is not the improvement. Search for a more
+appropriate contribution-specific component or inductive bias rather than
+scaling the architecture. Do not switch to representation or training unless it
+is also a main-contribution category.
 
 ---
 
@@ -541,6 +570,11 @@ Training Strategy.
 **Core Question**
 
 > Given the current representation and model, is the training process using the available data efficiently and robustly?
+
+Use this section to generate ideas only when a training mechanism is part of the
+paper's main contribution. Otherwise, training questions may check whether a
+comparison is valid, but a loss, optimizer, sampling, augmentation, or
+pretraining change cannot become a candidate.
 
 
 **3.1 Evaluate the Learning Objective**
@@ -676,7 +710,10 @@ These are usually secondary search directions unless a specific failure mode mot
 
 ### 4. Cross-Module Diagnostic Questions
 
-The strongest ideas often come from reasoning across modules rather than optimizing one component independently.
+Use cross-module reasoning to locate limitations inside the main contribution,
+not to broaden the allowed idea scope. A non-contribution module may be a
+diagnostic, control, or minimum integration dependency, but cannot be the
+candidate's improvement mechanism.
 
 **4.1 Robustness and Shortcut Learning**
 
@@ -687,9 +724,11 @@ Ask:
 - Is it sensitive to measurement noise?
 - Is it exploiting a source-dataset shortcut rather than the intended clinical signal?
 
-Route the remedy by mechanism: preprocessing or encoding is representation;
-an invariance-inducing inference module is model; augmentation, reweighting,
-robust objectives, domain adaptation, or federated optimization is training.
+Route the remedy by mechanism: preprocessing or encoding is representation; an
+invariance-inducing inference module is model; augmentation, reweighting, robust
+objectives, domain adaptation, or federated optimization is training. Retain the
+remedy as a candidate only when the routed category is part of the main
+contribution.
 
 Key question:
 > What dataset-specific correlation could the model be using instead of the intended clinical signal?
@@ -732,6 +771,9 @@ discarded, distorted, or underweighted.
 Before proposing an improvement, ask:
 
 > If this component became perfect, could performance meaningfully improve?
+
+Bottleneck analysis may eliminate a candidate direction, but it never makes an
+unrelated, non-contribution direction eligible.
 
 Examples:
 
