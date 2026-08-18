@@ -115,6 +115,46 @@ Search over:
 - model
 - training strategy
 
+Allocate search effort from the paper's claimed methodological contributions,
+not from model complexity alone. Reconstruct each contribution and its supporting
+evidence, then use this map:
+
+- Prioritize **input representation** for a new clinical score, index, biomarker,
+  signature, feature set, or feature-selection/construction method; deterministic
+  signal, image, text, or tabular preprocessing/encoding; temporal trajectories
+  or dynamics; missingness or observation-process encoding; or fixed multimodal
+  alignment and feature fusion. Search for a representation that captures the
+  same clinical construct or available raw information more faithfully.
+- Prioritize **model design** for a new prediction algorithm, architecture,
+  module, ensemble, learned encoder/aggregator/fusion mechanism, prediction head,
+  or inductive bias for temporal, spatial, relational, hierarchical, or
+  cross-modal structure. Search locally around the claimed mechanism: relax a
+  rigid assumption, remove a bottleneck, make it adaptive, or simplify it under
+  comparable resources.
+- Prioritize **training strategy** for a new training target or auxiliary task,
+  loss/objective, calibration or regularization procedure, imbalance or
+  cost-sensitive method, sampling/curriculum, augmentation, optimization,
+  pretraining, transfer, self-supervised, semi-supervised, or multi-task
+  learning, distillation,
+  domain adaptation/generalization, or robustness, fairness, privacy, or
+  federated-learning procedure. Preserve the fixed final prediction target and
+  search for a more aligned, data-efficient, or stable way to learn it.
+
+Classify by the mechanism being changed: features or encodings delivered to the
+predictor are representation; a learnable inference-time structure is model;
+targets, objectives, data exposure, parameter acquisition, and update rules are
+training. Themes such as multimodality, interpretability, clinical knowledge,
+uncertainty, robustness, fairness, privacy, and efficiency may span categories;
+route each concrete mechanism to every category it actually changes.
+
+For a paper with contributions in multiple categories, give substantial search
+effort to all of them, weighted by the paper's claims, ablations, and reproduced
+evidence. Priority is neither an exclusion rule nor a quota of one idea per
+category. For an applied, comparative, or benchmark paper whose novelty is a
+dataset, cohort, task, outcome, evaluation, or clinical validation rather than a
+method, keep that novelty fixed as part of the Paper Anchor and diagnose the
+three allowed categories without inventing a preferred one.
+
 {% if round_index > 1 %}
  Learn from the experience of previous rounds at `{{ prior_rounds_json }}`.
 {% endif %}
@@ -292,6 +332,10 @@ Useful diagnostic:
 
 If not, determine whether that distinction is clinically meaningful.
 
+Fixed time features and summaries are representation changes; a learned
+temporal dependency mechanism is a model change; temporal masking, augmentation,
+or sampling is a training change.
+
 
 **1.5 Missingness and Observation Process**
 
@@ -318,6 +362,10 @@ Important robustness question:
 
 
 **1.6 Multimodal Representation**
+
+Treat fixed alignment, normalization, and feature construction as
+representation; learned fusion or cross-modal interaction as model; and modality
+dropout or partial-modality learning as training.
 
 For multimodal studies, ask:
 - Are modalities fused early, intermediately, or late?
@@ -349,78 +397,31 @@ Ask:
 **Core Question**
 > Given the available representation, does the model architecture correctly exploit the structure needed for the task?
 
-Pure scaling is not the default research direction. For complex model, increasing parameter count, tuning budget, or training time may improve performance, but such gains SHOULD NOT be treated as method improvements.
+Pure scaling is not a method-improvement direction. Increasing parameter count,
+tuning budget, or training time alone SHOULD NOT be treated as a method
+improvement.
 
-**2.0 Set Model-Search Priority by Paper Type**
-Before searching the model space, classify the paper:
+**2.0 Confirm Model-Side Priority**
 
-**Class 1: Low Priority — Simple Off-the-Shelf Model**
-Examples:
-- Linear regression
-- Logistic regression
-- Cox proportional hazards model
-- LASSO / Ridge / Elastic Net
-- Generalized linear models
-- Naive Bayes
-- k-NN
-- Linear / kernel SVM only when data is small
-- Decision tree
-- Shallow random forest
-- Simple gradient boosting with limited depth / trees
-- Classical statistical scoring models
-- PCA + linear classifier
-- Simple rule-based / score-based models
+Use the contribution map in Workflow step 1. Give model search high priority
+when architecture or a learned model mechanism is a paper contribution, or when
+paper/reproduction evidence identifies a structural mismatch. The use of a
+simple, complex, or off-the-shelf model does not by itself establish priority.
+Do not default to replacing a simple model with a larger one; require a specific
+structure the current architecture cannot exploit, and compare alternatives at
+approximately matched capacity, compute, and tuning effort.
 
-In this case, pay less effort in model-search, and prioritize input representation / feature construction.
-However, in this case model could underfit or overfit because the total computation cost is small.
-It is a valid improvement by changing the original simple model with another simple model.
-But do not default to replacing the model with a much larger or more expensive architecture.
-Model replacement is justified mainly when the current model clearly cannot exploit structure
-already present in the inputs.
+**2.1 Evidence-Controlled Architecture Diagnosis**
 
-**Class 2: Medium Priority — Standard Complex Model Without a Novel Model Contribution**
-Examples:
-- Random Forest
-- XGBoost
-- LightGBM
-- CatBoost
-- RBF-SVM
-- kernel methods
-- Gaussian process models
-- MLP
-- standard CNN
-- standard RNN / LSTM / GRU
-- basic autoencoder
-- standard survival forest
-- DeepSurv and other standard neural survival model
-- or other established deep-learning architectures.
-
-Consider architecture replacement when there is a clear structural mismatch.
-Prefer alternatives with approximately comparable capacity, compute, or tuning budget.
-Ask whether a different inductive bias or component design achieves a better performance–compute
-tradeoff rather than whether a larger model performs better.
-
-**Class 3: High Priority — Paper Proposes a New Algorithm or Model Architecture**
-If the paper's contribution is itself a new model, module, objective, or algorithm,
-model-side improvement becomes a primary research direction.
-Take your time and pay more effort in model-search to find potential model-wise improvement.
-
-Treat the proposed mechanism as the local search center.
-
-Preserve the original research problem and core motivation.
-
-Prefer improving, relaxing, simplifying, or better implementing the proposed mechanism over replacing the whole model.
-
-**2.1 Resource-Controlled Model Diagnosis**
-
-Use capacity and convergence questions mainly as sanity checks, not as primary idea-generation prompts.
+Use model comparisons and component ablations to localize an architectural
+bottleneck. Treat convergence, seed sensitivity, and hyperparameter sensitivity
+as training diagnostics.
 
 Ask:
-- Has the reported model been trained sufficiently for the comparison to be meaningful?
-- Is validation performance still improving at the end of training?
-- Are results stable across seeds and reasonable hyperparameter choices?
-- Are proposed gains larger than ordinary tuning / training variance?
+- Do matched baselines or ablations isolate an architectural limitation?
+- What known structure is present in the inputs but unusable by the current model?
 - Under approximately matched compute, parameter count, and tuning effort, is the current architecture using the available information efficiently?
+- Which encoder, aggregation, interaction, or prediction component is the likely bottleneck?
 - Can a structural change improve the performance–compute tradeoff?
 
 Useful diagnostic:
@@ -431,7 +432,8 @@ Possible implication:
 ```text
 Additional generic model capacity is probably not the primary bottleneck.
 ```
-In that case, prioritize representation, objective, or a more appropriate inductive bias rather than simply scaling the architecture.
+In that case, prioritize representation, training objective, or a more
+appropriate inductive bias rather than simply scaling the architecture.
 
 ---
 
@@ -476,9 +478,11 @@ Prefer improvements that modify **one clearly diagnosed component**.
 **2.4 Improve a Proposed Novel Algorithm / Architecture**
 If the paper proposes its own new model or algorithm, explicitly reconstruct:
 
-problem:
- - claimed mechanism
- - implementation
+```text
+claimed problem
+→ proposed mechanism
+→ implementing component
+```
 
 Then ask:
 - What exact limitation is the new method intended to solve?
@@ -495,7 +499,7 @@ Then ask:
 
 Preferred improvement types:
 
-better implementation of the same mechanism
+- better implementation of the same mechanism
 - relax a strong assumption
 - make a rigid component adaptive
 - remove an information bottleneck
@@ -509,38 +513,7 @@ Is the paper's core idea useful but incompletely, rigidly, or inefficiently impl
 This is a **high-priority** search direction because it preserves the original paper's research motivation, maximizes code reuse, and allows targeted ablation of the proposed mechanism.
 
 
-**2.5 Evaluate the Learning Objective**
-
-Ask:
-- Why is this loss used?
-- Does the optimized objective match the clinical objective?
-- Is class imbalance important?
-- Are false positives and false negatives equally costly?
-- Is a survival endpoint being reduced to binary classification?
-- Is an ordinal outcome being treated incorrectly?
-- Would ranking be more important than probability accuracy?
-- Is calibration clinically important?
-- Are multiple related outcomes available for multi-task learning?
-- Should auxiliary objectives be used?
-
-Examples:
-
-```text
-binary cross-entropy
-→ cost-sensitive loss
-→ focal loss
-→ ranking objective
-→ survival objective
-→ multi-task objective
-```
-
-Key question:
-
-> Is the paper optimizing what is mathematically convenient, or what actually matters for the task?
-
----
-
-**2.6 Incorporate Known Structure or Constraints**
+**2.5 Incorporate Known Structure or Constraints**
 
 Ask:
 - Is monotonicity known for some variables?
@@ -551,29 +524,16 @@ Ask:
 - Are relationships among diagnoses, medications, and procedures known?
 - Could structural constraints reduce sample complexity or improve robustness?
 
-Potential methods:
-- monotonic models
+Potential architecture-side methods:
+- monotonic layers or models
 - hierarchy-aware encoders
 - graph models
-- constrained optimization
-- physiology-informed regularization
+- constraint-respecting modules
 - ontology-aware embeddings
 
-
-**2.7 Robustness and Shortcut Learning**
-
-Ask:
-- Which subgroups perform poorly?
-- Is performance stable across age, sex, disease severity, or other clinically relevant strata?
-- Does the model fail under missingness shift?
-- Does it fail under temporal shift?
-- Does it fail across hospitals?
-- Does it depend on device / scanner / protocol artifacts?
-- Is it sensitive to measurement noise?
-- Is it exploiting shortcuts specific to the source dataset?
-
-Key question:
-> What dataset-specific correlation could the model be using instead of the intended clinical signal?
+If the structure is imposed through a loss, regularizer, or constrained
+optimization procedure rather than inference-time architecture, route it to
+Training Strategy.
 
 
 ### 3. Training Strategy
@@ -583,7 +543,36 @@ Key question:
 > Given the current representation and model, is the training process using the available data efficiently and robustly?
 
 
-**3.1 Sample Efficiency**
+**3.1 Evaluate the Learning Objective**
+
+Ask:
+- Why is this loss used?
+- Does the optimized objective align with the frozen prediction task and primary evaluation protocol?
+- Can censoring, ordinality, ranking, calibration, or asymmetric clinical costs be modeled better while preserving the final target, horizon, and evaluator-facing output?
+- Is class imbalance important?
+- Are multiple related labels available for auxiliary or multi-task supervision?
+- Could an auxiliary objective improve learning without using unavailable prediction-time information?
+
+Examples:
+
+```text
+binary cross-entropy
+→ cost-sensitive loss
+→ focal loss
+→ ranking objective
+→ survival-aware objective
+→ auxiliary or multi-task objective
+```
+
+Key question:
+
+> Is the paper optimizing what is convenient, or what best supports the fixed prediction task?
+
+Do not change the frozen final outcome, horizon, evaluator-facing output, or
+evaluation protocol to make a new objective applicable.
+
+
+**3.2 Supervision and Sample Efficiency**
 
 Ask:
 - How large is the labeled dataset?
@@ -593,7 +582,10 @@ Ask:
 - Is self-supervised learning appropriate?
 - Is transfer learning possible?
 - Are related tasks available for multi-task learning?
-- Is pretraining available for the modality?
+- Is domain-specific pretraining available for the modality?
+- How large is the source-to-downstream domain shift?
+- Does the pretraining objective align with the downstream task?
+- Which components should be frozen or fine-tuned?
 
 Potential approaches:
 - self-supervised pretraining
@@ -602,7 +594,10 @@ Potential approaches:
 - multi-task learning
 - semi-supervised learning
 
-**3.2 Class Imbalance**
+Declare external pretraining as training strategy and exclude evaluation
+examples, outcome leakage, and information unavailable at prediction time.
+
+**3.3 Class Imbalance**
 
 Ask:
 - What is the outcome prevalence?
@@ -615,7 +610,7 @@ Ask:
 
 Treat simple imbalance handling as an engineering improvement unless it supports a broader methodological hypothesis.
 
-**3.3 Data Augmentation**
+**3.4 Data Augmentation**
 
 Ask:
 - Which transformations should preserve the label?
@@ -649,7 +644,7 @@ Key question:
 > Which transformations preserve the clinically relevant semantics?
 
 
-**3.4 Optimization Stability**
+**3.5 Optimization Stability**
 
 Ask:
 - Is performance sensitive to random seed?
@@ -661,20 +656,6 @@ Ask:
 - Are reported gains larger than run-to-run variance?
 
 A method improvement should not rely on a single favorable run.
-
-
-
-**3.5 Pretraining and Transfer**
-
-Ask:
-- Is there a larger external dataset with the same modality?
-- Is domain-specific pretraining available?
-- How large is the domain shift?
-- Does the pretraining objective align with the downstream task?
-- Should only part of the model be fine-tuned?
-- Would source-domain bias hurt downstream performance?
-
-
 **3.6 Sampling and Curriculum**
 
 Ask:
@@ -697,10 +678,29 @@ These are usually secondary search directions unless a specific failure mode mot
 
 The strongest ideas often come from reasoning across modules rather than optimizing one component independently.
 
-**4.1 Where Is Information Lost?**
+**4.1 Robustness and Shortcut Learning**
 
-Trace the full pipeline:
+Ask:
+- Which subgroups perform poorly?
+- Is performance stable across age, sex, disease severity, or other clinically relevant strata?
+- Does the model fail under missingness, temporal, hospital, device, scanner, or protocol shift?
+- Is it sensitive to measurement noise?
+- Is it exploiting a source-dataset shortcut rather than the intended clinical signal?
+
+Route the remedy by mechanism: preprocessing or encoding is representation;
+an invariance-inducing inference module is model; augmentation, reweighting,
+robust objectives, domain adaptation, or federated optimization is training.
+
+Key question:
+> What dataset-specific correlation could the model be using instead of the intended clinical signal?
+
+
+**4.2 Where Is Information Lost?**
+
+Trace both paths:
+
 ```text
+prediction path:
 raw patient data
 ↓
 preprocessing
@@ -709,19 +709,25 @@ representation
 ↓
 model
 ↓
-objective
-↓
 prediction
+
+training path:
+training examples + targets
+↓ sampling / augmentation
+model outputs + targets
+↓ loss / objective
+parameter updates
 ```
 
-At every transition ask:
+On the prediction path ask:
 
 > What information exists before this step but is no longer available afterward?
 
-This is one of the most general and useful research questions.
+On the training path ask which examples, errors, or clinical priorities are
+discarded, distorted, or underweighted.
 
 
-**4.2 Where Is the Actual Bottleneck?**
+**4.3 Where Is the Actual Bottleneck?**
 
 Before proposing an improvement, ask:
 
@@ -752,13 +758,14 @@ image-only ≈ multimodal
 all models perform poorly
 ```
 
-→ input signal or task formulation may be limiting.
+→ the available input signal may be limiting; do not change the fixed task to
+escape that limitation.
 
 Do not improve components simply because they are replaceable.
 
 ---
 
-**4.3 What Is the Strongest Questionable Assumption?**
+**4.4 What Is the Strongest Questionable Assumption?**
 
 Every pipeline contains implicit assumptions.
 
@@ -796,12 +803,16 @@ Assumption:
 
 > Cross-modal interaction can be captured adequately after independent encoding.
 
+The frozen split and evaluation protocol cannot be changed. Use a questionable
+evaluation assumption only to motivate an allowed representation, model, or
+training remedy within that protocol.
+
 Strong research ideas often come from:
 
 > Identify the strongest questionable assumption and relax it.
 
 
-**4.4 Why Should the Modification Work?**
+**4.5 Why Should the Modification Work?**
 
 Every candidate idea should contain an explicit mechanism:
 
@@ -824,7 +835,7 @@ Template:
 If the mechanism cannot be stated clearly, the idea is probably arbitrary model swapping.
 
 
-**4.5 What Is the Smallest Principled Intervention?**
+**4.6 What Is the Smallest Principled Intervention?**
 
 Ask:
 - Can the hypothesis be tested without redesigning the entire pipeline?
@@ -844,7 +855,7 @@ one diagnosis
 over large-scale pipeline replacement.
 
 
-**4.6 What Experiment Could Falsify the Hypothesis?**
+**4.7 What Experiment Could Falsify the Hypothesis?**
 
 Do not ask only:
 
