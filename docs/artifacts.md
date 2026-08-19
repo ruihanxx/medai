@@ -39,6 +39,7 @@ runs/<run_id>/
 ├── prompts/
 │   ├── audit_attempt_001.md
 │   ├── audit_attempt_001_resume_001.md  # incomplete direct-Codex audit only
+│   ├── <stage>_validation_resume_001.md  # bounded direct-Codex artifact repair
 │   ├── cohort_refine_attempt_001.md  # only after a failed audit
 │   ├── codegen_cloud_pull_command.schema.json  # opted-in cloud handoff only
 │   ├── codegen_cloud_pull_resume_001.md
@@ -225,6 +226,12 @@ temporary session. Resumed events append to the attempt transcript and reuse
 the existing scripts, results, and remote process; they do not create another
 scientific audit attempt. A valid report is the only successful completion
 artifact.
+
+For other direct-Codex Replicate Agent stages, a failed owned-artifact check
+creates `prompts/<stage>_validation_resume_<NNN>.md`. The prompt records the
+exact validation error and canonical artifact paths, and resumed events append
+to the original stage transcript. At most two repair turns occur in one stage
+invocation; failed checks remain visible even when a later repair succeeds.
 
 Each successful cohort-refinement round retains its transcript in a numbered
 attempt directory. A provider retry reuses the same directory and transcript

@@ -41,6 +41,10 @@ planning; local and cloud permission boundaries; same-round technical retries;
 same-session direct-Codex recovery when a successful turn omits its report; and
 codegen remaining a single scientific stage.
 
+Replicate Agent artifact-repair mocks cover a rejected plan that resumes the
+same direct-Codex session, appends its transcript, persists the exact validation
+error in a repair prompt, and completes only after full claim/artifact coverage.
+
 Auto Research mocks cover input-representation, model, and training-strategy
 implementation plans; declared changed-file boundaries; preservation of data,
 final prediction target, evaluator-facing output, and evaluation contracts; and

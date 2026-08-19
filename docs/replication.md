@@ -74,6 +74,16 @@ and these artifact-driven resumes remain inside the same scientific audit
 attempt and refinement count. Other providers retain one-turn audit behavior
 and fail immediately when their returned report is missing or invalid.
 
+The other direct-Codex Agent stages use the same artifact-driven completion
+rule. Preprocessing, final codegen validation, cohort refinement, planning, and
+each per-experiment report validation resume the same temporary session with
+the exact validation error and owned artifact paths. Each stage permits at most
+two repair turns, preserves valid work, and prohibits repeating completed
+experiments, data transfers, provider provisioning, or lifecycle actions merely
+to repair an artifact contract. Other providers retain one-turn behavior and
+fail immediately on invalid artifacts. Completed-stage validation during an
+explicit CLI resume does not reuse a process-local session.
+
 Each workflow node prints `enter <stage> stage` to standard output immediately
 when it starts.
 

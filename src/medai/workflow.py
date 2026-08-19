@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -39,6 +40,7 @@ from medai.providers import run_agent
 from medai.resources import detect_resources
 
 MAX_COHORT_REFINE_ROUNDS = 3
+MAX_AGENT_ARTIFACT_REPAIR_TURNS = 2
 
 
 class WorkflowState(TypedDict, total=False):
@@ -57,6 +59,69 @@ class WorkflowState(TypedDict, total=False):
 
 def skills_dir() -> Path:
     return _skills_dir()
+
+
+def _validate_agent_artifacts_with_resume(
+    *,
+    config: RunConfig,
+    stage_name: str,
+    session_id: str | None,
+    working_dir: Path,
+    transcript_path: Path,
+    artifact_paths: list[Path],
+    validate: Callable[[], object],
+) -> None:
+    """Resume a direct Codex stage when its owned artifacts fail validation."""
+    repair_turns = 0
+    prompt_index = 1
+    while True:
+        try:
+            validate()
+            return
+        except (OSError, RuntimeError, ValueError) as exc:
+            if config.provider != "codex":
+                raise
+            if session_id is None:
+                raise RuntimeError(
+                    f"Codex {stage_name} artifacts failed validation without a session ID"
+                ) from exc
+            if repair_turns >= MAX_AGENT_ARTIFACT_REPAIR_TURNS:
+                raise RuntimeError(
+                    f"{stage_name} artifacts still failed validation after "
+                    f"{MAX_AGENT_ARTIFACT_REPAIR_TURNS} resumed repair turns: {exc}"
+                ) from exc
+
+            resume_prompt_path = (
+                config.output
+                / "prompts"
+                / f"{stage_name}_validation_resume_{prompt_index:03d}.md"
+            )
+            while resume_prompt_path.exists():
+                prompt_index += 1
+                resume_prompt_path = (
+                    config.output
+                    / "prompts"
+                    / f"{stage_name}_validation_resume_{prompt_index:03d}.md"
+                )
+            render_prompt(
+                "replication/artifact_validation_resume.md",
+                resume_prompt_path,
+                stage_name=stage_name,
+                artifact_paths=artifact_paths,
+                artifact_validation_error=str(exc),
+            )
+            run_agent(
+                provider=config.provider,
+                prompt_path=resume_prompt_path,
+                working_dir=working_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                resume_session_id=session_id,
+            )
+            repair_turns += 1
+            prompt_index += 1
 
 
 def resolve_replication_output(
@@ -503,7 +568,7 @@ def _run_codegen_cloud_pull_handoff(
     codebase_dir: Path,
     prompt_path: Path,
     transcript_path: Path,
-) -> None:
+) -> str:
     """Pause one Codex session while local orchestration monitors cloud materialization."""
     command_dir = config.output / "codegen" / "cloud_pull" / "commands"
     command_dir.mkdir(parents=True, exist_ok=True)
@@ -589,6 +654,7 @@ def _run_codegen_cloud_pull_handoff(
         codex_reasoning_effort=config.codex_reasoning_effort,
         resume_session_id=session_id,
     )
+    return session_id
 
 
 def _run_has_remote_plan(config: RunConfig) -> bool:
@@ -929,14 +995,20 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     claims_path = config.output / "preprocessing" / "claims.json"
     experiments_path = config.output / "preprocessing" / "experiment_todo.json"
     transcript_path = config.output / "preprocessing" / "preprocessing_transcript.jsonl"
-    if pipeline_state.is_stage_completed("preprocessing_agent"):
-        if not paper_markdown.is_file() or not paper_markdown.read_text(encoding="utf-8").strip():
+
+    def validate_outputs() -> None:
+        if not paper_markdown.is_file() or not paper_markdown.read_text(
+            encoding="utf-8"
+        ).strip():
             raise RuntimeError(
-                f"Completed preprocessing paper artifact is missing or empty: {paper_markdown}"
+                f"Preprocessing agent left paper artifact missing or empty: {paper_markdown}"
             )
         claims = load_model(claims_path, ClaimsFile)
         experiments = load_model(experiments_path, ExperimentTodo)
         validate_experiment_coverage(claims, experiments)
+
+    if pipeline_state.is_stage_completed("preprocessing_agent"):
+        validate_outputs()
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed preprocessing transcript is missing: {transcript_path}")
         print("resume preprocessing_agent stage: skipped (already completed)")
@@ -956,7 +1028,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         claims_path=claims_path,
         experiments_path=experiments_path,
     )
-    run_agent(
+    session_id = run_agent(
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=config.output / "preprocessing",
@@ -965,13 +1037,15 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    if not paper_markdown.is_file() or not paper_markdown.read_text(encoding="utf-8").strip():
-        raise RuntimeError(
-            f"Preprocessing agent left paper artifact missing or empty: {paper_markdown}"
-        )
-    claims = load_model(claims_path, ClaimsFile)
-    experiments = load_model(experiments_path, ExperimentTodo)
-    validate_experiment_coverage(claims, experiments)
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name="preprocessing_agent",
+        session_id=session_id,
+        working_dir=config.output / "preprocessing",
+        transcript_path=transcript_path,
+        artifact_paths=[paper_markdown, claims_path, experiments_path],
+        validate=validate_outputs,
+    )
     pipeline_state.complete_stage(
         "preprocessing_agent",
         [
@@ -1007,7 +1081,8 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     skill_corrections_path = config.output / "system_maintenance" / "skills" / "corrections.json"
     completed_run_validation = pipeline_state.is_stage_completed("report_agents")
     infrastructure_resume = bool(codegen_checkpoints.get("infrastructure_resume"))
-    if pipeline_state.is_stage_completed("codegen_agent"):
+
+    def validate_outputs(*, require_active: bool = True) -> None:
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
         codegen_plan = load_model(codegen_plan_path, CodegenPlan)
@@ -1017,10 +1092,13 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             cloud_dataset=config.cloud_dataset if config.clouddrive else None,
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
-            require_active=not completed_run_validation,
+            require_active=require_active,
         )
         load_model(dataset_patch_path, DatasetPatchFile)
         load_model(skill_corrections_path, SkillCorrectionsFile)
+
+    if pipeline_state.is_stage_completed("codegen_agent"):
+        validate_outputs(require_active=not completed_run_validation)
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed codegen transcript is missing: {transcript_path}")
         print("resume codegen_agent stage: skipped (already completed)")
@@ -1081,14 +1159,14 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         resuming=previous_status in {"running", "failed", "invalidated"},
     )
     if cloud_pull_handoff and not _cloud_drive_materialization_completed(config):
-        _run_codegen_cloud_pull_handoff(
+        session_id = _run_codegen_cloud_pull_handoff(
             config=config,
             codebase_dir=codebase_dir,
             prompt_path=prompt_path,
             transcript_path=transcript_path,
         )
     else:
-        run_agent(
+        session_id = run_agent(
             provider=config.provider,
             prompt_path=prompt_path,
             working_dir=codebase_dir,
@@ -1097,16 +1175,20 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             codex_model=config.codex_model,
             codex_reasoning_effort=config.codex_reasoning_effort,
         )
-    codegen_plan = load_model(codegen_plan_path, CodegenPlan)
-    validate_codegen_remote_compute(
-        codegen_plan,
-        computation_provider_state_path,
-        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
-        drive_provider=config.drive_provider,
-        computation_provider=config.computation_provider,
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name="codegen_agent",
+        session_id=session_id,
+        working_dir=codebase_dir,
+        transcript_path=transcript_path,
+        artifact_paths=[
+            codebase_dir,
+            codegen_plan_path,
+            dataset_patch_path,
+            skill_corrections_path,
+        ],
+        validate=validate_outputs,
     )
-    load_model(dataset_patch_path, DatasetPatchFile)
-    load_model(skill_corrections_path, SkillCorrectionsFile)
     pipeline_state.complete_stage(
         "codegen_agent",
         [
@@ -1370,7 +1452,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         refine_round=refine_round,
         resuming=previous_status in {"running", "failed"},
     )
-    run_agent(
+    session_id = run_agent(
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=codebase_dir,
@@ -1379,7 +1461,15 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    load_model(codegen_plan_path, CodegenPlan)
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name=f"cohort_refine_attempt_{refine_round:03d}",
+        session_id=session_id,
+        working_dir=codebase_dir,
+        transcript_path=transcript_path,
+        artifact_paths=[codegen_plan_path],
+        validate=lambda: load_model(codegen_plan_path, CodegenPlan),
+    )
     pipeline_state.update_stage_checkpoints(
         "cohort_refine_agent",
         {
@@ -1401,7 +1491,8 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     transcript_path = config.output / "plan" / "plan_transcript.jsonl"
     claims = load_model(Path(state["claims_path"]), ClaimsFile)
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
-    if pipeline_state.is_stage_completed("plan_agent"):
+
+    def validate_outputs() -> None:
         plan = load_model(replicate_plan_path, ReplicationPlan)
         validate_replication_plan(experiments, plan)
         validate_codegen_remote_compute(
@@ -1412,6 +1503,9 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
             computation_provider=config.computation_provider,
             require_active=not pipeline_state.is_stage_completed("report_agents"),
         )
+
+    if pipeline_state.is_stage_completed("plan_agent"):
+        validate_outputs()
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed plan transcript is missing: {transcript_path}")
         print("resume plan_agent stage: skipped (already completed)")
@@ -1441,7 +1535,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         experiments=experiments.model_dump(mode="json"),
         gpu_info=resources["gpus"],
     )
-    run_agent(
+    session_id = run_agent(
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=Path(state["codebase_dir"]),
@@ -1450,15 +1544,14 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    plan = load_model(replicate_plan_path, ReplicationPlan)
-    validate_replication_plan(experiments, plan)
-    validate_codegen_remote_compute(
-        plan,
-        config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
-        drive_provider=config.drive_provider,
-        computation_provider=config.computation_provider,
-        require_active=not pipeline_state.is_stage_completed("report_agents"),
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name="plan_agent",
+        session_id=session_id,
+        working_dir=Path(state["codebase_dir"]),
+        transcript_path=transcript_path,
+        artifact_paths=[replicate_plan_path],
+        validate=validate_outputs,
     )
     pipeline_state.complete_stage(
         "plan_agent",
@@ -1590,7 +1683,23 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
                 continue
             break
     else:
-        run_agent(
+        is_final_experiment = (
+            experiment.experiment_id == experiments.experiments[-1].experiment_id
+        )
+
+        def validate_outputs() -> None:
+            if not report_path.is_file() or not report_path.read_text(
+                encoding="utf-8"
+            ).strip():
+                raise RuntimeError(
+                    f"Report agent did not write the shared report: {report_path}"
+                )
+            report_text = report_path.read_text(encoding="utf-8")
+            validate_report_experiment(report_text, claims, experiment, codegen_plan)
+            if is_final_experiment:
+                validate_reproduction_report(report_text, claims, experiments, codegen_plan)
+
+        session_id = run_agent(
             provider=config.provider,
             prompt_path=prompt_path,
             working_dir=Path(state["codebase_dir"]),
@@ -1710,13 +1819,14 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             codex_model=config.codex_model,
             codex_reasoning_effort=config.codex_reasoning_effort,
         )
-        if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
-            raise RuntimeError(f"Report agent did not write the shared report: {report_path}")
-        validate_report_experiment(
-            report_path.read_text(encoding="utf-8"),
-            claims,
-            experiment,
-            codegen_plan,
+        _validate_agent_artifacts_with_resume(
+            config=config,
+            stage_name=f"report_{experiment.experiment_id}",
+            session_id=session_id,
+            working_dir=config.output,
+            transcript_path=transcript_path,
+            artifact_paths=[report_path],
+            validate=validate_outputs,
         )
         completed_experiments.add(experiment.experiment_id)
         pipeline_state.update_stage_checkpoints(
@@ -1729,8 +1839,6 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
                 ]
             },
         )
-    report_text = report_path.read_text(encoding="utf-8")
-    validate_reproduction_report(report_text, claims, experiments, codegen_plan)
     pipeline_state.complete_stage(
         "report_agents",
         [str(report_path), *transcript_paths],

@@ -10,6 +10,7 @@ from medai.prompts import render_prompt
 from medai.workflow import (
     codegen_agent_node,
     create_workflow,
+    plan_agent_node,
     power_off_run_computation_instance,
     preflight_node,
     prepare_autoresearch_resume,
@@ -111,6 +112,127 @@ def _write_replication_log(path: Path, output_file: str) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def test_plan_agent_resumes_same_codex_session_after_validation_failure(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = _replicate_config(tmp_path)
+    PipelineState.create(config.output, {"provider": "codex"})
+    preprocessing_dir = config.output / "preprocessing"
+    preprocessing_dir.mkdir(parents=True)
+    paper_markdown = preprocessing_dir / "paper.md"
+    paper_markdown.write_text("# Paper\n", encoding="utf-8")
+    claims_path = preprocessing_dir / "claims.json"
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "statement": "Accuracy is reported.",
+                        "role": "final",
+                        "kind": "numeric",
+                        "paper_result": 0.9,
+                        "provenance": {
+                            "page": 1,
+                            "section": "Results",
+                            "quote": "Accuracy was 0.9.",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    experiments_path = preprocessing_dir / "experiment_todo.json"
+    experiments_path.write_text(
+        json.dumps(
+            {
+                "experiments": [
+                    {
+                        "experiment_id": "E1",
+                        "description": "Train and evaluate.",
+                        "computational_demand": "CPU",
+                        "claims": ["C1"],
+                        "artifacts": ["Figure S2"],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    resources_path = config.output / "preflight" / "resources.json"
+    resources_path.parent.mkdir(parents=True)
+    resources_path.write_text(json.dumps({"gpus": []}), encoding="utf-8")
+    codebase_dir = config.output / "codegen" / "codebase"
+    codebase_dir.mkdir(parents=True)
+    replicate_plan_path = config.output / "plan" / "replicate_plan.json"
+    calls: list[dict[str, object]] = []
+
+    def write_plan(verifies: list[str]) -> None:
+        replicate_plan_path.parent.mkdir(parents=True, exist_ok=True)
+        replicate_plan_path.write_text(
+            json.dumps(
+                {
+                    "environment": {
+                        "language": "Python",
+                        "key_dependencies": [],
+                        "setup_hints": "none",
+                    },
+                    "steps": [
+                        {
+                            "id": step_id,
+                            "description": f"Step {step_id}.",
+                            "command_hint": "python run.py",
+                            "expected_outcome": "metric",
+                            "verifies": verifies if step_id == 3 else [],
+                        }
+                        for step_id in (1, 2, 3)
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def incomplete_then_repairs(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("resume_session_id"):
+            prompt_text = kwargs["prompt_path"].read_text(encoding="utf-8")
+            assert "missing references: ['Figure S2']" in prompt_text
+            assert str(replicate_plan_path) in prompt_text
+            write_plan(["C1", "Figure S2"])
+        else:
+            write_plan(["C1"])
+        mode = "a" if kwargs.get("resume_session_id") else "w"
+        kwargs["transcript_path"].parent.mkdir(parents=True, exist_ok=True)
+        with kwargs["transcript_path"].open(mode, encoding="utf-8") as transcript:
+            transcript.write('{"type":"turn.completed"}\n')
+        return "plan-thread-123"
+
+    monkeypatch.setattr("medai.workflow.run_agent", incomplete_then_repairs)
+
+    result = plan_agent_node(
+        {
+            "config": config,
+            "paper_markdown": str(paper_markdown),
+            "resources_path": str(resources_path),
+            "claims_path": str(claims_path),
+            "experiments_path": str(experiments_path),
+            "codebase_dir": str(codebase_dir),
+        }
+    )
+
+    assert result == {"replicate_plan_path": str(replicate_plan_path)}
+    assert len(calls) == 2
+    assert calls[1]["resume_session_id"] == "plan-thread-123"
+    assert (
+        config.output / "prompts" / "plan_agent_validation_resume_001.md"
+    ).is_file()
+    transcript = config.output / "plan" / "plan_transcript.jsonl"
+    assert transcript.read_text(encoding="utf-8").count("turn.completed") == 2
+    assert PipelineState(config.output).is_stage_completed("plan_agent")
 
 
 def test_cloud_drive_preflight_accepts_remote_only_data(tmp_path: Path, monkeypatch):
