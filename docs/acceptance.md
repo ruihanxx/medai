@@ -38,7 +38,8 @@ the former combined error field; exhaustive issue-accumulation, root-cause, and
 feature-propagation prompt requirements; legacy Markdown verdict reads;
 audit-to-cohort-refinement routing; three-round exhaustion that continues to
 planning; local and cloud permission boundaries; same-round technical retries;
-and codegen remaining a single scientific stage.
+same-session direct-Codex recovery when a successful turn omits its report; and
+codegen remaining a single scientific stage.
 
 Auto Research mocks cover input-representation, model, and training-strategy
 implementation plans; declared changed-file boundaries; preservation of data,

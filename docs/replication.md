@@ -64,6 +64,16 @@ automatic stage failure. This session is intentionally temporary: an explicit
 CLI resume still archives and restarts the replication attempt as described
 below.
 
+For a direct-Codex preprocessing audit, a successfully returned agent turn is
+not stage completion by itself. Orchestration validates the attempt's compact
+`audit_report.json`; a missing or invalid report resumes the same temporary
+Codex session with the validation error and existing audit context. The resumed
+agent must inspect and continue any process it already launched instead of
+starting duplicate work. Initial and resumed turns append to one transcript,
+and these artifact-driven resumes remain inside the same scientific audit
+attempt and refinement count. Other providers retain one-turn audit behavior
+and fail immediately when their returned report is missing or invalid.
+
 Each workflow node prints `enter <stage> stage` to standard output immediately
 when it starts.
 

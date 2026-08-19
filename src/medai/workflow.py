@@ -1212,7 +1212,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         remote_compute_active=(config.output / "remote_compute" / "instance.json").is_file(),
         resuming=previous_audit_status in {"running", "failed"},
     )
-    run_agent(
+    session_id = run_agent(
         provider=config.provider,
         prompt_path=prompt_path,
         working_dir=attempt_dir,
@@ -1221,7 +1221,52 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    verdict = read_audit_verdict(report_path)
+    resume_index = 1
+    while True:
+        try:
+            verdict = read_audit_verdict(report_path)
+            break
+        except RuntimeError as exc:
+            if config.provider != "codex":
+                raise
+            if session_id is None:
+                raise RuntimeError(
+                    "Codex audit turn returned without a valid report or session ID"
+                ) from exc
+            resume_prompt_path = (
+                config.output
+                / "prompts"
+                / f"audit_attempt_{scientific_attempt:03d}_resume_{resume_index:03d}.md"
+            )
+            while resume_prompt_path.exists():
+                resume_index += 1
+                resume_prompt_path = (
+                    config.output
+                    / "prompts"
+                    / f"audit_attempt_{scientific_attempt:03d}_resume_{resume_index:03d}.md"
+                )
+            render_prompt(
+                "cohort_refine/audit_resume_instructions.md",
+                resume_prompt_path,
+                artifact_validation_error=str(exc),
+                report_path=report_path,
+                results_dir=results_dir,
+                remote_audit_dir=remote_audit_dir,
+                remote_compute_state_path=(
+                    config.output / "remote_compute" / "instance.json"
+                ),
+            )
+            run_agent(
+                provider=config.provider,
+                prompt_path=resume_prompt_path,
+                working_dir=attempt_dir,
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+                resume_session_id=session_id,
+            )
+            resume_index += 1
     checkpoint = {
         "audited_codegen_attempt": codegen_attempt,
         "audited_refine_round": completed_refine_round,

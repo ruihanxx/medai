@@ -38,6 +38,7 @@ runs/<run_id>/
 ├── report/<experiment_id>_transcript.jsonl
 ├── prompts/
 │   ├── audit_attempt_001.md
+│   ├── audit_attempt_001_resume_001.md  # incomplete direct-Codex audit only
 │   ├── cohort_refine_attempt_001.md  # only after a failed audit
 │   ├── codegen_cloud_pull_command.schema.json  # opted-in cloud handoff only
 │   ├── codegen_cloud_pull_resume_001.md
@@ -217,6 +218,13 @@ empty issue list and `FAIL` requires the complete accumulated set of distinct
 actionable issues, with at least one issue. Legacy Markdown reports retain
 read-only verdict compatibility. Audit reports are stage artifacts and do not
 change the reproduction report's three-section contract.
+
+For direct Codex, a missing or invalid compact report after a successful agent
+turn creates `prompts/audit_attempt_<NNN>_resume_<NNN>.md` and resumes the same
+temporary session. Resumed events append to the attempt transcript and reuse
+the existing scripts, results, and remote process; they do not create another
+scientific audit attempt. A valid report is the only successful completion
+artifact.
 
 Each successful cohort-refinement round retains its transcript in a numbered
 attempt directory. A provider retry reuses the same directory and transcript

@@ -19,7 +19,9 @@ reference.
   `templates/autoresearch/<stage>/`, and runtime skills under
   `templates/skills/`; none is stored under `src/`. Preprocessing audit and
   cohort refinement use `templates/cohort_refine/audit_session_instructions.md`
-  and `templates/cohort_refine/session_instructions.md`.
+  and `templates/cohort_refine/session_instructions.md`; an incomplete
+  direct-Codex audit resumes with
+  `templates/cohort_refine/audit_resume_instructions.md`.
 - Prompts are rendered with Jinja2 and persisted before invocation. Their
   canonical output paths are defined in `artifacts.md`.
 - Every invocation preserves its provider event stream as a JSONL transcript
@@ -37,6 +39,7 @@ temporary session across explicit orchestration handoffs:
 | Replication | `{"command":"<non-empty bash command>"}` | Run the foreground command locally, persist its result, validate canonical artifacts, and resume only when validation requires another turn. |
 | Opted-in cloud codegen or Auto Research planning | `{"command":"<non-empty bash command>"}` | After agent-owned preparation and power-off, run the foreground cloud monitor locally, validate cloud state, and resume the same session. |
 | Remote Auto Research experiment | One `remote_exec` or `download` operation | Select and prepare a campaign instance, execute the provider operation, persist its result, power off, validate local artifacts, and resume only when required. |
+| Preprocessing audit | Compact `audit_report.json` written in the attempt | Validate the report after every successful direct-Codex turn; if it is missing or invalid, resume the same session so existing local or remote work can finish. |
 
 Initial and resumed turns in one temporary session append to the same
 transcript. Explicit CLI resume preserves command artifacts but never reuses a

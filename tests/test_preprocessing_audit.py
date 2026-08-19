@@ -263,6 +263,52 @@ def test_audit_provider_retry_reuses_scientific_attempt(
     assert [path.name for path in audit_root.iterdir()] == ["attempt_001"]
 
 
+def test_codex_audit_resumes_same_session_until_report_validates(
+    tmp_path: Path,
+    monkeypatch,
+):
+    state = _audit_state(tmp_path)
+    config = state["config"]
+    assert isinstance(config, RunConfig)
+    calls: list[dict[str, object]] = []
+
+    def incomplete_then_passes(**kwargs):
+        calls.append(kwargs)
+        transcript_path = kwargs["transcript_path"]
+        mode = "a" if kwargs.get("resume_session_id") else "w"
+        with transcript_path.open(mode, encoding="utf-8") as transcript:
+            transcript.write('{"type":"turn.completed"}\n')
+        if kwargs.get("resume_session_id"):
+            (kwargs["working_dir"] / "audit_report.json").write_text(
+                json.dumps({"verdict": "PASS", "issues": []}),
+                encoding="utf-8",
+            )
+        return "audit-thread-123"
+
+    monkeypatch.setattr("medai.workflow.run_agent", incomplete_then_passes)
+
+    result = audit_agent_node(state)
+
+    assert result["audit_verdict"] == "PASS"
+    assert len(calls) == 2
+    assert calls[0].get("resume_session_id") is None
+    assert calls[1]["resume_session_id"] == "audit-thread-123"
+    resume_prompt = (
+        config.output / "prompts" / "audit_attempt_001_resume_001.md"
+    )
+    prompt_text = resume_prompt.read_text(encoding="utf-8")
+    assert "did not write its report" in prompt_text
+    assert "Inspect the existing audit processes and artifacts" in prompt_text
+    transcript = (
+        config.output
+        / "codegen"
+        / "audit"
+        / "attempt_001"
+        / "audit_transcript.jsonl"
+    )
+    assert transcript.read_text(encoding="utf-8").count("turn.completed") == 2
+
+
 def test_cohort_refine_provider_retry_reuses_round(
     tmp_path: Path,
     monkeypatch,
