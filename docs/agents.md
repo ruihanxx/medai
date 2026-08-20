@@ -92,10 +92,19 @@ foreground operation rather than run inside the agent turn.
 - A Replicate plan agent may edit the copied codebase for setup and smoke-test
   needs but may not change model semantics, introduce reduced or fallback
   plans, or hard-code paper results.
+- Replication receives the paper Markdown as a read-only scientific reference.
+  Before changing model, training, evaluation, or derived-data semantics, it
+  rereads the relevant paper text and implements any stated decision exactly.
+  A confirmed paper omission is resolved only with a medically appropriate,
+  broadly accepted medical-research and data-processing convention suited to
+  the study and supplied data; arbitrary defaults and result-driven changes are
+  prohibited. The paper statement or confirmed omission, decision basis, and
+  semantic effect are recorded with the fix evidence. Source data remains
+  read-only.
 - Replication receives no paper target values by default. Smart Replicate sees
-  only its claim-level audited anchors, not the paper, and records baseline,
-  comparisons, hypotheses, changes, commands, and actual round results in its
-  canonical log.
+  only its claim-level audited anchors in addition to the read-only paper
+  reference, and records baseline, comparisons, hypotheses, changes, commands,
+  and actual round results in its canonical log.
 
 The exhaustive audit decision procedure, cohort-refinement routing, missing
 input failure, and Smart Replicate workflow are defined in `replication.md`.

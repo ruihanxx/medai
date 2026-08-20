@@ -718,6 +718,11 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     replication_prompt = (output / "prompts" / "replicate.md").read_text(encoding="utf-8")
     assert "replication_log.json" in replication_prompt
     assert "evidence_summary.json" in replication_prompt
+    assert str(output / "preprocessing" / "paper.md") in replication_prompt
+    assert "Before changing any scientific semantics" in replication_prompt
+    assert (
+        "broadly accepted medical-research and data-processing convention" in replication_prompt
+    )
     report_prompt = (output / "prompts" / "report_E1.md").read_text(encoding="utf-8")
     assert str(output / "plan" / "replicate_plan.json") in report_prompt
     assert "replication_log.json" in report_prompt

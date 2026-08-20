@@ -25,6 +25,8 @@ A step is only "unreproducible" once distinct strategies have each failed for a 
 
 - **Working directory:** `{{ codebase_dir }}/` — the writable codebase produced by the codegen stage. Keep experiment outputs here.
 - **Replication plan:** `{{ replicate_plan_path }}` (read-only) — execute every step in this plan.
+- **Paper Markdown:** `{{ paper_markdown }}` (read-only) — use it as the
+  scientific source of truth when a fix could change methodology.
 - **Output directory:** `{{ replication_dir }}/` — write each pipeline-managed result here.
 Write only under the working directory and the output directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
 
@@ -49,6 +51,29 @@ The plan and code describe how to run the analysis correctly.
 - **Do not hard-code** reported values, and do not adjust code, seeds, thresholds, or rounding to make your output land on a reported number. 
 - If your result diverges from {% if smart %}a smart-mode anchor{% else %}an expected output shape{% endif %}, that is a finding to investigate and record, never a value to copy into the output.
 - **Setup values are different from results.** Hyperparameters, dataset sizes, version pins, and initial conditions the source *prescribes* tell you how to run — use them. Reported *outcomes* are not targets.
+
+## Scientific-semantic change gate
+
+Before changing any scientific semantics—including model architecture or
+objectives; training, validation, data splitting, or early stopping; and derived
+data, cohort, target, censoring, feature, time-window, missing-data, or
+aggregation meaning or content—first open `{{ paper_markdown }}` and reread the
+relevant Methods, appendix, and supplementary text.
+
+- When the paper states the decision, implement that statement exactly. Do not
+  replace it with a library default, a customary alternative, or a setting that
+  merely produces a closer result.
+- When the paper does not state the decision, use a medically appropriate,
+  broadly accepted medical-research and data-processing convention matched to
+  the study design, population, outcome, and supplied data. Do not choose an
+  arbitrary generic default. If no defensible consensus applies, leave the
+  scientific semantics unchanged and record the unresolved limitation.
+- Record the paper section or confirmed omission, the medical or data-processing
+  basis for the decision, and the exact semantic effect of the change in the
+  applicable `fixes_applied` entry and step notes.
+
+This gate does not authorize modifying source data or changing methodology to
+match a reported result.
 
 {% if smart %}
 ## Smart Replicate Mode

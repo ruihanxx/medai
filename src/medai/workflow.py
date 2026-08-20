@@ -1594,6 +1594,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         "replication/session_instructions.md",
         config.output / "prompts" / "replicate.md",
         replicate_plan_path=state["replicate_plan_path"],
+        paper_markdown=state["paper_markdown"],
         codebase_dir=state["codebase_dir"],
         replication_dir=config.output / "replication",
         skills_dir=skills_dir(),
