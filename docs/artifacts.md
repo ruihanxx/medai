@@ -28,10 +28,6 @@ runs/<run_id>/
 ├── plan/plan_transcript.jsonl
 ├── replication/replication_log.json
 ├── replication/evidence_summary.json
-├── replication/commands/
-│   ├── command_001.json
-│   ├── command_001.log
-│   └── command_001_result.json
 ├── replication/<experiment_id>/smart_replicate_log.json  # smart mode only
 ├── replication/replication_transcript.jsonl
 ├── report/reproduction_report.md
@@ -43,8 +39,7 @@ runs/<run_id>/
 │   ├── cohort_refine_attempt_001.md  # only after a failed audit
 │   ├── codegen_cloud_pull_command.schema.json  # opted-in cloud handoff only
 │   ├── codegen_cloud_pull_resume_001.md
-│   ├── replicate_command.schema.json
-│   └── replicate_resume_001.md
+│   └── replicate_agent_validation_resume_001.md
 ├── resume_history/resume_001/  # only after a replicate/report rollback
 │   ├── replication/
 │   ├── report/
@@ -149,13 +144,12 @@ reproduction report contains exactly three top-level audit sections:
 per-experiment claim/artifact comparisons, a verdict for every validation
 anchor, and one replication risk for every `codegen_plan.json` ambiguity.
 
-For Codex replication, each `replication/commands/command_<NNN>.json` is the
-single requested Bash command; its `.log` contains merged local stdout/stderr,
-and its `_result.json` records the command, exit code, duration, log path, and
-the artifact-validation error when another session turn is required. The
-initial and resumed Codex events share `replication_transcript.jsonl`; rendered
-resume prompts and the output schema are kept under `prompts/`. Replication
-rollback archives retain these prompts as well as the command artifacts.
+For Codex replication, the agent executes and monitors its commands inside one
+turn. The initial and artifact-repair events share
+`replication_transcript.jsonl`; a failed final validation creates
+`prompts/replicate_agent_validation_resume_<NNN>.md`. New runs do not create
+replication command JSON, log, or result artifacts. Rollback archives retain
+these prompts and also preserve legacy command artifacts from earlier runs.
 
 For an opted-in Codex cloud handoff, each
 `codegen/cloud_pull/commands/command_<NNN>.json` is the single requested

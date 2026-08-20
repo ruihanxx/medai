@@ -36,7 +36,7 @@ temporary session across explicit orchestration handoffs:
 
 | Mode | Structured request | Orchestration boundary |
 | --- | --- | --- |
-| Replication | `{"command":"<non-empty bash command>"}` | Run the foreground command locally, persist its result, validate canonical artifacts, and resume only when validation requires another turn. |
+| Replication | Stage-owned canonical artifacts | Codex executes and monitors its own commands during one agent turn; orchestration validates only after the turn ends and resumes the same session only for invalid final artifacts. |
 | Opted-in cloud codegen or Auto Research planning | `{"command":"<non-empty bash command>"}` | After agent-owned preparation and power-off, run the foreground cloud monitor locally, validate cloud state, and resume the same session. |
 | Remote Auto Research experiment | One `remote_exec` or `download` operation | Select and prepare a campaign instance, execute the provider operation, persist its result, power off, validate local artifacts, and resume only when required. |
 | Preprocessing audit | Compact `audit_report.json` written in the attempt | Validate the report after every successful direct-Codex turn; if it is missing or invalid, resume the same session so existing local or remote work can finish. |
@@ -50,9 +50,10 @@ validation, not a status field, completion sentinel, `--last`, or command exit
 status alone.
 
 Direct Codex may inspect files, edit within its stage boundary, and perform
-lightweight interaction. Long-running experiments, test suites, and monitors
-must be returned as one foreground operation rather than run inside the agent
-turn.
+lightweight interaction. Base replication is the exception: it runs its
+long-running commands directly inside its complete agent turn. Other
+long-running experiments, test suites, and monitors must be returned as one
+foreground operation rather than run inside the agent turn.
 
 ## Shared information and mutation rules
 

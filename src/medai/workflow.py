@@ -699,6 +699,9 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
     codebase_dir = output / "codegen" / "codebase"
     prompt_paths = [output / "prompts" / "replicate.md"]
     prompt_paths.extend(sorted((output / "prompts").glob("replicate_resume_*.md")))
+    prompt_paths.extend(
+        sorted((output / "prompts").glob("replicate_agent_validation_resume_*.md"))
+    )
     prompt_paths.extend(sorted((output / "prompts").glob("replicate_command*.json")))
     prompt_paths.extend(sorted((output / "prompts").glob("report_*.md")))
     prompt_paths = [path for path in prompt_paths if path.is_file()]
@@ -1617,88 +1620,12 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
             indent=2,
         ),
     )
-    if config.provider == "codex":
-        command_dir = config.output / "replication" / "commands"
-        command_dir.mkdir(parents=True, exist_ok=True)
-        command_schema_path = config.output / "prompts" / "replicate_command.schema.json"
-        write_json(command_schema_path, ReplicationCommand.model_json_schema())
-        session_id: str | None = None
-        resume_prompt_path: Path | None = None
-        command_index = 1
-        while True:
-            command_request_path = command_dir / f"command_{command_index:03d}.json"
-            if session_id is None:
-                session_id = run_agent(
-                    provider=config.provider,
-                    prompt_path=prompt_path,
-                    working_dir=Path(state["codebase_dir"]),
-                    transcript_path=transcript_path,
-                    siliconflow_config_path=config.siliconflow_config,
-                    codex_model=config.codex_model,
-                    codex_reasoning_effort=config.codex_reasoning_effort,
-                    output_schema_path=command_schema_path,
-                    output_last_message_path=command_request_path,
-                )
-                if session_id is None:
-                    raise RuntimeError("Codex replication turn did not return a session ID")
-            else:
-                assert resume_prompt_path is not None
-                run_agent(
-                    provider=config.provider,
-                    prompt_path=resume_prompt_path,
-                    working_dir=Path(state["codebase_dir"]),
-                    transcript_path=transcript_path,
-                    siliconflow_config_path=config.siliconflow_config,
-                    codex_model=config.codex_model,
-                    codex_reasoning_effort=config.codex_reasoning_effort,
-                    output_schema_path=command_schema_path,
-                    output_last_message_path=command_request_path,
-                    resume_session_id=session_id,
-                )
+    outputs: list[str] = []
 
-            command = load_model(command_request_path, ReplicationCommand).command
-            log_path = command_dir / f"command_{command_index:03d}.log"
-            result_path = command_dir / f"command_{command_index:03d}_result.json"
-            result = _run_agent_command(
-                command,
-                codebase_dir=Path(state["codebase_dir"]),
-                log_path=log_path,
-                result_path=result_path,
-            )
-            try:
-                outputs = validate_replication_artifacts(state)
-            except (RuntimeError, ValueError) as exc:
-                result["artifact_validation_error"] = str(exc)
-                write_json(result_path, result)
-                resume_prompt_path = render_prompt(
-                    "replication/command_result_instructions.md",
-                    config.output / "prompts" / f"replicate_resume_{command_index:03d}.md",
-                    command_result_path=result_path,
-                    command_log_path=log_path,
-                    exit_code=result["exit_code"],
-                    duration_seconds=result["duration_seconds"],
-                    artifact_validation_error=result["artifact_validation_error"],
-                )
-                command_index += 1
-                continue
-            break
-    else:
-        is_final_experiment = (
-            experiment.experiment_id == experiments.experiments[-1].experiment_id
-        )
+    def validate_outputs() -> None:
+        outputs[:] = validate_replication_artifacts(state)
 
-        def validate_outputs() -> None:
-            if not report_path.is_file() or not report_path.read_text(
-                encoding="utf-8"
-            ).strip():
-                raise RuntimeError(
-                    f"Report agent did not write the shared report: {report_path}"
-                )
-            report_text = report_path.read_text(encoding="utf-8")
-            validate_report_experiment(report_text, claims, experiment, codegen_plan)
-            if is_final_experiment:
-                validate_reproduction_report(report_text, claims, experiments, codegen_plan)
-
+    try:
         session_id = run_agent(
             provider=config.provider,
             prompt_path=prompt_path,
@@ -1708,8 +1635,22 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
             codex_model=config.codex_model,
             codex_reasoning_effort=config.codex_reasoning_effort,
         )
-        outputs = validate_replication_artifacts(state)
-    power_off_run_computation_instance(config)
+        if config.provider == "codex" and session_id is None:
+            raise RuntimeError("Codex replication turn did not return a session ID")
+        _validate_agent_artifacts_with_resume(
+            config=config,
+            stage_name="replicate_agent",
+            session_id=session_id,
+            working_dir=Path(state["codebase_dir"]),
+            transcript_path=transcript_path,
+            artifact_paths=[
+                config.output / "replication" / "replication_log.json",
+                config.output / "replication" / "evidence_summary.json",
+            ],
+            validate=validate_outputs,
+        )
+    finally:
+        power_off_run_computation_instance(config)
     pipeline_state.complete_stage(
         "replicate_agent",
         [*outputs, str(transcript_path)],
@@ -1810,7 +1751,21 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
                 indent=2,
             ),
         )
-        run_agent(
+        is_final_experiment = experiment.experiment_id == experiments.experiments[-1].experiment_id
+
+        def validate_outputs() -> None:
+            if not report_path.is_file() or not report_path.read_text(
+                encoding="utf-8"
+            ).strip():
+                raise RuntimeError(
+                    f"Report agent did not write the shared report: {report_path}"
+                )
+            report_text = report_path.read_text(encoding="utf-8")
+            validate_report_experiment(report_text, claims, experiment, codegen_plan)
+            if is_final_experiment:
+                validate_reproduction_report(report_text, claims, experiments, codegen_plan)
+
+        session_id = run_agent(
             provider=config.provider,
             prompt_path=prompt_path,
             working_dir=config.output,

@@ -26,11 +26,10 @@ resume, repeated cloud pull, report-completed no-op, power-off-before-report,
 and persistent cleanup warnings. Tests assert that no safety failure creates a
 second instance.
 
-Codex replication mocks cover thread-ID extraction, explicit-session resume
-with the same output schema and appended transcript, rejection of blank or
-extra structured output, command/log/result persistence, nonzero command
-handoff for debugging, validation-driven continuation, final-only power-off,
-and unchanged one-turn behavior for other providers.
+Codex replication mocks cover thread-ID extraction, direct agent execution
+without a command output schema, final-only artifact validation, same-session
+artifact repair with an appended transcript, final cleanup after success or
+terminal failure, and unchanged one-turn behavior for other providers.
 
 Preprocessing-audit mocks cover the compact JSON verdict/issue contract with
 separate non-empty evidence, diagnosis, and required-fix fields; rejection of

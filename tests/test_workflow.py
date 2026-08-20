@@ -114,6 +114,83 @@ def _write_replication_log(path: Path, output_file: str) -> None:
     )
 
 
+def _write_minimal_replicate_agent_inputs(config) -> dict[str, str]:
+    PipelineState.create(config.output, {"paper": str(config.paper), "provider": "codex"})
+    codebase = config.output / "codegen" / "codebase"
+    codebase.mkdir(parents=True)
+    claims_path = config.output / "preprocessing" / "claims.json"
+    claims_path.parent.mkdir()
+    claims_path.write_text(
+        json.dumps(
+            {
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "statement": "Accuracy is reported.",
+                        "role": "final",
+                        "kind": "numeric",
+                        "paper_result": 0.9,
+                        "provenance": {
+                            "page": 1,
+                            "section": "Results",
+                            "quote": "Accuracy was 0.9.",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    experiments_path = config.output / "preprocessing" / "experiment_todo.json"
+    experiments_path.write_text(
+        json.dumps(
+            {
+                "experiments": [
+                    {
+                        "experiment_id": "E1",
+                        "description": "Train and evaluate.",
+                        "computational_demand": "CPU",
+                        "claims": ["C1"],
+                        "artifacts": [],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    replicate_plan_path = config.output / "plan" / "replicate_plan.json"
+    replicate_plan_path.parent.mkdir()
+    replicate_plan_path.write_text(
+        json.dumps(
+            {
+                "environment": {
+                    "language": "Python",
+                    "key_dependencies": [],
+                    "setup_hints": "none",
+                },
+                "steps": [
+                    {
+                        "id": step_id,
+                        "description": f"Step {step_id}.",
+                        "command_hint": "python run.py",
+                        "expected_outcome": "output",
+                        "verifies": [],
+                    }
+                    for step_id in (1, 2, 3)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return {
+        "config": config,
+        "claims_path": str(claims_path),
+        "experiments_path": str(experiments_path),
+        "replicate_plan_path": str(replicate_plan_path),
+        "codebase_dir": str(codebase),
+    }
+
+
 def test_plan_agent_resumes_same_codex_session_after_validation_failure(
     tmp_path: Path,
     monkeypatch,
@@ -510,7 +587,6 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 encoding="utf-8",
             )
         elif name == "replicate.md":
-            kwargs["output_last_message_path"].write_text('{"command":"true"}\n', encoding="utf-8")
             result_dir = output / "replication" / "E1"
             result_dir.mkdir(parents=True)
             (result_dir / "figure.png").write_bytes(b"png")
@@ -794,7 +870,6 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
 
     def fake_agent(*, prompt_path, transcript_path, **kwargs):
         transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
-        kwargs["output_last_message_path"].write_text('{"command":"true"}\n', encoding="utf-8")
         result_dir = output / "replication" / "E1"
         result_dir.mkdir()
         artifact_path = result_dir / "figure.png"
@@ -877,7 +952,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
     assert "five adjustment rounds per experiment" in prompt
 
 
-def test_codex_replication_hands_off_failed_commands_to_same_session(
+def test_codex_replication_validates_after_turn_and_repairs_same_session(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -950,35 +1025,34 @@ def test_codex_replication_hands_off_failed_commands_to_same_session(
         encoding="utf-8",
     )
 
-    requested_commands = iter(
-        [
-            "pwd; printf 'first-error\\n' >&2; false",
-            "printf 'second-command\\n'",
-        ]
-    )
     agent_calls = []
     validation_calls = []
     events = []
 
     def fake_agent(**kwargs):
         agent_calls.append(kwargs)
-        command = next(requested_commands)
-        kwargs["output_last_message_path"].write_text(
-            json.dumps({"command": command}), encoding="utf-8"
-        )
+        if not kwargs.get("resume_session_id"):
+            assert not validation_calls
+        events.append("agent" if not kwargs.get("resume_session_id") else "repair")
         mode = "a" if kwargs.get("resume_session_id") else "w"
+        kwargs["transcript_path"].parent.mkdir(parents=True, exist_ok=True)
         with kwargs["transcript_path"].open(mode, encoding="utf-8") as transcript:
             transcript.write('{"type":"turn.completed"}\n')
         return "thread-123"
 
     def fake_validate(_state):
         validation_calls.append("validate")
+        events.append("validate")
         if len(validation_calls) == 1:
             raise RuntimeError("replication log is incomplete")
         return [str(config.output / "replication" / "replication_log.json")]
 
     monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
     monkeypatch.setattr("medai.workflow.validate_replication_artifacts", fake_validate)
+    monkeypatch.setattr(
+        "medai.workflow._run_agent_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected handoff")),
+    )
     monkeypatch.setattr(
         "medai.workflow.power_off_run_computation_instance",
         lambda _config: events.append("power-off"),
@@ -994,24 +1068,84 @@ def test_codex_replication_hands_off_failed_commands_to_same_session(
         }
     )
 
-    commands = config.output / "replication" / "commands"
-    first_result = json.loads((commands / "command_001_result.json").read_text())
-    second_result = json.loads((commands / "command_002_result.json").read_text())
-    assert json.loads((commands / "command_001.json").read_text()) == {
-        "command": "pwd; printf 'first-error\\n' >&2; false"
-    }
-    assert first_result["exit_code"] == 1
-    assert first_result["artifact_validation_error"] == "replication log is incomplete"
-    assert Path(first_result["log_path"]) == commands / "command_001.log"
-    assert str(codebase) in (commands / "command_001.log").read_text()
-    assert "first-error" in (commands / "command_001.log").read_text()
-    assert second_result["exit_code"] == 0
-    assert second_result["artifact_validation_error"] is None
     assert len(agent_calls) == 2
     assert agent_calls[1]["resume_session_id"] == "thread-123"
-    assert agent_calls[0]["output_schema_path"] == agent_calls[1]["output_schema_path"]
-    assert (config.output / "prompts" / "replicate_resume_001.md").is_file()
+    assert agent_calls[0].get("output_schema_path") is None
+    assert agent_calls[0].get("output_last_message_path") is None
+    assert agent_calls[1].get("output_schema_path") is None
+    assert agent_calls[1].get("output_last_message_path") is None
+    assert not (config.output / "replication" / "commands").exists()
+    assert not (config.output / "prompts" / "replicate_command.schema.json").exists()
+    repair_prompt = config.output / "prompts" / "replicate_agent_validation_resume_001.md"
+    assert "replication log is incomplete" in repair_prompt.read_text(encoding="utf-8")
+    assert (config.output / "replication" / "replication_transcript.jsonl").read_text(
+        encoding="utf-8"
+    ).count("turn.completed") == 2
+    assert events == ["agent", "validate", "repair", "validate", "power-off"]
+
+
+def test_codex_replication_powers_off_after_agent_error(tmp_path: Path, monkeypatch):
+    config = _replicate_config(tmp_path)
+    state = _write_minimal_replicate_agent_inputs(config)
+    events = []
+
+    def failing_agent(**_kwargs):
+        raise RuntimeError("agent failed")
+
+    monkeypatch.setattr("medai.workflow.run_agent", failing_agent)
+    monkeypatch.setattr(
+        "medai.workflow.power_off_run_computation_instance",
+        lambda _config: events.append("power-off"),
+    )
+
+    try:
+        replicate_agent_node(state)
+    except RuntimeError as exc:
+        assert str(exc) == "agent failed"
+    else:
+        raise AssertionError("replicate agent unexpectedly completed")
+
     assert events == ["power-off"]
+    assert PipelineState(config.output).get_stage_status("replicate_agent") != "completed"
+
+
+def test_codex_replication_powers_off_after_repair_exhaustion(tmp_path: Path, monkeypatch):
+    config = _replicate_config(tmp_path)
+    state = _write_minimal_replicate_agent_inputs(config)
+    agent_calls = []
+    events = []
+
+    def fake_agent(**kwargs):
+        agent_calls.append(kwargs)
+        mode = "a" if kwargs.get("resume_session_id") else "w"
+        kwargs["transcript_path"].parent.mkdir(parents=True, exist_ok=True)
+        with kwargs["transcript_path"].open(mode, encoding="utf-8") as transcript:
+            transcript.write('{"type":"turn.completed"}\n')
+        return "thread-123"
+
+    def failing_validate(_state):
+        events.append("validate")
+        raise RuntimeError("replication log is incomplete")
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    monkeypatch.setattr("medai.workflow.validate_replication_artifacts", failing_validate)
+    monkeypatch.setattr(
+        "medai.workflow.power_off_run_computation_instance",
+        lambda _config: events.append("power-off"),
+    )
+
+    try:
+        replicate_agent_node(state)
+    except RuntimeError as exc:
+        assert "after 2 resumed repair turns" in str(exc)
+    else:
+        raise AssertionError("replicate agent unexpectedly completed")
+
+    assert len(agent_calls) == 3
+    assert agent_calls[1]["resume_session_id"] == "thread-123"
+    assert agent_calls[2]["resume_session_id"] == "thread-123"
+    assert events == ["validate", "validate", "validate", "power-off"]
+    assert PipelineState(config.output).get_stage_status("replicate_agent") != "completed"
 
 
 def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
@@ -1448,8 +1582,11 @@ def test_remote_plan_and_replication_prompts_require_power_off_not_release():
 
     assert "provider adapter's reviewed power-off action" in plan_prompt
     assert "must not release" in plan_prompt
-    assert "Every invocation of this stage is a complete replication attempt" in (replicate_prompt)
-    assert "Do not call release" in replicate_prompt
+    assert "Every invocation of this stage is a complete replication attempt" in replicate_prompt
+    assert "Use your tools inside this session" in replicate_prompt
+    assert "Do not return\na command JSON object" in replicate_prompt
+    assert "Do not release the instance" in replicate_prompt
+    assert "Command handoff protocol" not in replicate_prompt
 
 
 def test_resume_archives_interrupted_replicate_attempt_and_restarts_it(

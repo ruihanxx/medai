@@ -129,62 +129,25 @@ execution. Reuse that same remote copy. Download only experiment outputs,
 aggregate evidence, and logs; never download raw or row-level dataset content.
 {% endif %}
 
-## Command handoff protocol
+## Execution and completion
 
-Your response is constrained to exactly one JSON object with one non-empty
-field: `{"command": "<bash command>"}`. The command is the next action for
-local orchestration, not an explanation or a completion marker.
+Use your tools inside this session to execute, monitor, and debug every
+command required by the replication plan. Work through the entire plan in
+order; do not end the turn after a single setup, experiment, or remote command.
+Keep foreground work attached until it reaches a terminal state, and do not use
+`nohup`, `&`, or another detached launcher.
 
-You may inspect files, edit the writable codebase, and use lightweight
-interactive checks in this turn. Do not directly run or monitor a large
-experiment, test suite, provider CLI, or remote job here. Return that work as
-the one `command` instead. Local orchestration will execute it from
-`{{ codebase_dir }}/` with `/bin/bash -lc`, stream and save its combined log,
-then resume this same session with the exit status, log path, and artifact
-validation result.
+Before ending the turn, complete every plan step and write the complete
+`replication_log.json`, `evidence_summary.json`, and all locally accessible
+files referenced by `step_outcomes[].output_files`. Record command evidence,
+failures, and fixes in the replication log as the work proceeds. Do not return
+a command JSON object, a handoff request, or a completion sentinel.
 
-The returned command must stay in the foreground. Do not use `nohup`, `&`, or
-another background/detached launcher. A remote command must likewise wait or
-poll until its requested remote work reaches a terminal state. On the next turn,
-use the saved result to debug, choose the next experiment, or continue the
-plan. Do not return an empty command, a `status` field, or a completion
-sentinel: orchestration alone decides completion by validating the replication
-artifacts after each command.
-
-### Environment setup command
-
-If setup is required, return it as the first handoff command. For example,
-adapt the following to the actual codebase rather than executing it in this
-turn:
-
-```bash
-cd {{ codebase_dir }}
-
-# Verify tools
-python --version
-uv --version
-
-# Check GPU availability
-nvidia-smi 2>/dev/null && echo "GPU: available" || echo "GPU: not available"
-
-# Create a virtual environment
-uv venv {{ codebase_dir }}/.venv
-source {{ codebase_dir }}/.venv/bin/activate
-
-# Install dependencies (try multiple strategies)
-if [ -f requirements.txt ]; then
-    uv pip install -r requirements.txt 2>&1 || echo "requirements.txt install had errors"
-fi
-if [ -f setup.py ] || [ -f pyproject.toml ]; then
-    uv pip install -e . 2>&1 || echo "editable install had errors"
-fi
-if [ -f environment.yml ]; then
-    echo "Note: environment.yml found; if conda is unavailable here, approximate it with pip installs"
-fi
-
-# Record what was installed
-uv pip list > {{ replication_dir }}/installed_packages.txt 2>&1
-```
+After the agent turn ends, workflow validates the final canonical artifacts.
+If that validation fails, it resumes this same session with the exact error and
+the existing files. In a resumed turn, inspect the complete artifact set,
+repair the stated issue, and preserve completed experiments rather than
+repeating them.
 
 ## How to Fix Issues
 
@@ -236,9 +199,9 @@ GPU is available. Use it when present. If GPU is unavailable:
 
 ## Replication Plan
 
-Read `{{ replicate_plan_path }}` and complete every step in listed order by
-returning one foreground command at a time. If a step fails, inspect the saved
-command result on the resumed turn, fix the issue, and return the next command.
+Read `{{ replicate_plan_path }}` and complete every step in listed order during
+this session. If a command fails, inspect its result directly, fix the issue,
+and continue until the complete attempt is ready for final artifact validation.
 
 ### Resume an interrupted attempt
 
@@ -328,13 +291,10 @@ details, CPU/RAM capacity, CUDA details, or other relevant package versions.
 ## Remote shutdown
 
 When the plan uses remote compute, download and locally validate every required
-result, log, exit-status record, and evidence artifact before its final step.
-Return the provider adapter's reviewed power-off action using
-`{{ computation_provider_state_path }}` as the appropriate foreground command.
-Do not call release: the instance must remain recoverable through report
-generation, and orchestration releases it only after the completed report has
-been validated. Before returning a command after a failed remote attempt,
-preserve available evidence and include the same bounded, idempotent power-off
-action; surface any shutdown failure.
+result, log, exit-status record, and evidence artifact before ending this turn.
+Do not release the instance or issue its final power-off action: workflow owns
+power-off after the agent turn and final artifact repair sequence complete.
+Preserve available evidence when a remote command fails and surface any
+irrecoverable infrastructure condition explicitly.
 
 Begin execution now.

@@ -53,16 +53,15 @@ result. A successful resume proceeds only from completed cloud state; an
 incomplete result returns to that session for bounded diagnostics and a fresh
 prepare/monitor handoff.
 
-For `provider=codex` only, replication uses an intra-invocation command handoff
-loop. Codex returns one schema-validated non-empty Bash command, orchestration
-runs it locally from the codebase while streaming and saving its combined log,
-then validates the canonical replication artifacts. A failed command or an
-incomplete validation resumes the same explicit Codex session with that saved
-result so Codex can debug or choose the next command. Completion is solely a
-successful artifact validation; command exit status is diagnostic, not an
-automatic stage failure. This session is intentionally temporary: an explicit
-CLI resume still archives and restarts the replication attempt as described
-below.
+For `provider=codex` only, replication runs as one direct agent session. Codex
+executes, monitors, and repairs its own commands before ending the turn; host
+orchestration does not inspect or persist individual command results. After a
+successful agent return, orchestration validates the complete canonical
+replication artifacts. An incomplete validation resumes the same explicit
+Codex session for at most two artifact-repair turns. Completion is solely a
+successful final artifact validation. This session is intentionally temporary:
+an explicit CLI resume still archives and restarts the replication attempt as
+described below.
 
 For a direct-Codex preprocessing audit, a successfully returned agent turn is
 not stage completion by itself. Orchestration validates the attempt's compact
