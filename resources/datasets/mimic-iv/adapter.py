@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import csv
 import gzip
+import hashlib
 import importlib
 import io
 from pathlib import Path
@@ -30,9 +31,11 @@ class UnsupportedFormatError(DatasetAdapterError):
 class DatasetAdapter:
     """Standard access layer for the MIMIC-IV dataset capsule.
 
-    No official local loader was present in raw/. This adapter therefore uses the
-    generated resource contract and a minimal CSV reader. Pandas is
-    used when available; otherwise load_table falls back to list[dict].
+    The capsule combines MIMIC-IV with the separately versioned MIMIC-IV-ED
+    Demo component. No official local loader was present in raw/. This adapter
+    therefore uses the generated resource contract and a minimal CSV reader.
+    Pandas is used when available; otherwise load_table falls back to
+    list[dict].
     """
 
     def __init__(self, root: str | Path):
@@ -48,6 +51,7 @@ class DatasetAdapter:
             'dataset_id': self.resources_doc.get('dataset_id'),
             'dataset_name': self.resources_doc.get('dataset_name'),
             'version': self.resources_doc.get('version'),
+            'components': list(self.resources_doc.get('components', [])),
             'generated_at': self.resources_doc.get('generated_at'),
             'resource_count': len(self._resources),
             'tabular_resource_count': sum(
@@ -236,6 +240,32 @@ class DatasetAdapter:
                         passed.append(f'{resource_id} declared columns match header')
                 except Exception as exc:  # noqa: BLE001 - validation reports all resource errors.
                     failures.append(f'{resource_id} header read failed: {exc}')
+            expected_sha256 = resource.get('sha256')
+            if expected_sha256:
+                paths = resource.get('paths') or []
+                if len(paths) != 1:
+                    failures.append(f'{resource_id} checksum requires exactly one path')
+                else:
+                    path = self.root / paths[0]
+                    if path.exists():
+                        observed_sha256 = self._sha256(path)
+                        if observed_sha256 == expected_sha256:
+                            passed.append(f'{resource_id} checksum matches')
+                        else:
+                            failures.append(
+                                f'{resource_id} checksum mismatch: '
+                                f'expected {expected_sha256}, observed {observed_sha256}'
+                            )
+        declared_resource_ids = set(self._resources)
+        for entity in self.graph_doc.get('entities', []):
+            missing = sorted(set(entity.get('resource_ids') or []) - declared_resource_ids)
+            if missing:
+                failures.append(
+                    f"{entity.get('entity_id', '<unknown>')} graph resources missing from resources.yaml: "
+                    + ', '.join(missing)
+                )
+        if not any('graph resources missing' in failure for failure in failures):
+            passed.append('dataset graph resources are declared')
         if deep:
             warnings.append('deep validation is intentionally lightweight; full-row scans are not performed by default')
         _, pandas_error = self._try_import_pandas()
@@ -249,6 +279,14 @@ class DatasetAdapter:
             raise DatasetAdapterError(f'missing required file: {path}')
         with path.open('r', encoding='utf-8') as f:
             return yaml.safe_load(f) or {}
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open('rb') as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @staticmethod
     def _try_import_pandas():
