@@ -1,53 +1,81 @@
 ---
 name: computation-provider
-description: Connect to and operate remote computation providers. Use when local CPU, memory, storage, accelerator capacity, or runtime availability cannot satisfy an experiment and remote infrastructure must be inspected, acquired, connected, initialized, supplied with code or data, operated, powered down, or released.
+description: Acquire and operate remote computation resources, including provider selection, lifecycle management, key-first SSH authentication, environment initialization, file transfer, remote execution, result retrieval, and cleanup. Use when local CPU, memory, storage, accelerator capacity, or runtime availability cannot satisfy an experiment.
 ---
 
 # Computation Provider
 
 ## Overview
 
-Use this skill as the provider-independent entry point for remote computation.
-Treat provider selection, resource discovery, instance operations, data movement,
-and remote execution as separate capabilities. Combine only the capabilities the
-task requires; their order below is not a mandatory workflow.
+Use this skill as the single entry point for remote computation. Treat provider
+selection, resource discovery, instance lifecycle, SSH access, data movement,
+and remote execution as separate internal capabilities. Combine only the
+capabilities the task requires; their order below is not a mandatory workflow.
 
-After determining the provider, read `references/<provider>.md` before invoking
-any provider operation. Follow that reference for configuration names, supported
-operations, scripts, state fields, safety checks, and failure handling.
+Discover supported adapters from `providers/*.json`. Select only metadata that
+matches the run's resolved provider. Read its `reference` before invoking any
+provider operation. For cloud-backed data, read the selected drive's `reference`
+from that same metadata before materialization or remote data access.
 
-## When to Use
+Metadata is the contract between orchestration and an adapter. It declares the
+provider script, required local configuration, non-secret configuration
+fingerprint, supported drives, cloud-source mapping, action timeouts, and legacy
+manifest migration fields. Do not infer an adapter, drive, command, path, or
+environment variable outside its metadata and referenced documents.
 
-Use this skill when an experiment requires a remote computation platform because
-the available local environment cannot meet its full-scale execution needs.
+## Capability Boundary
 
-## Supported Providers
+Keep provider API calls, machine selection, instance lifecycle, connection
+metadata resolution, and provider-specific filesystem or image rules in the
+provider adapter and its metadata-selected reference.
 
-- `autodl`: read `references/autodl.md` after selecting this provider.
+Keep SSH authentication, command execution, upload, and download in the shared
+`scripts/ssh.py` helper. Treat this helper as an internal sub-capability, not as
+a provider or a separately triggered skill. A provider adapter may expose
+`exec`, `upload`, and `download` commands, but it must only refresh and validate
+provider connection metadata before delegating the actual SSH operation to the
+shared helper.
 
-Do not infer support for a provider that is not listed here. Stop explicitly if
-the required provider has no reference document or the required capability is
-not documented there.
+## Adapter protocol
+
+Each adapter script must support these actions: `validate-state`, `status`,
+`power-on`, `power-off`, `reconcile`, `release`, `cloud-pull`, `exec`, `upload`,
+and `download`. The adapter owns provider-specific state validation. The shared
+orchestrator may check only the public envelope and the cloud fields `drive`,
+`dataset`, `completed`, and `target_path`.
+
+`providers/<provider>.json` is the complete supported provider set. Do not infer
+support for a provider, drive, or capability that metadata and its selected
+reference do not document.
+
+A drive may set `cloud_pull_handoff: true` when its reference defines a safe
+two-step preparation and local-monitor procedure. A resumable Codex codegen or
+Auto Research planning session may use that opt-in: the agent completes the
+reference's active-instance preparation and power-off step, then local
+orchestration runs the returned foreground monitor command, powers off again
+after validation, and resumes that same session.
 
 ## Local Configs
 
 Store provider keys, API URLs, and other local provider configuration in the
 project-root `.env`. Keep only empty or non-secret defaults in the project-root
 `.env.example`. Read the selected provider reference for its exact configuration
-contract.
+contract. Keep the matching SSH private key under the host `~/.ssh` directory.
+Set `COMPUTATION_PROVIDER_SSH_IDENTITY_FILE` only when a specific key must be
+selected; otherwise allow OpenSSH to use its normal config and default identities.
+Never configure `COMPUTATION_PROVIDER_SSH_PASSWORD` in `.env`; reserve it for a
+provider adapter to pass an ephemeral fallback password to the SSH child process.
 
 Never copy secrets into a run state file, generated prompt, transcript, command
 output, remote log, or result artifact. Persist only the non-secret identifiers
 and connection metadata required to resume or clean up the current run.
 
-## Sub Skills
+## Capabilities
 
 ### Determine the Provider
 
-Match configured providers against the experiment's required compute and the
-supported-provider list. Select a provider only after confirming that its local
-configuration is present. Read its reference document before taking any further
-provider action.
+Use the provider and drive already resolved in the run configuration. Read their
+metadata-selected reference documents before taking any further provider action.
 
 ### Query Machine Types
 
@@ -70,10 +98,22 @@ derive a provider-specific state filename.
 
 ### Connect to a Remote Machine
 
-Confirm the instance is running and use the connection method documented by the
-provider. Keep authentication material local, validate the remote identity, and
-avoid exposing credentials through arguments, logs, transcripts, or artifacts.
-Fail explicitly when the connection cannot be authenticated or established.
+Confirm the instance is running, then let the selected provider resolve only its
+provider-specific SSH host, port, user, and optional fallback password. Delegate
+authentication, command execution, and transfers to `scripts/ssh.py` through the
+provider adapter.
+
+For every operation, the shared helper first runs the harmless remote command
+`true` with `BatchMode=yes`. If public-key authentication succeeds, use the same
+identity for the requested command or transfer. If the probe fails and the
+provider supplied a fallback password, use `sshpass -e`; keep the password only
+in the child environment and never pass it as a command argument. Fail explicitly
+when neither method authenticates.
+
+Use `StrictHostKeyChecking=accept-new`. Never disable host-key checking, print or
+persist authentication material, or retry the requested remote operation after
+a connection failure. Authentication fallback may occur only during the
+side-effect-free probe.
 
 ### Initialize the Remote Environment
 
@@ -108,7 +148,22 @@ Treat creation as a billable side effect and release as irreversible. Never
 release an instance unless its state explicitly proves that the current run
 created it. Transfer all required results, logs, and evidence before release.
 
-During the `replicate` stage, release every current-run instance immediately
-after all remote experiments finish and their required outputs are transferred.
-Attempt release on failure paths as well. Release must be idempotent or guarded by
-persisted release state so cleanup never targets an already released instance.
+During the `replicate` stage, power off every current-run instance after all
+remote experiments finish and their required outputs are transferred. Attempt
+the same idempotent power-off on failure paths. Release only after the report
+artifacts have been validated and the pipeline is completed. The sole earlier
+release case is resume reconciliation: an instance that is still recorded by
+the provider but fails the one harmless SSH probe must be powered off and
+successfully released before one replacement may be created. Persisted lifecycle
+state must guard every release and replacement.
+
+For a cloud-backed Auto Research campaign, create the first campaign-owned
+instance only when the first audited idea reaches experiment planning. A
+provider may maintain a bounded pool in canonical state, select a retained
+usable member before each foreground experiment command, and add one only after
+an unambiguous capacity conflict. Every newly selected member independently
+materializes and verifies the inherited inventory. Orchestration synchronizes
+the local audited mother code and local idempotent mother-environment definition,
+powers every member off in `finally`, and resumes the agent. A failed campaign
+remains powered off but unreleased. Release every owned member only after
+final-report validation and campaign completion.

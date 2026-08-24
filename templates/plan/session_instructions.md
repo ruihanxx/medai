@@ -1,10 +1,17 @@
 # Plan agent
 
-You are reviewing and modifying a codebase associated with a medical paper, and generating a step-by-step replication plan for testing whether the code reproduces the paper's reported results. The codebase is at `{{ codebase_dir }}`. Your target is to make sure that the implementation exactly aligns with the target paper's methodology, perfectly matches given computation resources to achieve good efficiency, and is ready to run. After that, you
+You are generating a step-by-step replication plan for testing whether a paper's code reproduces the paper's reported results.  The codebase at `{{ codebase_dir }}` was just written from the paper by an earlier phase and may be rough.
 
 ## Inputs:
 - Paper Markdown: `{{ paper_markdown }}`
+{% if cloud_drive_enabled %}
+- Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
+  already materialized at the read-only path in remote provider state.
+- Selected provider reference: `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
+- Selected drive reference: `{{ drive_reference|default("<selected-drive-reference>") }}`
+{% else %}
 - Data: `{{ data_dir or "not supplied" }}` (read-only)
+{% endif %}
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
@@ -20,16 +27,16 @@ a skill genuinely matches; many plans will not need any skill, and that
 is fine.
 
 If remote computation was selected, read
-`{{ skills_dir }}/computation_provider/SKILL.md` and then the selected
-provider reference named by that skill before planning remote operations.
-
-Required work:
-
-1. Ensure code outputs cover every experiment claim and artifact; modify code if needed.
-2. Install all dependencies.
-3. Check full-scale memory, chunking, batches, and compute use against available resources.
-4. Run smoke tests and debug failures.
-5. Write `{{ replicate_plan_path }}`:
+`{{ skills_dir }}/computation_provider/SKILL.md`, then read the selected provider
+reference at `{{ computation_provider_reference|default("<selected-provider-reference>") }}` before planning remote operations.
+{% if cloud_drive_enabled %}Also read the selected drive reference at
+`{{ drive_reference|default("<selected-drive-reference>") }}` before planning cloud operations.{% endif %}
+{% if cloud_drive_enabled %}
+This cloud-backed run must keep using the existing remote instance and the
+completed materialized dataset. Read its target path from provider state and
+copy it exactly into every `remote_dataset_dir`; do not upload, download,
+remount, or rematerialize the raw dataset.
+{% endif %}
 
 
 ## Paper Claims and Experiment artifacts
@@ -40,10 +47,10 @@ from a Figure/Table while retaining the same claim format.
 
 {% for claim in claims.claims %}
 {% if claim.role == "validation" %}
-- **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+- **{{ claim.claim_id }}** ({{ claim.role }}): {{ claim.statement }}
   - Source: {{ claim.provenance.section }}
-{% if claim.paper_value is defined %}
-  - Anchor value: {{ claim.paper_value | tojson }}{% if claim.units is defined %} {{ claim.units }}{% endif %}
+{% if claim.paper_result is not none %}
+  - Anchor value: {{ claim.paper_result | tojson }}
 {% endif %}
 {% endif %}
 {% endfor %}
@@ -52,11 +59,11 @@ The following experiments were extracted from the paper. Every claim and
 artifact associated with each experiment must be reproduced.
 
 {% for experiment in experiments.experiments %}
-- **{{ experiment.id }}**: {{ experiment.description }}
+- **{{ experiment.experiment_id }}**: {{ experiment.description }}
   - Claims:
 {% for claim_id in experiment.claims %}
-{% set claim = claims.claims | selectattr("id", "equalto", claim_id) | first %}
-    - **{{ claim.id }}** ({{ claim.role }}): {{ claim.description }}
+{% set claim = claims.claims | selectattr("claim_id", "equalto", claim_id) | first %}
+    - **{{ claim.claim_id }}** ({{ claim.role }}): {{ claim.statement }}
 {% endfor %}
   - Artifacts:
 {% for artifact in experiment.artifacts %}
@@ -76,7 +83,8 @@ Explore the repository and generate a replication plan — a sequence of concret
 2. **Environment setup** — what to install, any system requirements
 3. **Running the code** — training scripts, experiments, evaluations
 4. **Collecting outputs** — what files / metrics each step produces
-5. **Remote server termination** (if required) - terminate instance to avoid additional charge.
+5. **Remote server shutdown** (if required) - after downloading and validating
+   every required local result, power off the instance without releasing it.
 
 For each step, provide:
 - A clear description of what to do
@@ -160,16 +168,25 @@ If replication requires remote compute, add this top-level object alongside
 ```json
 {
     "remote_compute": {
-        "provider": "autodl",
         "state_path": "{{ computation_provider_state_path }}",
-        "remote_working_directory": "/root/autodl-tmp/<experiment_id>",
+        "remote_working_dir": "<provider-reference-defined-run-directory>",
+        "remote_dataset_dir": "<provider-reference-defined-read-only-dataset-directory>",
+        "provider": "<selected-provider>",
         "setup_hints": [
-            "Use the AutoDL provider script with the local state at {{ computation_provider_state_path }} to resolve the current SSH connection and connect to the remote server.",
-            "Upload the code from {{ codebase_dir }}/ to /root/autodl-tmp/<experiment_id>/code and the experiment's required input data to /root/autodl-tmp/<experiment_id>/data."
+            "Use the selected provider reference and the local state at {{ computation_provider_state_path }} to resolve the current connection and connect to the remote server.",
+{% if cloud_drive_enabled %}
+            "Upload only code from {{ codebase_dir }}/; reuse the completed read-only cloud dataset recorded in provider state and never transfer raw data locally."
+{% else %}
+            "Upload the code from {{ codebase_dir }}/ and the experiment's required input data to the run-owned locations defined by the selected provider reference."
+{% endif %}
         ]
     }
 }
 ```
-Also add a step in `"steps"` to terminate and release the instance.
+Only `state_path`, `remote_working_dir`, and `remote_dataset_dir` are required
+and statically validated. Additional provider and execution fields are allowed.
+Make the final `"steps"` entry download and validate all required local outputs,
+then invoke the provider adapter's reviewed power-off action. It must not release
+the instance; orchestration releases only after the report is complete.
 
 Begin your analysis now.

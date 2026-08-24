@@ -1,0 +1,304 @@
+dataset_id: mimic-iv
+generated_at: '2026-08-20'
+entities:
+- entity_id: patient
+  description: individual patient
+  resource_ids:
+  - patients
+  key_fields:
+  - subject_id
+- entity_id: hospital_admission
+  description: one hospital admission for a patient
+  resource_ids:
+  - admissions
+  key_fields:
+  - subject_id
+  - hadm_id
+- entity_id: emergency_department_stay
+  description: one emergency department stay in the MIMIC-IV-ED Demo component
+  resource_ids:
+  - edstays
+  key_fields:
+  - subject_id
+  - stay_id
+- entity_id: emergency_department_event
+  description: diagnosis, medication, triage, or vital-sign information recorded for an ED stay
+  resource_ids:
+  - diagnosis
+  - medrecon
+  - pyxis
+  - triage
+  - vitalsign
+  key_fields:
+  - subject_id
+  - stay_id
+- entity_id: hospital_transfer
+  description: one ward or care-location transfer interval
+  resource_ids:
+  - transfers
+  key_fields:
+  - subject_id
+  - hadm_id
+  - transfer_id
+- entity_id: icu_stay
+  description: one ICU stay derived from transfer records
+  resource_ids:
+  - icustays
+  key_fields:
+  - subject_id
+  - hadm_id
+  - stay_id
+- entity_id: hospital_event
+  description: hospital EHR event or billing row
+  resource_ids:
+  - diagnoses_icd
+  - drgcodes
+  - emar
+  - emar_detail
+  - hcpcsevents
+  - labevents
+  - microbiologyevents
+  - omr
+  - pharmacy
+  - poe
+  - poe_detail
+  - prescriptions
+  - procedures_icd
+  key_fields:
+  - subject_id
+  - hadm_id
+- entity_id: icu_event
+  description: ICU event row linked to an ICU stay and item dictionary
+  resource_ids:
+  - chartevents
+  - datetimeevents
+  - inputevents
+  - ingredientevents
+  - outputevents
+  - procedureevents
+  key_fields:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - itemid
+- entity_id: dictionary_item
+  description: code or item dictionary entry
+  resource_ids:
+  - d_hcpcs
+  - d_icd_diagnoses
+  - d_icd_procedures
+  - d_labitems
+  - d_items
+  key_fields:
+  - itemid
+  - icd_code
+  - code
+- entity_id: provider
+  description: deidentified hospital provider
+  resource_ids:
+  - provider
+  key_fields:
+  - provider_id
+- entity_id: caregiver
+  description: deidentified ICU caregiver
+  resource_ids:
+  - caregiver
+  key_fields:
+  - caregiver_id
+relationships:
+- relationship_id: admission_belongs_to_patient
+  from_entity: hospital_admission
+  to_entity: patient
+  join_fields:
+  - subject_id
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: MIMIC-IV core concepts define subject_id as patient identifier and hadm_id as hospitalization identifier.
+  confidence: high
+- relationship_id: ed_stay_belongs_to_patient
+  from_entity: emergency_department_stay
+  to_entity: patient
+  join_fields:
+  - subject_id
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: MIMIC-IV-ED documentation defines subject_id as the patient identifier shared with MIMIC-IV.
+  confidence: high
+- relationship_id: ed_stay_links_to_hospital_admission
+  from_entity: emergency_department_stay
+  to_entity: hospital_admission
+  join_fields:
+  - subject_id
+  - hadm_id
+  cardinality: many_to_zero_or_one
+  temporal_rule: when hadm_id is populated, ED outtime should be at or near the linked hospital admission interval
+  evidence: MIMIC-IV-ED documentation states that hadm_id is populated when an ED stay is followed by hospital
+    admission; every populated local ED hadm_id exists in the local admissions table.
+  confidence: high
+- relationship_id: ed_event_belongs_to_ed_stay
+  from_entity: emergency_department_event
+  to_entity: emergency_department_stay
+  join_fields:
+  - subject_id
+  - stay_id
+  cardinality: many_to_one
+  temporal_rule: charttime, when present, should be interpreted relative to the ED intime/outtime interval
+  evidence: MIMIC-IV-ED uses edstays as the central table and links all five data tables through stay_id; all local
+    event stay_id values resolve to edstays.
+  confidence: high
+- relationship_id: ed_diagnosis_uses_icd_dictionary
+  from_entity: emergency_department_event
+  to_entity: dictionary_item
+  join_fields:
+  - diagnosis.icd_code=d_icd_diagnoses.icd_code
+  - diagnosis.icd_version=d_icd_diagnoses.icd_version
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: The ED diagnosis table supplies ICD code and version fields compatible with the MIMIC-IV ICD diagnosis
+    dictionary; all 288 observed local ED code/version keys resolve, and diagnosis retains its released icd_title.
+  confidence: high
+- relationship_id: transfer_belongs_to_admission
+  from_entity: hospital_transfer
+  to_entity: hospital_admission
+  join_fields:
+  - subject_id
+  - hadm_id
+  cardinality: many_to_one
+  temporal_rule: transfer time should fall within the hospital admission interval when timestamps are available
+  evidence: transfers table contains subject_id and hadm_id; core concepts define transfer_id within hospital movement
+    tracking.
+  confidence: high
+- relationship_id: icu_stay_belongs_to_admission
+  from_entity: icu_stay
+  to_entity: hospital_admission
+  join_fields:
+  - subject_id
+  - hadm_id
+  cardinality: many_to_one
+  temporal_rule: ICU stay interval should fall within the hospital admission interval when timestamps are available
+  evidence: ICU documentation states icustays are derived from transfers and include admission linkage.
+  confidence: high
+- relationship_id: icu_event_belongs_to_icu_stay
+  from_entity: icu_event
+  to_entity: icu_stay
+  join_fields:
+  - subject_id
+  - hadm_id
+  - stay_id
+  cardinality: many_to_one
+  temporal_rule: event timestamp should align to the ICU stay interval for cohort construction
+  evidence: ICU documentation states all event tables contain stay_id and itemid.
+  confidence: high
+- relationship_id: hospital_event_belongs_to_admission
+  from_entity: hospital_event
+  to_entity: hospital_admission
+  join_fields:
+  - subject_id
+  - hadm_id
+  cardinality: many_to_one
+  temporal_rule: event timestamp should align to the hospital admission interval when a timestamp and hadm_id are
+    available
+  evidence: Hospital module event tables commonly include subject_id and hadm_id for admission-level alignment.
+  confidence: high
+- relationship_id: lab_event_uses_lab_item_dictionary
+  from_entity: hospital_event
+  to_entity: dictionary_item
+  join_fields:
+  - labevents.itemid=d_labitems.itemid
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: d_labitems is the dimension table for labevents itemid values.
+  confidence: high
+- relationship_id: icu_event_uses_item_dictionary
+  from_entity: icu_event
+  to_entity: dictionary_item
+  join_fields:
+  - itemid
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: ICU documentation describes d_items as the dimension table for ICU event itemid values.
+  confidence: high
+- relationship_id: diagnosis_uses_icd_dictionary
+  from_entity: hospital_event
+  to_entity: dictionary_item
+  join_fields:
+  - diagnoses_icd.icd_code=d_icd_diagnoses.icd_code
+  - diagnoses_icd.icd_version=d_icd_diagnoses.icd_version
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: d_icd_diagnoses describes ICD diagnosis codes.
+  confidence: high
+- relationship_id: procedure_uses_icd_dictionary
+  from_entity: hospital_event
+  to_entity: dictionary_item
+  join_fields:
+  - procedures_icd.icd_code=d_icd_procedures.icd_code
+  - procedures_icd.icd_version=d_icd_procedures.icd_version
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: d_icd_procedures describes ICD procedure codes.
+  confidence: high
+- relationship_id: provider_id_links_to_provider
+  from_entity: hospital_event
+  to_entity: provider
+  join_fields:
+  - '*_provider_id=provider.provider_id'
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: Hosp documentation states columns with provider_id suffix may be linked to provider.
+  confidence: high
+- relationship_id: icu_event_links_to_caregiver
+  from_entity: icu_event
+  to_entity: caregiver
+  join_fields:
+  - caregiver_id
+  cardinality: many_to_one
+  temporal_rule: null
+  evidence: ICU documentation states ICU event caregiver_id links to caregiver.
+  confidence: high
+temporal_structure:
+  patient: may have multiple hospital admissions over time; dates are shifted per patient but internally consistent
+    within patient
+  emergency_department_stay: has an ED arrival/departure interval through intime and outtime; an admitted stay may
+    link forward to one hospital admission through hadm_id
+  emergency_department_event: medrecon, pyxis, and vitalsign have charttime; diagnosis and triage are stay-level
+    records without a charttime field
+  hospital_admission: has admission and discharge interval through admittime and dischtime
+  hospital_transfer: tracks movement across hospital care locations and can include ICU stay_id
+  icu_stay: occurs within a hospital admission and has intime/outtime interval
+  event_tables: timestamped rows should be aligned by join keys and chart/store/start/end times according to task
+    needs
+alignment_notes:
+- Use subject_id for patient-level linkage.
+- The local ED component is MIMIC-IV-ED Demo v2.2 (222 stays across 64 subjects), not the full MIMIC-IV-ED release;
+  do not infer full-release coverage from its presence.
+- Use ED stay_id only within edstays, diagnosis, medrecon, pyxis, triage, and vitalsign. ED stay_id and ICU stay_id
+  name different identifier domains and must not be joined directly.
+- Link an admitted ED stay to the hospital module using populated edstays.hadm_id (and subject_id as a consistency
+  guard); do not fabricate admission linkage for ED stays with null hadm_id.
+- All ED subject_id values and populated hadm_id values resolve in the local MIMIC-IV v3.1 patient/admission tables,
+  but preserve the separate MIMIC-IV-ED Demo v2.2 component provenance in derived artifacts.
+- Use subject_id and hadm_id for admission-level linkage when hadm_id is present.
+- Use subject_id, hadm_id, and stay_id for ICU stay/event linkage when stay_id is present.
+- For hospital events lacking stay_id, align to ICU analyses only after admission linkage and temporal filtering
+  against ICU intervals.
+- Dates are deidentified and shifted consistently within a patient; do not compare absolute years across patients
+  without anchor-year guidance.
+unresolved_relationships:
+- source: MIMIC-IV-ED Demo v2.2 component
+  target: MIMIC-IV v3.1 component
+  issue: the local components are separately versioned releases even though all observed ED patient and admission
+    identifiers resolve in the local core tables
+  suggested_resolution: bind analyses to the local files and declared component versions; revalidate identifier and
+    temporal coverage before substituting a different ED or core release
+  confidence: medium
+- source: hosp events without hadm_id
+  target: hospital_admission or icu_stay
+  issue: some event rows may lack hadm_id or stay_id
+  suggested_resolution: link by subject_id and apply table-specific timestamp interval filtering where required
+  confidence: medium
+- source: HCPCS code dictionary
+  target: hcpcsevents
+  issue: event column hcpcs_cd and dictionary column code use different names
+  suggested_resolution: join hcpcsevents.hcpcs_cd to d_hcpcs.code when a billing code dictionary is needed
+  confidence: high

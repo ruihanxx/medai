@@ -2,17 +2,16 @@
 Clustering analysis example with multiple algorithms, evaluation, and visualization.
 """
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
-from sklearn.mixture import GaussianMixture
-from sklearn.metrics import (
-    silhouette_score, calinski_harabasz_score, davies_bouldin_score
-)
 import warnings
+
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.cluster import DBSCAN, AgglomerativeClustering, KMeans
+from sklearn.decomposition import PCA
+from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score, silhouette_score
+from sklearn.mixture import GaussianMixture
+from sklearn.preprocessing import StandardScaler
+
 warnings.filterwarnings('ignore')
 
 
@@ -183,14 +182,14 @@ def compare_clustering_algorithms(X, n_clusters=3):
                 'davies_bouldin': davies
             }
 
-            print(f"\nDBSCAN:")
+            print("\nDBSCAN:")
             print(f"  Clusters found:         {n_clusters_dbscan}")
             print(f"  Noise points:           {n_noise}")
             print(f"  Silhouette Score:       {silhouette:.4f} (higher is better)")
             print(f"  Calinski-Harabasz:      {calinski:.4f} (higher is better)")
             print(f"  Davies-Bouldin:         {davies:.4f} (lower is better)")
     else:
-        print(f"\nDBSCAN:")
+        print("\nDBSCAN:")
         print(f"  Clusters found:         {n_clusters_dbscan}")
         print(f"  Noise points:           {n_noise}")
         print("  Note: Insufficient clusters for metric calculation")

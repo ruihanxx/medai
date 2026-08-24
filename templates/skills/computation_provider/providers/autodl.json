@@ -1,0 +1,39 @@
+{
+  "adapter_version": 1,
+  "provider": "autodl",
+  "reference": "references/autodl.md",
+  "script": "scripts/autodl.py",
+  "environment": [
+    {"name": "AUTODL_TOKEN", "secret": true, "required": true},
+    {"name": "AUTODL_IMAGE_UUID", "secret": false, "required": true}
+  ],
+  "configuration_fingerprint": ["AUTODL_IMAGE_UUID"],
+  "drives": {
+    "aliyun": {
+      "reference": "cloud/aliyun.md",
+      "source_template": "medai/{dataset}",
+      "environment": [
+        {"name": "AUTODL_AUTOPANEL_PASSWORD", "secret": true, "required": true},
+        {"name": "AUTODL_CLOUDDRIVE_TIMEOUT_SECONDS", "secret": false, "required": false, "default": "3600"},
+        {"name": "AUTODL_CLOUDDRIVE_GPU_SPEC", "secret": false, "required": false, "default": "v-32g-p"}
+      ],
+      "configuration_fingerprint": []
+    }
+  },
+  "default_drive": "aliyun",
+  "actions": {
+    "validate-state": 60,
+    "status": 120,
+    "power-on": 720,
+    "power-off": 120,
+    "reconcile": 720,
+    "release": 120,
+    "cloud-pull": 1920,
+    "exec": 7200,
+    "upload": 7200,
+    "download": 7200
+  },
+  "legacy_manifest": {
+    "configuration_fields": {"AUTODL_IMAGE_UUID": "autodl_image_uuid"}
+  }
+}

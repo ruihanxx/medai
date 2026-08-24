@@ -1,0 +1,55 @@
+{
+  "adapter_version": 1,
+  "provider": "vastai",
+  "reference": "references/vastai.md",
+  "script": "scripts/vastai.py",
+  "environment": [
+    {"name": "VAST_API_KEY", "secret": true, "required": true},
+    {"name": "VASTAI_IMAGE", "secret": false, "required": true},
+    {"name": "VASTAI_API_BASE_URL", "secret": false, "required": false, "default": "https://console.vast.ai"},
+    {"name": "VASTAI_MAX_DPH", "secret": false, "required": false, "default": "2"},
+    {"name": "VASTAI_DISK_GB", "secret": false, "required": false, "default": "64"},
+    {"name": "VASTAI_DEFAULT_GPU_COUNT", "secret": false, "required": false, "default": "1"},
+    {"name": "VASTAI_MIN_GPU_RAM_GB", "secret": false, "required": false, "default": "24"},
+    {"name": "VASTAI_MIN_CPU_RAM_GB", "secret": false, "required": false, "default": "32"},
+    {"name": "VASTAI_MIN_RELIABILITY", "secret": false, "required": false, "default": "0.99"},
+    {"name": "VASTAI_MAX_CAMPAIGN_INSTANCES", "secret": false, "required": false, "default": "3"}
+  ],
+  "configuration_fingerprint": [
+    "VASTAI_IMAGE",
+    "VASTAI_API_BASE_URL",
+    "VASTAI_MAX_DPH",
+    "VASTAI_DISK_GB",
+    "VASTAI_DEFAULT_GPU_COUNT",
+    "VASTAI_MIN_GPU_RAM_GB",
+    "VASTAI_MIN_CPU_RAM_GB",
+    "VASTAI_MIN_RELIABILITY"
+  ],
+  "drives": {
+    "google-drive": {
+      "reference": "cloud/google-drive.md",
+      "source_template": "medai/{dataset}",
+      "cloud_pull_handoff": true,
+      "environment": [
+        {"name": "VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "secret": false, "required": true}
+      ],
+      "configuration_fingerprint": ["VASTAI_GOOGLE_DRIVE_CONNECTION_ID"]
+    }
+  },
+  "default_drive": "google-drive",
+  "actions": {
+    "validate-state": 60,
+    "status": 120,
+    "power-on": 900,
+    "power-off": 300,
+    "reconcile": 1800,
+    "release": 300,
+    "cloud-pull": 5400,
+    "exec": 7200,
+    "upload": 7200,
+    "download": 7200
+  },
+  "legacy_manifest": {
+    "configuration_fields": {}
+  }
+}

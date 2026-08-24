@@ -12,10 +12,11 @@ Plot types:
     line, scatter, bar, histogram, heatmap, contour, box, violin, 3d, all
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.gridspec import GridSpec
 import argparse
+
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.gridspec import GridSpec
 
 
 def set_publication_style():
@@ -236,11 +237,11 @@ def create_box_plot(data, ax=None):
     # Generate multiple distributions
     box_data = [np.random.normal(0, std, 100) for std in range(1, 5)]
 
-    bp = ax.boxplot(box_data, labels=['Group 1', 'Group 2', 'Group 3', 'Group 4'],
-                    patch_artist=True, showmeans=True,
-                    boxprops=dict(facecolor='lightblue', edgecolor='black'),
-                    medianprops=dict(color='red', linewidth=2),
-                    meanprops=dict(marker='D', markerfacecolor='green', markersize=8))
+    _bp = ax.boxplot(box_data, labels=['Group 1', 'Group 2', 'Group 3', 'Group 4'],
+                     patch_artist=True, showmeans=True,
+                     boxprops=dict(facecolor='lightblue', edgecolor='black'),
+                     medianprops=dict(color='red', linewidth=2),
+                     meanprops=dict(marker='D', markerfacecolor='green', markersize=8))
 
     ax.set_xlabel('Groups')
     ax.set_ylabel('Values')
@@ -283,7 +284,6 @@ def create_violin_plot(data, ax=None):
 
 def create_3d_plot():
     """Create 3D surface plot."""
-    from mpl_toolkits.mplot3d import Axes3D
 
     fig = plt.figure(figsize=(12, 9))
     ax = fig.add_subplot(111, projection='3d')
@@ -383,11 +383,11 @@ def main():
     }
 
     if args.plot_type == '3d':
-        fig = create_3d_plot()
+        _fig = create_3d_plot()
     elif args.plot_type == 'all':
-        fig = create_comprehensive_figure()
+        _fig = create_comprehensive_figure()
     else:
-        fig = plot_functions[args.plot_type](data)
+        _fig = plot_functions[args.plot_type](data)
 
     # Save figure
     plt.savefig(args.output, dpi=300, bbox_inches='tight')

@@ -1,9 +1,23 @@
 dataset_id: mimic-iv
 dataset_name: MIMIC-IV
 version: '3.1'
-generated_at: '2026-07-06'
+generated_at: '2026-08-20'
 raw_root: raw
-local_raw_root_note: raw is a symlink to ../mimic-iv_raw; original raw files were not modified.
+local_raw_root_note: The adapter treats the user-supplied raw directory as read-only; raw files were not modified.
+components:
+- component_id: mimic-iv
+  dataset_name: MIMIC-IV
+  version: '3.1'
+  coverage: credentialed full release
+  paths:
+  - raw/hosp
+  - raw/icu
+- component_id: mimic-iv-ed-demo
+  dataset_name: MIMIC-IV-ED Demo
+  version: '2.2'
+  coverage: public demo subset; 222 ED stays across 64 subjects in the local tables
+  paths:
+  - raw/ed
 official_sources:
 - title: PhysioNet MIMIC-IV v3.1 project page
   url: https://physionet.org/content/mimiciv/3.1/
@@ -25,7 +39,219 @@ official_sources:
   url: https://mimic.mit.edu/docs/iv/about/concepts/
   accessed: '2026-07-06'
   notes: Official identifier and date-shifting concepts.
+- title: PhysioNet MIMIC-IV-ED Demo v2.2 project page
+  url: https://physionet.org/content/mimic-iv-ed-demo/2.2/
+  accessed: '2026-08-20'
+  notes: Official public demo release page and six-table file listing; local ED file sizes and hashes match this release.
+- title: PhysioNet MIMIC-IV-ED v2.2 project page
+  url: https://physionet.org/content/mimic-iv-ed/2.2/
+  accessed: '2026-08-20'
+  notes: Official full-release data descriptions and linkage guidance used to document the demo tables.
+- title: MIMIC-IV ED module documentation
+  url: https://mimic.mit.edu/docs/iv/modules/ed/
+  accessed: '2026-08-20'
+  notes: Official ED star-schema and table documentation.
 resources:
+- resource_id: diagnosis
+  columns:
+  - subject_id
+  - stay_id
+  - seq_num
+  - icd_code
+  - icd_version
+  - icd_title
+  paths:
+  - raw/ed/diagnosis.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 8992
+    human_readable: 8.8 KB
+  count_summary:
+    file_count: 1
+    row_count: 545
+    column_count: 6
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  sha256: 3a2d6bfb402d5783f1950f4729dd378e825475719f0535fb6b0209c2bc0744e9
+  source_evidence:
+  - local header, complete row count, and SHA256SUMS_ed.txt
+  - https://physionet.org/content/mimic-iv-ed/2.2/
+  - https://mimic.mit.edu/docs/iv/modules/ed/
+  notes: ICD-9/ICD-10 diagnoses billed for the ED stay; these are distinct from hospital diagnoses_icd rows.
+- resource_id: edstays
+  columns:
+  - subject_id
+  - hadm_id
+  - stay_id
+  - intime
+  - outtime
+  - gender
+  - race
+  - arrival_transport
+  - disposition
+  paths:
+  - raw/ed/edstays.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: entity_table
+  size_summary:
+    total_bytes: 6258
+    human_readable: 6.1 KB
+  count_summary:
+    file_count: 1
+    row_count: 222
+    column_count: 9
+    unique_stay_id: 222
+    unique_subject_id: 64
+    populated_hadm_id: 171
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  sha256: fc185cb111a70e9dfd8457c6e1da4f9366dee729e072282995dcd7045a5a3c52
+  source_evidence:
+  - local header, complete row count, and SHA256SUMS_ed.txt
+  - https://physionet.org/content/mimic-iv-ed/2.2/
+  - https://mimic.mit.edu/docs/iv/modules/ed/
+  notes: ED tracking table with one row per stay; populated hadm_id values link admitted ED stays to hospital admissions.
+- resource_id: medrecon
+  columns:
+  - subject_id
+  - stay_id
+  - charttime
+  - name
+  - gsn
+  - ndc
+  - etc_rn
+  - etccode
+  - etcdescription
+  paths:
+  - raw/ed/medrecon.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 39662
+    human_readable: 38.7 KB
+  count_summary:
+    file_count: 1
+    row_count: 2764
+    column_count: 9
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  sha256: efdab040cede0ef19997d6c5f55f3e8cbaccdfdf7b502fc779420ddcbf47804c
+  source_evidence:
+  - local header, complete row count, and SHA256SUMS_ed.txt
+  - https://physionet.org/content/mimic-iv-ed/2.2/
+  - https://mimic.mit.edu/docs/iv/modules/ed/medrecon.html
+  notes: Medications reported as being taken before the ED stay, with GSN, NDC, and therapeutic-class fields.
+- resource_id: pyxis
+  columns:
+  - subject_id
+  - stay_id
+  - charttime
+  - med_rn
+  - name
+  - gsn_rn
+  - gsn
+  paths:
+  - raw/ed/pyxis.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 12430
+    human_readable: 12.1 KB
+  count_summary:
+    file_count: 1
+    row_count: 1082
+    column_count: 7
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  sha256: 9019853bc68c0467ee26d3dcedf4d3dcbaa7a01ffb2f819adb99b2072fa84ec0
+  source_evidence:
+  - local header, complete row count, and SHA256SUMS_ed.txt
+  - https://physionet.org/content/mimic-iv-ed/2.2/
+  - https://mimic.mit.edu/docs/iv/modules/ed/
+  notes: Medication dispensation events from the ED Pyxis system; it does not cover medications dispensed elsewhere.
+- resource_id: triage
+  columns:
+  - subject_id
+  - stay_id
+  - temperature
+  - heartrate
+  - resprate
+  - o2sat
+  - sbp
+  - dbp
+  - pain
+  - acuity
+  - chiefcomplaint
+  paths:
+  - raw/ed/triage.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 5489
+    human_readable: 5.4 KB
+  count_summary:
+    file_count: 1
+    row_count: 222
+    column_count: 11
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  sha256: 086dadcb49adc5f24bdda0e342ec9cf0fbcb2e9595516c5c101d408434e1e09b
+  source_evidence:
+  - local header, complete row count, and SHA256SUMS_ed.txt
+  - https://physionet.org/content/mimic-iv-ed/2.2/
+  - https://mimic.mit.edu/docs/iv/modules/ed/
+  notes: Initial ED triage vital signs, pain, acuity, and deidentified free-text chief complaint.
+- resource_id: vitalsign
+  columns:
+  - subject_id
+  - stay_id
+  - charttime
+  - temperature
+  - heartrate
+  - resprate
+  - o2sat
+  - sbp
+  - dbp
+  - rhythm
+  - pain
+  paths:
+  - raw/ed/vitalsign.csv.gz
+  modality: tabular_ehr
+  file_format: csv
+  compression: gzip
+  role: event_table
+  size_summary:
+    total_bytes: 15307
+    human_readable: 14.9 KB
+  count_summary:
+    file_count: 1
+    row_count: 1038
+    column_count: 11
+    sample_rows_profiled: 200
+  readable: true
+  reader_hint: gzip.open/csv or pandas.read_csv with compression="gzip"
+  sha256: 89967d8b9dd139d540e9d08270bb6282dd2df0eb7111d38bfe2a79c0b291ab78
+  source_evidence:
+  - local header, complete row count, and SHA256SUMS_ed.txt
+  - https://physionet.org/content/mimic-iv-ed/2.2/
+  - https://mimic.mit.edu/docs/iv/modules/ed/
+  notes: Aperiodic vital signs documented during ED stays, including chart time, rhythm, and pain fields.
 - resource_id: admissions
   columns:
   - subject_id
@@ -1136,3 +1362,24 @@ resources:
   source_evidence:
   - local raw documentation file
   notes: Local checksum manifest for raw files.
+- resource_id: sha256sums_ed_txt
+  columns: []
+  paths:
+  - raw/SHA256SUMS_ed.txt
+  modality: documentation
+  file_format: text
+  compression: none
+  role: manifest
+  size_summary:
+    total_bytes: 577
+    human_readable: 577 B
+  count_summary:
+    file_count: 1
+    line_count: 7
+  readable: true
+  reader_hint: plain text SHA-256 manifest; validate the six raw/ed payloads independently of its LICENSE.txt entry
+  source_evidence:
+  - local raw documentation file
+  - six raw/ed payload hashes verified on 2026-08-20
+  notes: Upstream MIMIC-IV-ED Demo v2.2 checksum manifest. Its six ED payload hashes match; its LICENSE.txt hash does
+    not match the separate MIMIC-IV v3.1 license retained at the shared raw root.
