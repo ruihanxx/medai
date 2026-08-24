@@ -1,0 +1,227 @@
+dataset_id: faers
+generated_at: '2026-08-25'
+
+partition_contract:
+  partition_key: quarter
+  selector: 2014Q1..2024Q4
+  expected_partition_count: 44
+  applies_to_resource_ids:
+  - demographics
+  - drugs
+  - indications
+  - outcomes
+  - reactions
+  - report_sources
+  - therapies
+  reuse_rule: >-
+    The entity and relationship graph below applies identically within every
+    selected quarter. Resolve the seven physical table files through adapter.py;
+    do not duplicate this graph for individual years or quarters.
+  cross_partition_rule: >-
+    Retain _quarter as provenance when combining partitions. A later quarter may
+    contain a later version of an existing CASEID, so cross-quarter cohorts must
+    define a version-selection rule instead of treating every row as a new case.
+
+schema_versions:
+- schema_id: legacy_2014_h1
+  applies_to:
+  - 2014Q1
+  - 2014Q2
+  differences:
+  - DEMO uses GNDR_COD instead of SEX and lacks AUTH_NUM, LIT_REF, and AGE_GRP.
+  - DRUG lacks PROD_AI.
+  - REAC lacks DRUG_REC_ACT.
+  normalization: adapter.py renames GNDR_COD to SEX and fills absent canonical fields with null.
+- schema_id: current_schema
+  applies_to: 2014Q3..2024Q4
+  differences: []
+  normalization: Physical headers already match the canonical resource schemas.
+
+entities:
+- entity_id: adverse_event_case_version
+  description: One released FAERS case version in a quarterly extract.
+  resource_ids:
+  - demographics
+  key_fields:
+  - primaryid
+  case_identity_fields:
+  - caseid
+  - caseversion
+  partition_field: _quarter
+
+- entity_id: reported_drug
+  description: One reported medicinal product within a released case version.
+  resource_ids:
+  - drugs
+  key_fields:
+  - primaryid
+  - drug_seq
+  partition_field: _quarter
+
+- entity_id: adverse_reaction
+  description: One MedDRA preferred-term reaction row associated with a released case version.
+  resource_ids:
+  - reactions
+  key_fields:
+  - primaryid
+  - pt
+  partition_field: _quarter
+
+- entity_id: patient_outcome
+  description: One coded patient outcome associated with a released case version.
+  resource_ids:
+  - outcomes
+  key_fields:
+  - primaryid
+  - outc_cod
+  partition_field: _quarter
+
+- entity_id: report_source
+  description: One coded source associated with a released case version.
+  resource_ids:
+  - report_sources
+  key_fields:
+  - primaryid
+  - rpsr_cod
+  partition_field: _quarter
+
+- entity_id: drug_therapy_interval
+  description: One reported therapy interval for a drug within a released case version.
+  resource_ids:
+  - therapies
+  key_fields:
+  - primaryid
+  - dsg_drug_seq
+  - start_dt
+  - end_dt
+  partition_field: _quarter
+
+- entity_id: drug_indication
+  description: One MedDRA preferred-term indication for a drug within a released case version.
+  resource_ids:
+  - indications
+  key_fields:
+  - primaryid
+  - indi_drug_seq
+  - indi_pt
+  partition_field: _quarter
+
+- entity_id: deleted_case_notice
+  description: A released identifier for a case deleted by FDA or a manufacturer.
+  resource_ids:
+  - deleted_cases
+  key_fields:
+  - caseid
+  partition_field: _quarter
+
+relationships:
+- relationship_id: drug_belongs_to_case_version
+  from_entity: reported_drug
+  to_entity: adverse_event_case_version
+  join_fields:
+  - primaryid
+  partition_guard: _quarter
+  cardinality: many_to_one
+  evidence: FDA ASC_NTS defines PRIMARYID as the link field between all seven ASCII files and documents one or more drugs per demographic row.
+  confidence: high
+
+- relationship_id: reaction_belongs_to_case_version
+  from_entity: adverse_reaction
+  to_entity: adverse_event_case_version
+  join_fields:
+  - primaryid
+  partition_guard: _quarter
+  cardinality: many_to_one
+  evidence: FDA ASC_NTS documents one or more reaction terms per demographic row, linked by PRIMARYID.
+  confidence: high
+
+- relationship_id: outcome_belongs_to_case_version
+  from_entity: patient_outcome
+  to_entity: adverse_event_case_version
+  join_fields:
+  - primaryid
+  partition_guard: _quarter
+  cardinality: many_to_one
+  evidence: FDA ASC_NTS documents zero or more outcome rows per demographic row, linked by PRIMARYID.
+  confidence: high
+
+- relationship_id: report_source_belongs_to_case_version
+  from_entity: report_source
+  to_entity: adverse_event_case_version
+  join_fields:
+  - primaryid
+  partition_guard: _quarter
+  cardinality: many_to_one
+  evidence: FDA ASC_NTS documents zero or more report-source rows per demographic row, linked by PRIMARYID.
+  confidence: high
+
+- relationship_id: therapy_belongs_to_reported_drug
+  from_entity: drug_therapy_interval
+  to_entity: reported_drug
+  join_fields:
+  - therapies.primaryid=drugs.primaryid
+  - therapies.dsg_drug_seq=drugs.drug_seq
+  partition_guard: _quarter
+  cardinality: many_to_one
+  evidence: FDA ASC_NTS explicitly requires PRIMARYID plus the drug sequence to link THER to DRUG; multiple therapy intervals may exist for one drug.
+  confidence: high
+
+- relationship_id: indication_belongs_to_reported_drug
+  from_entity: drug_indication
+  to_entity: reported_drug
+  join_fields:
+  - indications.primaryid=drugs.primaryid
+  - indications.indi_drug_seq=drugs.drug_seq
+  partition_guard: _quarter
+  cardinality: many_to_one
+  evidence: FDA ASC_NTS explicitly maps INDI_DRUG_SEQ to DRUG_SEQ within PRIMARYID and permits zero or more indications per drug.
+  confidence: high
+
+- relationship_id: deleted_notice_flags_case
+  from_entity: deleted_case_notice
+  to_entity: adverse_event_case_version
+  join_fields:
+  - deleted_cases.caseid=demographics.caseid
+  partition_guard: null
+  cardinality: one_to_many_versions
+  evidence: FDA FAQ 44 states that deletion lists contain cases deleted by FDA or manufacturers; the files contain one unlabelled identifier per line.
+  confidence: medium
+
+temporal_structure:
+  quarter: Extract partition covering reports received or completed for that quarter; it is not the adverse-event date.
+  case_version: CASEVERSION increments for follow-ups, while PRIMARYID identifies a specific case version and CASEID groups versions.
+  adverse_event_date: EVENT_DT can be partial YYYY, YYYYMM, or YYYYMMDD and must retain its submitted precision.
+  therapy_interval: START_DT and END_DT can be partial; a drug may have multiple intervals with the same PRIMARYID and drug sequence.
+  extract_semantics: The quarterly output supplies the latest completed version available when the extract is prepared; exceptional processing delays can move a case into a later extract.
+
+semantic_value_changes:
+- applies_to: 2021Q4..2024Q4
+  field: reporter_country and occr_country
+  change: FDA documentation says the modernized extracts use GENC country codes.
+- applies_to: 2022Q3..2024Q4
+  field: rept_cod
+  change: 5DAY and 30DAY appear as combination-product report types.
+- applies_to: 2024Q4
+  field: role_cod
+  change: DN (Drug Not Administered) was added as a valid role code.
+
+alignment_notes:
+- Join the seven core tables within a quarter using PRIMARYID; retain _quarter as an explicit guard and provenance field.
+- Link THER and INDI to DRUG with both PRIMARYID and the table-specific drug sequence; a drug sequence is not globally unique.
+- Use CASEID plus CASEVERSION for cross-quarter version reasoning. Do not assume one physical row per real-world case across all partitions.
+- Preserve partial dates as strings or explicit interval/precision representations; do not impute missing month or day as 01.
+- MedDRA preferred terms in REAC and INDI are release-dependent coded labels; term casing and MedDRA versions can change over time.
+- Apply deleted-case notices when constructing longitudinal datasets. The 2019Q1 AllDeletedCases file is historical/cumulative and is excluded by the adapter unless explicitly requested.
+- Do not infer causality, incidence, or comparative product risk from spontaneous-report counts.
+
+unresolved_relationships:
+- source: deleted_cases.caseid
+  target: demographics.caseid
+  issue: Deletion files have no header; the FDA FAQ calls their values cases but does not label the identifier field in the physical file.
+  suggested_resolution: Treat values as CASEID for case-level exclusion, retain source filename and quarter, and verify against the task-specific case population before destructive filtering.
+  confidence: medium
+- source: cross-quarter case versions
+  target: analysis cohort
+  issue: A case may be represented by different versions in different extracts, and delayed processing can shift its appearance.
+  suggested_resolution: Predeclare whether the analysis is quarter-of-receipt, report-version, or latest-case based, then select by CASEID, CASEVERSION, and FDA receipt dates accordingly.
+  confidence: high

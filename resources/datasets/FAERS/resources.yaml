@@ -1,0 +1,545 @@
+dataset_id: faers
+dataset_name: FDA Adverse Event Reporting System Quarterly ASCII Extracts
+version: 2014Q1-2024Q4
+generated_at: '2026-08-25'
+raw_root: raw
+local_raw_root_note: >-
+  The downloaded quarterly directories, original ZIP files, extracted FDA files,
+  checksums, source URL list, and downloader are preserved beneath raw without
+  modifying their contents.
+official_sources:
+- title: FDA AEMS latest quarterly data files
+  url: https://www.fda.gov/drugs/fda-adverse-event-monitoring-system-aems/fda-adverse-event-monitoring-system-aems-latest-quarterly-data-files
+  accessed: '2026-08-24'
+  notes: FDA landing page; the system and page were formerly named FAERS.
+- title: FDA FAERS/AEMS quarterly data extract file index
+  url: https://fis.fda.gov/extensions/FPD-QDE-FAERS/FPD-QDE-FAERS.html
+  accessed: '2026-08-24'
+  notes: Official quarter-by-quarter ASCII and XML download index.
+- title: Local FDA quarterly README and ASC_NTS documents
+  path_spec:
+  - raw/{quarter}/extracted/Readme.{doc|pdf}
+  - raw/{quarter}/extracted/{ascii|ASCII}/ASC_NTS.{doc|pdf}
+  notes: FDA-supplied format, caveat, field, and relationship documentation repeated in each quarterly package.
+
+quarter_groups:
+  all_quarters:
+    selector: 2014Q1..2024Q4
+    expected_count: 44
+  legacy_2014_h1:
+    quarters:
+    - 2014Q1
+    - 2014Q2
+    expected_count: 2
+  current_schema:
+    selector: 2014Q3..2024Q4
+    expected_count: 42
+  deleted_case_quarters:
+    selector: 2019Q1..2024Q4
+    expected_count: 24
+
+partition_contract:
+  partition_key: quarter
+  directory_pattern: raw/{YYYY}Q{Q}
+  archive_pattern: raw/{quarter}/faers_ascii_{YYYY}{q|Q}{Q}.zip
+  extracted_table_pattern: raw/{quarter}/extracted/{ascii|ASCII}/{TABLE}{YY}Q{Q}[_new].txt
+  delimiter: '$'
+  text_encoding: latin-1
+  line_endings: mixed CRLF/LF across releases
+  reuse_rule: >-
+    Every logical resource below applies to a quarter group and is described once;
+    adapter.py resolves the repeated physical files case-insensitively instead of
+    storing a separate resource object for every year and quarter.
+  observed_path_variants:
+  - applies_to: 2014Q1..2019Q4
+    ascii_directory: ascii
+  - applies_to: 2020Q1..2024Q4
+    ascii_directory: ASCII
+  - applies_to: 2018Q1
+    exception: The demographic filename is DEMO18Q1_new.txt.
+  - applies_to: 2019Q1..2024Q4
+    exception: Deleted-case directory and filenames vary in capitalization and naming; adapter.py discovers them by role.
+
+schema_normalization:
+  canonical_schema: current_schema
+  rules:
+  - resource_id: demographics
+    applies_to: legacy_2014_h1
+    rename:
+      gndr_cod: sex
+    fill_with_null:
+    - auth_num
+    - lit_ref
+    - age_grp
+  - resource_id: drugs
+    applies_to: legacy_2014_h1
+    fill_with_null:
+    - prod_ai
+  - resource_id: reactions
+    applies_to: legacy_2014_h1
+    fill_with_null:
+    - drug_rec_act
+  notes: >-
+    Normalization changes only column shape. It does not infer values absent from
+    the 2014Q1-Q2 extracts; adapter.py returns those cells as null.
+
+clinical_caveats:
+- A submitted report does not establish that a product caused an event.
+- Spontaneous-report counts cannot estimate incidence or comparative drug risk.
+- Quarter is extract/receipt provenance, not the adverse-event date; event and therapy dates may be partial YYYY, YYYYMM, or YYYYMMDD values.
+- The extract is case/version based and supplies the latest completed version available when a quarterly extract is produced.
+- Supporting frequency PDFs can differ slightly from physical file counts for older extracts; use physical files for local row counts.
+
+resources:
+- resource_id: demographics
+  kind: quarterly_table
+  table_code: DEMO
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/DEMO{YY}Q{Q}[_new].txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  compression: none
+  role: case_version_entity_table
+  canonical_columns:
+  - primaryid
+  - caseid
+  - caseversion
+  - i_f_code
+  - event_dt
+  - mfr_dt
+  - init_fda_dt
+  - fda_dt
+  - rept_cod
+  - auth_num
+  - mfr_num
+  - mfr_sndr
+  - lit_ref
+  - age
+  - age_cod
+  - age_grp
+  - sex
+  - e_sub
+  - wt
+  - wt_cod
+  - rept_dt
+  - to_mfr
+  - occp_cod
+  - reporter_country
+  - occr_country
+  raw_schema_variants:
+  - variant_id: legacy_2014_h1
+    applies_to: legacy_2014_h1
+    columns:
+    - primaryid
+    - caseid
+    - caseversion
+    - i_f_code
+    - event_dt
+    - mfr_dt
+    - init_fda_dt
+    - fda_dt
+    - rept_cod
+    - mfr_num
+    - mfr_sndr
+    - age
+    - age_cod
+    - gndr_cod
+    - e_sub
+    - wt
+    - wt_cod
+    - rept_dt
+    - to_mfr
+    - occp_cod
+    - reporter_country
+    - occr_country
+  - variant_id: current_schema
+    applies_to: current_schema
+    columns:
+    - primaryid
+    - caseid
+    - caseversion
+    - i_f_code
+    - event_dt
+    - mfr_dt
+    - init_fda_dt
+    - fda_dt
+    - rept_cod
+    - auth_num
+    - mfr_num
+    - mfr_sndr
+    - lit_ref
+    - age
+    - age_cod
+    - age_grp
+    - sex
+    - e_sub
+    - wt
+    - wt_cod
+    - rept_dt
+    - to_mfr
+    - occp_cod
+    - reporter_country
+    - occr_country
+  size_summary:
+    total_bytes: 2418081804
+    min_partition_bytes: 28309653
+    max_partition_bytes: 70973625
+  count_summary:
+    file_count: 44
+    row_count: not_counted_large_partitioned_files
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  source_evidence:
+  - Local headers from every quarterly DEMO file
+  - FDA Readme and ASC_NTS documents
+  notes: One row per released case version within a quarterly extract; PRIMARYID links all seven tables.
+
+- resource_id: drugs
+  kind: quarterly_table
+  table_code: DRUG
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/DRUG{YY}Q{Q}.txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  compression: none
+  role: medication_event_table
+  canonical_columns:
+  - primaryid
+  - caseid
+  - drug_seq
+  - role_cod
+  - drugname
+  - prod_ai
+  - val_vbm
+  - route
+  - dose_vbm
+  - cum_dose_chr
+  - cum_dose_unit
+  - dechal
+  - rechal
+  - lot_num
+  - exp_dt
+  - nda_num
+  - dose_amt
+  - dose_unit
+  - dose_form
+  - dose_freq
+  raw_schema_variants:
+  - variant_id: legacy_2014_h1
+    applies_to: legacy_2014_h1
+    columns:
+    - primaryid
+    - caseid
+    - drug_seq
+    - role_cod
+    - drugname
+    - val_vbm
+    - route
+    - dose_vbm
+    - cum_dose_chr
+    - cum_dose_unit
+    - dechal
+    - rechal
+    - lot_num
+    - exp_dt
+    - nda_num
+    - dose_amt
+    - dose_unit
+    - dose_form
+    - dose_freq
+  - variant_id: current_schema
+    applies_to: current_schema
+    columns: &drug_columns
+    - primaryid
+    - caseid
+    - drug_seq
+    - role_cod
+    - drugname
+    - prod_ai
+    - val_vbm
+    - route
+    - dose_vbm
+    - cum_dose_chr
+    - cum_dose_unit
+    - dechal
+    - rechal
+    - lot_num
+    - exp_dt
+    - nda_num
+    - dose_amt
+    - dose_unit
+    - dose_form
+    - dose_freq
+  size_summary:
+    total_bytes: 6778227738
+    min_partition_bytes: 51523678
+    max_partition_bytes: 226648175
+  count_summary:
+    file_count: 44
+    row_count: not_counted_large_partitioned_files
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  source_evidence:
+  - Local headers from every quarterly DRUG file
+  - FDA Readme and ASC_NTS documents
+  notes: One or more drugs per case; join therapy and indication rows using PRIMARYID plus the corresponding drug sequence.
+
+- resource_id: indications
+  kind: quarterly_table
+  table_code: INDI
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/INDI{YY}Q{Q}.txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  compression: none
+  role: drug_indication_event_table
+  canonical_columns: &indication_columns
+  - primaryid
+  - caseid
+  - indi_drug_seq
+  - indi_pt
+  raw_schema_variants:
+  - variant_id: all_quarters
+    applies_to: all_quarters
+    columns: *indication_columns
+  size_summary:
+    total_bytes: 2200004127
+    min_partition_bytes: 18526184
+    max_partition_bytes: 77639413
+  count_summary:
+    file_count: 44
+    row_count: not_counted_large_partitioned_files
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  source_evidence:
+  - Local headers from every quarterly INDI file
+  - FDA Readme and ASC_NTS documents
+  notes: MedDRA preferred terms for reported drug indications; INDI_DRUG_SEQ maps to DRUG_SEQ within PRIMARYID.
+
+- resource_id: outcomes
+  kind: quarterly_table
+  table_code: OUTC
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/OUTC{YY}Q{Q}.txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  compression: none
+  role: case_outcome_event_table
+  canonical_columns: &outcome_columns
+  - primaryid
+  - caseid
+  - outc_cod
+  raw_schema_variants:
+  - variant_id: all_quarters
+    applies_to: all_quarters
+    columns: *outcome_columns
+  size_summary:
+    total_bytes: 283577921
+    min_partition_bytes: 3646825
+    max_partition_bytes: 9683245
+  count_summary:
+    file_count: 44
+    row_count: not_counted_large_partitioned_files
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  source_evidence:
+  - Local headers from every quarterly OUTC file
+  - FDA Readme and ASC_NTS documents
+  notes: Zero or more coded patient outcomes per released case version.
+
+- resource_id: reactions
+  kind: quarterly_table
+  table_code: REAC
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/REAC{YY}Q{Q}.txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  compression: none
+  role: adverse_reaction_event_table
+  canonical_columns:
+  - primaryid
+  - caseid
+  - pt
+  - drug_rec_act
+  raw_schema_variants:
+  - variant_id: legacy_2014_h1
+    applies_to: legacy_2014_h1
+    columns:
+    - primaryid
+    - caseid
+    - pt
+  - variant_id: current_schema
+    applies_to: current_schema
+    columns:
+    - primaryid
+    - caseid
+    - pt
+    - drug_rec_act
+  size_summary:
+    total_bytes: 2066589541
+    min_partition_bytes: 23844821
+    max_partition_bytes: 60406816
+  count_summary:
+    file_count: 44
+    row_count: not_counted_large_partitioned_files
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  source_evidence:
+  - Local headers from every quarterly REAC file
+  - FDA Readme and ASC_NTS documents
+  notes: One or more MedDRA preferred terms per case; term order does not imply clinical priority.
+
+- resource_id: report_sources
+  kind: quarterly_table
+  table_code: RPSR
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/RPSR{YY}Q{Q}.txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  compression: none
+  role: report_source_event_table
+  canonical_columns: &report_source_columns
+  - primaryid
+  - caseid
+  - rpsr_cod
+  raw_schema_variants:
+  - variant_id: all_quarters
+    applies_to: all_quarters
+    columns: *report_source_columns
+  size_summary:
+    total_bytes: 15957108
+    min_partition_bytes: 109704
+    max_partition_bytes: 844524
+  count_summary:
+    file_count: 44
+    row_count: not_counted_large_partitioned_files
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  source_evidence:
+  - Local headers from every quarterly RPSR file
+  - FDA Readme and ASC_NTS documents
+  notes: Zero or more source codes from the latest released version of a case.
+
+- resource_id: therapies
+  kind: quarterly_table
+  table_code: THER
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/THER{YY}Q{Q}.txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  compression: none
+  role: drug_therapy_interval_table
+  canonical_columns: &therapy_columns
+  - primaryid
+  - caseid
+  - dsg_drug_seq
+  - start_dt
+  - end_dt
+  - dur
+  - dur_cod
+  raw_schema_variants:
+  - variant_id: all_quarters
+    applies_to: all_quarters
+    columns: *therapy_columns
+  size_summary:
+    total_bytes: 915256578
+    min_partition_bytes: 9576541
+    max_partition_bytes: 31130203
+  count_summary:
+    file_count: 44
+    row_count: not_counted_large_partitioned_files
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  source_evidence:
+  - Local headers from every quarterly THER file
+  - FDA Readme and ASC_NTS documents
+  notes: Zero or more therapy intervals per drug; DSG_DRUG_SEQ maps to DRUG_SEQ within PRIMARYID.
+
+- resource_id: deleted_cases
+  kind: deleted_case_list
+  applies_to: deleted_case_quarters
+  path_spec:
+  - raw/{quarter}/extracted/{deleted|DELETED|Deleted}/*DeletedCases.txt
+  - raw/{quarter}/extracted/Deleted/DELETE{YY}Q{Q}.txt
+  modality: identifier_list
+  file_format: line_delimited_text
+  compression: none
+  role: case_deletion_notice
+  columns:
+  - caseid
+  size_summary:
+    total_bytes: 1962905
+    min_file_bytes: 26460
+    max_file_bytes: 814551
+  count_summary:
+    file_count: 25
+    nonblank_identifier_lines: 205133
+  readable: true
+  reader_hint: DatasetAdapter.iter_deleted_case_ids; historical AllDeletedCases.txt is excluded unless explicitly requested
+  source_evidence:
+  - Local file inspection
+  - FDA FAQ question 44 supplied with the extracts
+  notes: >-
+    FDA began supplying deletion lists in 2019Q1. That quarter contains both a
+    historical AllDeletedCases file and a quarter-specific list; later quarters
+    contain one quarter-specific list. Files have no header and some begin with a blank line.
+
+- resource_id: quarterly_documentation
+  kind: quarterly_documentation
+  applies_to: all_quarters
+  path_spec:
+  - raw/{quarter}/extracted/Readme.{doc|pdf}
+  - raw/{quarter}/extracted/FAQs.{doc|pdf}
+  - raw/{quarter}/extracted/{ascii|ASCII}/*.{doc|pdf}
+  modality: documentation
+  file_format: doc_or_pdf
+  compression: none
+  role: official_documentation_and_frequency_reports
+  size_summary:
+    total_bytes: 62595737
+    min_file_bytes: 12803
+    max_file_bytes: 868813
+  count_summary:
+    file_count: 440
+  readable: true
+  reader_hint: DOC/PDF reader; table-specific PDFs contain supporting counts rather than source rows
+  source_evidence: Local extracted FDA packages
+  notes: Repeated official format notes, FAQs, and table-specific frequency/null-count reports are grouped once here.
+
+- resource_id: quarterly_archives
+  kind: quarterly_archive
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/faers_ascii_{YYYY}{q|Q}{Q}.zip
+  modality: archive
+  file_format: zip
+  compression: zip
+  role: original_release_archive
+  size_summary:
+    total_bytes: 2521980367
+    min_partition_bytes: 25791893
+    max_partition_bytes: 74056668
+  count_summary:
+    file_count: 44
+  readable: true
+  reader_hint: zipfile.ZipFile; adapter.validate(deep=True) checks CRC and SHA-256
+  source_evidence:
+  - FDA quarterly extract index
+  - raw/SHA256SUMS generated after local download
+  notes: One original FDA ASCII ZIP per quarter, retained alongside its extracted directory.
+
+- resource_id: acquisition_support
+  kind: acquisition_support
+  paths:
+  - raw/SHA256SUMS
+  - raw/source_urls.txt
+  - raw/download_and_extract.sh
+  modality: provenance
+  file_format: text_and_shell
+  compression: none
+  role: local_acquisition_provenance
+  count_summary:
+    file_count: 3
+  readable: true
+  reader_hint: Plain text and Bash; run download_and_extract.sh from its current raw directory for resumable acquisition
+  source_evidence: Locally generated during acquisition from the official FDA index
+  notes: These are local provenance/support artifacts, not files authored by FDA.
