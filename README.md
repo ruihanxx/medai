@@ -8,7 +8,6 @@
   <a href="#中文">简体中文</a> · <a href="#english">English</a>
 </p>
 
-> **语言切换 / Language switch:** 点击上方语言链接即可跳转到完整的中文或英文说明。 Click either link above to jump to the complete language version.
 
 ---
 
@@ -18,20 +17,13 @@
 
 ## 项目介绍
 
-MedAI 是一个运行在 Docker 中、以证据为约束的医学论文复现与 Auto Research（自动研究改进）系统。它将论文 PDF、可选的原始代码仓库和数据集转换为可执行实验、可审计的复现记录，以及逐项声明和图表/表格对照的报告。
+MedAI 是一个运行在 Docker 中、以证据为约束的医学论文复现与 Auto Research harness。它将论文 PDF、可选的原始代码仓库和数据集转换为可执行实验、可审计的复现记录，以及逐项声明和图表/表格对照的报告。
 
 - **多类型数据集：** 不将输入限制为某个固定数据集或表格格式；可面向论文所需的结构化临床数据、EHR/纵向数据、时序、医学影像、组学、文本等研究输入。前提是提供论文要求的完整原始文件和可用执行环境。
 - **预测与统计分析模型：** 复现工作流可覆盖监督式预测和统计分析；它从论文提取可检查的文本/数值声明、实验定义及图表/表格锚点，并与真实运行证据逐项比较。
 - **科学保真与可追溯：** 论文、原始仓库和源数据均以只读方式使用。缺失论文指定文件、无效产物或技术失败会明确停止，不会伪造结果、静默替代输入或缩小规模来制造“成功”。
 - **论文改进 / Auto Research：** 在已完成且有效的预测型复现之上，系统提出有论文和文献依据的输入表示、模型或训练策略改进，以独立代码副本、边界审计及已有基线证据评估改进。若论文同时含统计分析，只选择其中严格的监督式预测实验。
 
-| 场景 | MedAI 的边界 |
-| --- | --- |
-| 本地数据 | 只读挂载；审计、复现和报告写入独立运行目录。 |
-| 云端数据 | 完整物化到远程运行目录；只回传允许的汇总指标、日志和结果，绝不回传原始或逐行数据。 |
-| 原始仓库 | 仅复制到 <code>codegen/codebase/</code> 后修改，原仓库不被改写。 |
-| 论文未说明的细节 | 记录为歧义，再以可审计、适用的医学研究惯例解决；不能按目标结果调参。 |
-| Auto Research | 仅适用于已完成的监督式预测复现，并固定数据/队列/划分、结局、评价器输入输出和评价协议。 |
 
 ## 快速开始
 
@@ -324,10 +316,6 @@ medai/
 
 规范路径、字段与验证规则请见 [文档路由](docs/README.md)、[复现工作流](docs/replication.md)、[Auto Research](docs/autoresearch.md) 和 [产物契约](docs/artifacts.md)。
 
-## 致谢
-
-_待补充。_
-
 [回到顶部](#readme-top)
 
 ---
@@ -338,20 +326,14 @@ _待补充。_
 
 ## Overview
 
-MedAI is an evidence-bound system for medical-paper replication and Auto Research, running in Docker. It turns a paper PDF, an optional source repository, and a dataset into executable experiments, auditable replication records, and claim- and artifact-level reports.
+MedAI is an evidence-bound Harness for medical-paper replication and Auto Research, running in Docker. It turns a paper PDF, an optional source repository, and a dataset into executable experiments, auditable replication records, and claim- and artifact-level reports.
 
 - **Heterogeneous datasets:** MedAI is not restricted to one dataset or one table format. It is designed for the structured clinical, EHR/longitudinal, time-series, medical-imaging, omics, text, and other research inputs required by a paper—provided that complete paper-required source files and a usable runtime are supplied.
 - **Prediction and statistical-analysis models:** The replication workflow can cover supervised prediction and statistical analysis. It extracts checkable textual/numeric claims, experiment definitions, and figure/table anchors, then compares each with real execution evidence.
 - **Scientific fidelity and traceability:** The paper, source repository, and source data are read-only. Missing paper-required files, invalid artifacts, and technical failures stop explicitly; MedAI does not fabricate results, silently substitute inputs, or reduce scale just to produce a successful-looking run.
 - **Paper improvement / Auto Research:** From a completed, valid prediction replication, MedAI proposes paper- and literature-grounded input-representation, model, or training-strategy improvements. It assesses them with isolated code copies, boundary audits, and existing baseline evidence. If a paper also contains statistical analyses, only strict supervised-prediction experiments are selected.
 
-| Situation | MedAI boundary |
-| --- | --- |
-| Local data | Read-only mount; auditing, replication, and reporting write to a separate run directory. |
-| Cloud data | Fully materialized remotely; only permitted aggregate metrics, logs, and results return locally—never raw or row-level data. |
-| Source repository | Copied to <code>codegen/codebase/</code> before modification; the supplied repository is never changed. |
-| Paper underspecification | Recorded as an ambiguity, then resolved with an auditable, appropriate medical-research convention—not outcome-driven tuning. |
-| Auto Research | Only for completed supervised-prediction replications; data/cohort/split, outcome, evaluator I/O, and evaluation protocol are frozen. |
+ 
 
 ## Quick start
 
@@ -645,7 +627,5 @@ medai/
 For canonical paths, schemas, and validation rules, see the [documentation router](docs/README.md), [replication workflow](docs/replication.md), [Auto Research contract](docs/autoresearch.md), and [artifact contract](docs/artifacts.md).
 
 ## Acknowledgement
-
-_To be added._
 
 [Back to top](#readme-top)
