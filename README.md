@@ -5,9 +5,320 @@
 **Evidence-bound medical-paper replication and Auto Research**
 
 <p align="center">
-  <a href="#中文">简体中文</a> · <a href="#english">English</a>
+  <a href="#english">English</a> · <a href="#中文">简体中文</a>
 </p>
 
+
+---
+
+<a id="english"></a>
+
+# English
+
+## Overview
+
+MedAI is an evidence-bound Harness for medical-paper replication and Auto Research, running in Docker. It turns a paper PDF, an optional source repository, and a dataset into executable experiments, auditable replication records, and claim- and artifact-level reports.
+
+- **Heterogeneous datasets:** MedAI is not restricted to one dataset or one table format. It is designed for the structured clinical, EHR/longitudinal, time-series, medical-imaging, omics, text, and other research inputs required by a paper—provided that complete paper-required source files and a usable runtime are supplied.
+- **Prediction and statistical-analysis models:** The replication workflow can cover supervised prediction and statistical analysis. It extracts checkable textual/numeric claims, experiment definitions, and figure/table anchors, then compares each with real execution evidence.
+- **Scientific fidelity and traceability:** The paper, source repository, and source data are read-only. Missing paper-required files, invalid artifacts, and technical failures stop explicitly; MedAI does not fabricate results, silently substitute inputs, or reduce scale just to produce a successful-looking run.
+- **Paper improvement / Auto Research:** From a completed, valid prediction replication, MedAI proposes paper- and literature-grounded input-representation, model, or training-strategy improvements. It assesses them with isolated code copies, boundary audits, and existing baseline evidence. If a paper also contains statistical analyses, only strict supervised-prediction experiments are selected.
+
+
+## Quick start
+
+### 0. Requirements before you start
+
+Run MedAI from its **source checkout**, because <code>init</code> builds the local Docker overlay from that directory.
+
+1. Docker Engine on Linux or Docker Desktop on macOS/Windows, configured for Linux containers.
+2. Python 3.10+ for the host MinerU PDF runtime. Windows supports Python 3.10–3.12; macOS requires Apple Silicon and macOS 14+ (Intel Macs are unsupported).
+3. At least one agent CLI: <code>codex</code>, <code>claude</code>, or <code>codex</code> used through the SiliconFlow adapter. Confirm <code>codex --version</code> (or <code>claude --version</code>) first.
+4. An accessible paper PDF, the **complete** paper-required dataset directory, and optionally the source repository. A missing paper-required file is an explicit failure.
+5. Enough local disk, network access, and Docker resources. Configure remote compute first if the paper's full scale exceeds local hardware; MedAI will not silently downscale it.
+
+### 1. Get the project and use the MedAI CLI
+
+~~~bash
+git clone https://github.com/ruihanxx/medai.git
+cd medai
+
+# Linux / macOS: the checked-in launcher is the recommended MedAI CLI
+./medai --help
+~~~
+
+On Windows PowerShell or Command Prompt:
+
+~~~bat
+.\medai.cmd --help
+~~~
+
+No globally installed <code>medai</code> command is needed. Calling <code>./medai</code> from the checkout (<code>medai.cmd</code> on Windows) keeps the image built by <code>init</code> aligned with the current source.
+
+### 2. Configure the agent provider
+
+Copy the template. <code>.env</code> is Git-ignored; never commit a secret.
+
+~~~bash
+cp .env.example .env
+~~~
+
+#### Option A: sign in to local Codex (recommended)
+
+Install and sign in to the Codex CLI on the **host**, then verify it runs:
+
+~~~bash
+codex login
+codex --version
+~~~
+
+Choose a default model and reasoning effort in project <code>.env</code>; CLI flags can override them:
+
+~~~dotenv
+MEDAI_CODEX_MODEL=<your-codex-model>
+MEDAI_CODEX_REASONING_EFFORT=high
+~~~
+
+At runtime MedAI mounts the host <code>~/.codex</code> credential directory read-only into the container, so sign in on the host. Use the [official OpenAI documentation](https://learn.chatgpt.com/docs) for the current Codex CLI installation and sign-in procedure.
+
+#### Option B: use a SiliconFlow model
+
+Create an uncommitted dotenv file, for example <code>siliconflow.env</code>:
+
+~~~dotenv
+SILICONFLOW_API_KEY=<your-api-key>
+SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
+CODEX_CLI_SILICONFLOW_MODEL=<your-model-id>
+CODEX_CLI_SILICONFLOW_CONTEXT_WINDOW=131072
+CODEX_CLI_TIMEOUT_SECONDS=1200
+~~~
+
+The <code>codex</code> CLI is still required. Pass <code>--provider codex-siliconflow --siliconflow-config /absolute/path/siliconflow.env</code>. The secret is never written to the run manifest, prompts, logs, or command arguments.
+
+### 3. Optional: Vast.ai + Google Drive cloud data
+
+Use this when data cannot or should not live locally and the study needs remote compute. Complete the following in Vast.ai first:
+
+1. Create an appropriately scoped API key and register a public SSH key in Vast; keep the paired private key under host <code>~/.ssh</code>. Set <code>COMPUTATION_PROVIDER_SSH_IDENTITY_FILE</code> only if OpenSSH cannot select the key itself.
+2. In Vast Settings → Cloud Connections, connect a dedicated Google Drive account and record its Cloud Connection ID.
+3. Create <code>medai/&lt;dataset-name&gt;</code> in that Drive, for example <code>medai/mimic-iv</code>. The CLI takes the directory name, not a Drive path.
+4. Select a Vast Docker image compatible with the paper's software and hardware requirements, then set a budget and resource floors.
+
+Set these project <code>.env</code> values (replace every example):
+
+~~~dotenv
+MEDAI_COMPUTATION_PROVIDER=vastai
+MEDAI_DRIVE_PROVIDER=google-drive
+VAST_API_KEY=<scoped-api-key>
+VASTAI_IMAGE=<explicit-compatible-container-image>
+VASTAI_GOOGLE_DRIVE_CONNECTION_ID=<vast-cloud-connection-id>
+
+# Optional cost and resource guardrails
+VASTAI_MAX_DPH=2
+VASTAI_DISK_GB=64
+VASTAI_DEFAULT_GPU_COUNT=1
+VASTAI_MIN_GPU_RAM_GB=24
+VASTAI_MIN_CPU_RAM_GB=32
+VASTAI_MIN_RELIABILITY=0.99
+VASTAI_MAX_CAMPAIGN_INSTANCES=3
+~~~
+
+Cloud mode creates a read-only remote data target and a complete file inventory. Use <code>--clouddrive --data &lt;dataset-name&gt;</code>, **not** a local data path. The selected adapter manages billable creation, power-off, release, and resume through run state; never hand-edit <code>remote_compute/instance.json</code>.
+
+### 4. Initialize once
+
+<code>init</code> creates the host MinerU environment, installs the pinned PDF runtime, builds the <code>medai:local</code> image, and downloads MinerU models. The initial run can take a while; completed environments and models are reused.
+
+~~~bash
+# Linux / macOS
+./medai init
+~~~
+
+~~~bat
+:: Windows
+.\medai.cmd init
+~~~
+
+Useful initialization variables: <code>MEDAI_MODEL_CACHE</code> selects the model cache; <code>MEDAI_MINERU_MODEL_SOURCE</code> can be <code>auto</code>, <code>huggingface</code>, or <code>modelscope</code>; <code>MEDAI_MINERU_PYTHON</code> selects host Python; NVIDIA/Windows users can set <code>MEDAI_TORCH_INDEX_URL</code> before initialization for a CUDA-matched PyTorch index.
+
+### 5. Replicate a paper
+
+Replace the placeholders with absolute paths. <code>--repo</code> is optional; in local mode <code>--data</code> must be the prepared data directory.
+
+~~~bash
+./medai \
+  --replicate \
+  --paper /absolute/path/paper.pdf \
+  --repo /absolute/path/original-repository \
+  --data /absolute/path/dataset \
+  --provider codex
+~~~
+
+With SiliconFlow:
+
+~~~bash
+./medai \
+  --replicate \
+  --paper /absolute/path/paper.pdf \
+  --data /absolute/path/dataset \
+  --provider codex-siliconflow \
+  --siliconflow-config /absolute/path/siliconflow.env
+~~~
+
+With Vast.ai + Google Drive:
+
+~~~bash
+./medai \
+  --replicate \
+  --paper /absolute/path/paper.pdf \
+  --repo /absolute/path/original-repository \
+  --clouddrive \
+  --data mimic-iv \
+  --provider codex
+~~~
+
+The default output is <code>runs/&lt;UTC timestamp&gt;_&lt;paper-name&gt;/</code>. To resume, invoke the same inputs and configuration with the existing <code>--output runs/&lt;run_id&gt;</code>. Completed stages are validated before being skipped.
+
+### 6. Run Auto Research
+
+Choose a completed supervised-prediction replication. Without <code>--output</code>, MedAI creates <code>autoresearch/campaign_NNN/</code> automatically.
+
+~~~bash
+./medai \
+  --autoresearch \
+  --replicate-run runs/<completed-run-id> \
+  --max-iter 1
+~~~
+
+<code>--max-iter</code> accepts 1–10. Use <code>--assessment-threshold &lt;non-negative-number&gt;</code> to raise the weighted-score bar for a valid improvement. When reusing SiliconFlow, pass <code>--siliconflow-config</code> again because secrets are never restored from a manifest.
+
+## Configuration
+
+### CLI arguments
+
+| Argument | Purpose and constraints |
+| --- | --- |
+| <code>--replicate</code> | Starts replication; mutually exclusive with <code>--autoresearch</code> and requires <code>--paper</code>. |
+| <code>--autoresearch</code> | Starts improvement research from a completed run. Requires <code>--replicate-run</code>; cannot be combined with <code>--paper</code>, <code>--repo</code>, <code>--data</code>, <code>--clouddrive</code>, or <code>--smart-replicate</code>. |
+| <code>--paper &lt;PDF&gt;</code> | Paper PDF; replication only. |
+| <code>--repo &lt;dir&gt;</code> | Optional source repository; only its run copy is modified. |
+| <code>--data &lt;dir-or-name&gt;</code> | Existing local directory, or a safe dataset directory name with <code>--clouddrive</code>. |
+| <code>--clouddrive</code> | Enables cloud materialization; requires a configured computation provider and drive. |
+| <code>--provider &lt;codex\|claude\|codex-siliconflow&gt;</code> | Selects the agent provider; replication defaults to <code>codex</code>. |
+| <code>--siliconflow-config &lt;dotenv&gt;</code> | Required for <code>codex-siliconflow</code>; invalid with another provider. |
+| <code>--codex-model &lt;name&gt;</code> | Overrides <code>MEDAI_CODEX_MODEL</code>; <code>codex</code> only. |
+| <code>--codex-reasoning-effort &lt;level&gt;</code> | Overrides default reasoning effort; <code>codex</code> only. One of <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>, <code>ultra</code>. |
+| <code>--smart-replicate</code> | Supplies audited claim anchors and permits at most five hypothesis-recorded adjustments per experiment. Disabled by default. |
+| <code>--output &lt;dir&gt;</code> | For replication, an existing manifest-bearing run below <code>runs/</code> to resume. For Auto Research, a new or existing campaign directory. |
+| <code>--replicate-run &lt;dir&gt;</code> | Completed base run for Auto Research; must be below <code>runs/</code>. |
+| <code>--max-iter &lt;1-10&gt;</code> | Maximum Auto Research iterations; default 1. |
+| <code>--assessment-threshold &lt;number ≥ 0&gt;</code> | Weighted-score threshold for a valid Auto Research improvement; default 0. |
+
+### Environment variables
+
+| Variable | Description |
+| --- | --- |
+| <code>MEDAI_CODEX_MODEL</code> / <code>MEDAI_CODEX_REASONING_EFFORT</code> | Default model and reasoning effort for <code>codex</code>. |
+| <code>MEDAI_MODEL_CACHE</code> | Host MinerU environment/model cache; defaults to <code>.medai/mineru/</code>. |
+| <code>MEDAI_MINERU_MODEL_SOURCE</code> | <code>auto</code>, <code>huggingface</code>, or <code>modelscope</code>. |
+| <code>MEDAI_MINERU_PYTHON</code> / <code>MEDAI_TORCH_INDEX_URL</code> / <code>MEDAI_PYPI_INDEX</code> | MinerU Python, device-specific PyTorch index, and general PyPI index. |
+| <code>MEDAI_MINERU_BACKEND</code> | Overrides the default MinerU <code>pipeline</code> backend. |
+| <code>MEDAI_DOCKER_PLATFORM</code> / <code>MEDAI_IMAGE</code> | Docker platform (default <code>linux/amd64</code>) and image name (default <code>medai:local</code>). |
+| <code>MEDAI_COMPUTATION_PROVIDER</code> / <code>MEDAI_DRIVE_PROVIDER</code> | Remote-compute and cloud-drive adapters; see Vast.ai + Google Drive above. |
+| <code>VAST_*</code> / <code>VASTAI_*</code> | Vast API, image, resource, cost, reliability, and Google Drive connection configuration. |
+
+## Architecture, workflow, and interfaces
+
+### Replication workflow
+
+~~~mermaid
+flowchart LR
+    I[Paper PDF / optional code / data] --> A[Preflight and PDF parsing]
+    A --> B[Claims and experiment definitions]
+    B --> C[Code generation and ambiguity record]
+    C --> D[Data and cohort audit]
+    D -->|FAIL, up to 3 refinement rounds| E[Cohort/preprocessing refinement]
+    E --> D
+    D -->|PASS or refinements exhausted| F[Experiment plan]
+    F --> G[Full-scale replication]
+    G --> H[Claim/artifact comparison report]
+~~~
+
+| Section | Responsibility | Primary outputs |
+| --- | --- | --- |
+| <code>preflight</code> | Validates inputs and records CPU, RAM, disk, and GPU. | <code>preflight/resources.json</code> |
+| <code>preprocess_pdf</code> | Imports host MinerU output and preserves canonical Markdown and paper assets. | <code>preprocessing/paper.md</code>, <code>artifacts/</code> |
+| <code>preprocessing_agent</code> | Audits figure/table labels and formulas; extracts claims, validation anchors, and experiments. | <code>claims.json</code>, <code>experiment_todo.json</code> |
+| <code>codegen_agent</code> | Inspects data read-only, records ambiguities, and copies/writes executable code. Stops if a paper-required file is missing. | <code>codegen/codebase/</code>, <code>codegen_plan.json</code> |
+| <code>audit_agent</code> | Runs real-data preprocessing and applicable independent cohort/data-quality checks, accumulating the full issue set. | <code>codegen/audit/attempt_*/audit_report.json</code> |
+| <code>cohort_refine_agent</code> | After audit failure, changes only cohort construction, loading, preprocessing, and related ambiguities—not model, training, or evaluation. | Numbered attempt directories and updated plan |
+| <code>plan_agent</code> | Covers every claim, prepares dependencies, smoke-tests, and writes the plan. | <code>plan/replicate_plan.json</code> |
+| <code>replicate_agent</code> | Executes every planned experiment at paper full scale and saves evidence. | <code>replication_log.json</code>, <code>evidence_summary.json</code> |
+| <code>report_agents</code> | Compares every claim/figure/table anchor with real artifacts, recording validation judgements and ambiguity risks. | <code>report/reproduction_report.md</code> |
+
+### Auto Research workflow
+
+~~~mermaid
+flowchart LR
+    A[Completed prediction replication] --> B[Eligibility]
+    B --> C[Result-blind weighting and experiment contracts]
+    C --> D[Three evidence-grounded ideas per round]
+    D --> E[Independent code copy and minimal implementation]
+    E --> F[Six-boundary audit]
+    F --> G[Full-scale experiment]
+    G --> H[Evidence assessment against replication baseline]
+    H -->|No valid idea and iterations remain| D
+    H -->|Valid idea or limit reached| I[Auto Research report]
+~~~
+
+Auto Research first freezes data/cohort/split, prediction outcome and horizon, evaluator input/output, metrics, and evaluation protocol. It then creates three input-representation, model, or training-strategy candidates per round. Each candidate uses an independent code copy and cannot write back to the base replication. The ordered audit checks data, prediction target, input representation, evaluator-facing output, training, and evaluation; only an audited idea can run at full scale. Assessment compares the primary metric with existing baseline evidence and records actual delta, relative change, and an evidence-bound score from -5 to 5. It is not tuning towards a paper-reported result.
+
+### Interfaces and protocol boundaries
+
+| Interface | Protocol / invariant |
+| --- | --- |
+| CLI → launcher | Use <code>./medai</code> on Linux/macOS or <code>medai.cmd</code> on Windows. Each invocation selects exactly one of <code>--replicate</code> and <code>--autoresearch</code>. |
+| Launcher → Docker | Paper, source repository, data, and CLI credentials enter as read-only bind mounts; only the run output is writable. |
+| Agent → stage | MedAI renders a Jinja2 prompt first; the agent writes stage-owned structured artifacts. A JSONL transcript is diagnostic evidence, never proof of completed work on its own. |
+| Artifacts → orchestrator | <code>manifest.json</code> records input fingerprint, overall/per-stage state, attempts, checkpoints, and outputs. On resume, completed stages are revalidated before they are skipped; invalid artifacts resume or fail explicitly. |
+| Remote compute → state | The adapter writes non-secret lifecycle state to <code>remote_compute/instance.json</code>. A cloud dataset also requires a per-file inventory; raw data never returns locally. |
+| Report → user | The final report maps paper claims and figure/table anchors to genuinely generated files, exposing uncertainty, divergence, and failure risk. |
+
+## Repository layout
+
+~~~text
+medai/
+├── medai / medai.cmd          # Linux/macOS and Windows launchers
+├── src/medai/                 # Orchestration, state, CLI, provider adapters
+├── docker/                    # Docker overlay and container entrypoint
+├── templates/                 # Stage prompts and runtime skills
+│   └── skills/computation_provider/
+│       ├── providers/         # Supported compute/drive metadata
+│       └── references/        # Provider procedures and safety contracts
+├── docs/                      # Execution, workflow, artifact, and agent contracts
+├── tests/                     # Local and mocked external-boundary tests
+├── .env.example               # Non-secret configuration template
+├── .medai/mineru/             # Host MinerU environment/models after init (default)
+└── runs/<run_id>/             # Auditable replication outputs (default)
+    ├── manifest.json
+    ├── preprocessing/
+    ├── codegen/
+    ├── plan/
+    ├── replication/
+    ├── report/reproduction_report.md
+    ├── remote_compute/
+    └── autoresearch/campaign_<NNN>/
+        ├── experiment_setup/
+        ├── idea_generation/
+        ├── rounds/
+        └── report/auto_research_report.md
+~~~
+
+For canonical paths, schemas, and validation rules, see the [documentation router](docs/README.md), [replication workflow](docs/replication.md), [Auto Research contract](docs/autoresearch.md), and [artifact contract](docs/artifacts.md).
+
+## Acknowledgement
+
+[Back to top](#readme-top)
 
 ---
 
@@ -317,315 +628,3 @@ medai/
 规范路径、字段与验证规则请见 [文档路由](docs/README.md)、[复现工作流](docs/replication.md)、[Auto Research](docs/autoresearch.md) 和 [产物契约](docs/artifacts.md)。
 
 [回到顶部](#readme-top)
-
----
-
-<a id="english"></a>
-
-# English
-
-## Overview
-
-MedAI is an evidence-bound Harness for medical-paper replication and Auto Research, running in Docker. It turns a paper PDF, an optional source repository, and a dataset into executable experiments, auditable replication records, and claim- and artifact-level reports.
-
-- **Heterogeneous datasets:** MedAI is not restricted to one dataset or one table format. It is designed for the structured clinical, EHR/longitudinal, time-series, medical-imaging, omics, text, and other research inputs required by a paper—provided that complete paper-required source files and a usable runtime are supplied.
-- **Prediction and statistical-analysis models:** The replication workflow can cover supervised prediction and statistical analysis. It extracts checkable textual/numeric claims, experiment definitions, and figure/table anchors, then compares each with real execution evidence.
-- **Scientific fidelity and traceability:** The paper, source repository, and source data are read-only. Missing paper-required files, invalid artifacts, and technical failures stop explicitly; MedAI does not fabricate results, silently substitute inputs, or reduce scale just to produce a successful-looking run.
-- **Paper improvement / Auto Research:** From a completed, valid prediction replication, MedAI proposes paper- and literature-grounded input-representation, model, or training-strategy improvements. It assesses them with isolated code copies, boundary audits, and existing baseline evidence. If a paper also contains statistical analyses, only strict supervised-prediction experiments are selected.
-
- 
-
-## Quick start
-
-### 0. Requirements before you start
-
-Run MedAI from its **source checkout**, because <code>init</code> builds the local Docker overlay from that directory.
-
-1. Docker Engine on Linux or Docker Desktop on macOS/Windows, configured for Linux containers.
-2. Python 3.10+ for the host MinerU PDF runtime. Windows supports Python 3.10–3.12; macOS requires Apple Silicon and macOS 14+ (Intel Macs are unsupported).
-3. At least one agent CLI: <code>codex</code>, <code>claude</code>, or <code>codex</code> used through the SiliconFlow adapter. Confirm <code>codex --version</code> (or <code>claude --version</code>) first.
-4. An accessible paper PDF, the **complete** paper-required dataset directory, and optionally the source repository. A missing paper-required file is an explicit failure.
-5. Enough local disk, network access, and Docker resources. Configure remote compute first if the paper's full scale exceeds local hardware; MedAI will not silently downscale it.
-
-### 1. Get the project and use the MedAI CLI
-
-~~~bash
-git clone https://github.com/ruihanxx/medai.git
-cd medai
-
-# Linux / macOS: the checked-in launcher is the recommended MedAI CLI
-./medai --help
-~~~
-
-On Windows PowerShell or Command Prompt:
-
-~~~bat
-.\medai.cmd --help
-~~~
-
-No globally installed <code>medai</code> command is needed. Calling <code>./medai</code> from the checkout (<code>medai.cmd</code> on Windows) keeps the image built by <code>init</code> aligned with the current source.
-
-### 2. Configure the agent provider
-
-Copy the template. <code>.env</code> is Git-ignored; never commit a secret.
-
-~~~bash
-cp .env.example .env
-~~~
-
-#### Option A: sign in to local Codex (recommended)
-
-Install and sign in to the Codex CLI on the **host**, then verify it runs:
-
-~~~bash
-codex login
-codex --version
-~~~
-
-Choose a default model and reasoning effort in project <code>.env</code>; CLI flags can override them:
-
-~~~dotenv
-MEDAI_CODEX_MODEL=<your-codex-model>
-MEDAI_CODEX_REASONING_EFFORT=high
-~~~
-
-At runtime MedAI mounts the host <code>~/.codex</code> credential directory read-only into the container, so sign in on the host. Use the [official OpenAI documentation](https://learn.chatgpt.com/docs) for the current Codex CLI installation and sign-in procedure.
-
-#### Option B: use a SiliconFlow model
-
-Create an uncommitted dotenv file, for example <code>siliconflow.env</code>:
-
-~~~dotenv
-SILICONFLOW_API_KEY=<your-api-key>
-SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
-CODEX_CLI_SILICONFLOW_MODEL=<your-model-id>
-CODEX_CLI_SILICONFLOW_CONTEXT_WINDOW=131072
-CODEX_CLI_TIMEOUT_SECONDS=1200
-~~~
-
-The <code>codex</code> CLI is still required. Pass <code>--provider codex-siliconflow --siliconflow-config /absolute/path/siliconflow.env</code>. The secret is never written to the run manifest, prompts, logs, or command arguments.
-
-### 3. Optional: Vast.ai + Google Drive cloud data
-
-Use this when data cannot or should not live locally and the study needs remote compute. Complete the following in Vast.ai first:
-
-1. Create an appropriately scoped API key and register a public SSH key in Vast; keep the paired private key under host <code>~/.ssh</code>. Set <code>COMPUTATION_PROVIDER_SSH_IDENTITY_FILE</code> only if OpenSSH cannot select the key itself.
-2. In Vast Settings → Cloud Connections, connect a dedicated Google Drive account and record its Cloud Connection ID.
-3. Create <code>medai/&lt;dataset-name&gt;</code> in that Drive, for example <code>medai/mimic-iv</code>. The CLI takes the directory name, not a Drive path.
-4. Select a Vast Docker image compatible with the paper's software and hardware requirements, then set a budget and resource floors.
-
-Set these project <code>.env</code> values (replace every example):
-
-~~~dotenv
-MEDAI_COMPUTATION_PROVIDER=vastai
-MEDAI_DRIVE_PROVIDER=google-drive
-VAST_API_KEY=<scoped-api-key>
-VASTAI_IMAGE=<explicit-compatible-container-image>
-VASTAI_GOOGLE_DRIVE_CONNECTION_ID=<vast-cloud-connection-id>
-
-# Optional cost and resource guardrails
-VASTAI_MAX_DPH=2
-VASTAI_DISK_GB=64
-VASTAI_DEFAULT_GPU_COUNT=1
-VASTAI_MIN_GPU_RAM_GB=24
-VASTAI_MIN_CPU_RAM_GB=32
-VASTAI_MIN_RELIABILITY=0.99
-VASTAI_MAX_CAMPAIGN_INSTANCES=3
-~~~
-
-Cloud mode creates a read-only remote data target and a complete file inventory. Use <code>--clouddrive --data &lt;dataset-name&gt;</code>, **not** a local data path. The selected adapter manages billable creation, power-off, release, and resume through run state; never hand-edit <code>remote_compute/instance.json</code>.
-
-### 4. Initialize once
-
-<code>init</code> creates the host MinerU environment, installs the pinned PDF runtime, builds the <code>medai:local</code> image, and downloads MinerU models. The initial run can take a while; completed environments and models are reused.
-
-~~~bash
-# Linux / macOS
-./medai init
-~~~
-
-~~~bat
-:: Windows
-.\medai.cmd init
-~~~
-
-Useful initialization variables: <code>MEDAI_MODEL_CACHE</code> selects the model cache; <code>MEDAI_MINERU_MODEL_SOURCE</code> can be <code>auto</code>, <code>huggingface</code>, or <code>modelscope</code>; <code>MEDAI_MINERU_PYTHON</code> selects host Python; NVIDIA/Windows users can set <code>MEDAI_TORCH_INDEX_URL</code> before initialization for a CUDA-matched PyTorch index.
-
-### 5. Replicate a paper
-
-Replace the placeholders with absolute paths. <code>--repo</code> is optional; in local mode <code>--data</code> must be the prepared data directory.
-
-~~~bash
-./medai \
-  --replicate \
-  --paper /absolute/path/paper.pdf \
-  --repo /absolute/path/original-repository \
-  --data /absolute/path/dataset \
-  --provider codex
-~~~
-
-With SiliconFlow:
-
-~~~bash
-./medai \
-  --replicate \
-  --paper /absolute/path/paper.pdf \
-  --data /absolute/path/dataset \
-  --provider codex-siliconflow \
-  --siliconflow-config /absolute/path/siliconflow.env
-~~~
-
-With Vast.ai + Google Drive:
-
-~~~bash
-./medai \
-  --replicate \
-  --paper /absolute/path/paper.pdf \
-  --repo /absolute/path/original-repository \
-  --clouddrive \
-  --data mimic-iv \
-  --provider codex
-~~~
-
-The default output is <code>runs/&lt;UTC timestamp&gt;_&lt;paper-name&gt;/</code>. To resume, invoke the same inputs and configuration with the existing <code>--output runs/&lt;run_id&gt;</code>. Completed stages are validated before being skipped.
-
-### 6. Run Auto Research
-
-Choose a completed supervised-prediction replication. Without <code>--output</code>, MedAI creates <code>autoresearch/campaign_NNN/</code> automatically.
-
-~~~bash
-./medai \
-  --autoresearch \
-  --replicate-run runs/<completed-run-id> \
-  --max-iter 1
-~~~
-
-<code>--max-iter</code> accepts 1–10. Use <code>--assessment-threshold &lt;non-negative-number&gt;</code> to raise the weighted-score bar for a valid improvement. When reusing SiliconFlow, pass <code>--siliconflow-config</code> again because secrets are never restored from a manifest.
-
-## Configuration
-
-### CLI arguments
-
-| Argument | Purpose and constraints |
-| --- | --- |
-| <code>--replicate</code> | Starts replication; mutually exclusive with <code>--autoresearch</code> and requires <code>--paper</code>. |
-| <code>--autoresearch</code> | Starts improvement research from a completed run. Requires <code>--replicate-run</code>; cannot be combined with <code>--paper</code>, <code>--repo</code>, <code>--data</code>, <code>--clouddrive</code>, or <code>--smart-replicate</code>. |
-| <code>--paper &lt;PDF&gt;</code> | Paper PDF; replication only. |
-| <code>--repo &lt;dir&gt;</code> | Optional source repository; only its run copy is modified. |
-| <code>--data &lt;dir-or-name&gt;</code> | Existing local directory, or a safe dataset directory name with <code>--clouddrive</code>. |
-| <code>--clouddrive</code> | Enables cloud materialization; requires a configured computation provider and drive. |
-| <code>--provider &lt;codex\|claude\|codex-siliconflow&gt;</code> | Selects the agent provider; replication defaults to <code>codex</code>. |
-| <code>--siliconflow-config &lt;dotenv&gt;</code> | Required for <code>codex-siliconflow</code>; invalid with another provider. |
-| <code>--codex-model &lt;name&gt;</code> | Overrides <code>MEDAI_CODEX_MODEL</code>; <code>codex</code> only. |
-| <code>--codex-reasoning-effort &lt;level&gt;</code> | Overrides default reasoning effort; <code>codex</code> only. One of <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>, <code>ultra</code>. |
-| <code>--smart-replicate</code> | Supplies audited claim anchors and permits at most five hypothesis-recorded adjustments per experiment. Disabled by default. |
-| <code>--output &lt;dir&gt;</code> | For replication, an existing manifest-bearing run below <code>runs/</code> to resume. For Auto Research, a new or existing campaign directory. |
-| <code>--replicate-run &lt;dir&gt;</code> | Completed base run for Auto Research; must be below <code>runs/</code>. |
-| <code>--max-iter &lt;1-10&gt;</code> | Maximum Auto Research iterations; default 1. |
-| <code>--assessment-threshold &lt;number ≥ 0&gt;</code> | Weighted-score threshold for a valid Auto Research improvement; default 0. |
-
-### Environment variables
-
-| Variable | Description |
-| --- | --- |
-| <code>MEDAI_CODEX_MODEL</code> / <code>MEDAI_CODEX_REASONING_EFFORT</code> | Default model and reasoning effort for <code>codex</code>. |
-| <code>MEDAI_MODEL_CACHE</code> | Host MinerU environment/model cache; defaults to <code>.medai/mineru/</code>. |
-| <code>MEDAI_MINERU_MODEL_SOURCE</code> | <code>auto</code>, <code>huggingface</code>, or <code>modelscope</code>. |
-| <code>MEDAI_MINERU_PYTHON</code> / <code>MEDAI_TORCH_INDEX_URL</code> / <code>MEDAI_PYPI_INDEX</code> | MinerU Python, device-specific PyTorch index, and general PyPI index. |
-| <code>MEDAI_MINERU_BACKEND</code> | Overrides the default MinerU <code>pipeline</code> backend. |
-| <code>MEDAI_DOCKER_PLATFORM</code> / <code>MEDAI_IMAGE</code> | Docker platform (default <code>linux/amd64</code>) and image name (default <code>medai:local</code>). |
-| <code>MEDAI_COMPUTATION_PROVIDER</code> / <code>MEDAI_DRIVE_PROVIDER</code> | Remote-compute and cloud-drive adapters; see Vast.ai + Google Drive above. |
-| <code>VAST_*</code> / <code>VASTAI_*</code> | Vast API, image, resource, cost, reliability, and Google Drive connection configuration. |
-
-## Architecture, workflow, and interfaces
-
-### Replication workflow
-
-~~~mermaid
-flowchart LR
-    I[Paper PDF / optional code / data] --> A[Preflight and PDF parsing]
-    A --> B[Claims and experiment definitions]
-    B --> C[Code generation and ambiguity record]
-    C --> D[Data and cohort audit]
-    D -->|FAIL, up to 3 refinement rounds| E[Cohort/preprocessing refinement]
-    E --> D
-    D -->|PASS or refinements exhausted| F[Experiment plan]
-    F --> G[Full-scale replication]
-    G --> H[Claim/artifact comparison report]
-~~~
-
-| Section | Responsibility | Primary outputs |
-| --- | --- | --- |
-| <code>preflight</code> | Validates inputs and records CPU, RAM, disk, and GPU. | <code>preflight/resources.json</code> |
-| <code>preprocess_pdf</code> | Imports host MinerU output and preserves canonical Markdown and paper assets. | <code>preprocessing/paper.md</code>, <code>artifacts/</code> |
-| <code>preprocessing_agent</code> | Audits figure/table labels and formulas; extracts claims, validation anchors, and experiments. | <code>claims.json</code>, <code>experiment_todo.json</code> |
-| <code>codegen_agent</code> | Inspects data read-only, records ambiguities, and copies/writes executable code. Stops if a paper-required file is missing. | <code>codegen/codebase/</code>, <code>codegen_plan.json</code> |
-| <code>audit_agent</code> | Runs real-data preprocessing and applicable independent cohort/data-quality checks, accumulating the full issue set. | <code>codegen/audit/attempt_*/audit_report.json</code> |
-| <code>cohort_refine_agent</code> | After audit failure, changes only cohort construction, loading, preprocessing, and related ambiguities—not model, training, or evaluation. | Numbered attempt directories and updated plan |
-| <code>plan_agent</code> | Covers every claim, prepares dependencies, smoke-tests, and writes the plan. | <code>plan/replicate_plan.json</code> |
-| <code>replicate_agent</code> | Executes every planned experiment at paper full scale and saves evidence. | <code>replication_log.json</code>, <code>evidence_summary.json</code> |
-| <code>report_agents</code> | Compares every claim/figure/table anchor with real artifacts, recording validation judgements and ambiguity risks. | <code>report/reproduction_report.md</code> |
-
-### Auto Research workflow
-
-~~~mermaid
-flowchart LR
-    A[Completed prediction replication] --> B[Eligibility]
-    B --> C[Result-blind weighting and experiment contracts]
-    C --> D[Three evidence-grounded ideas per round]
-    D --> E[Independent code copy and minimal implementation]
-    E --> F[Six-boundary audit]
-    F --> G[Full-scale experiment]
-    G --> H[Evidence assessment against replication baseline]
-    H -->|No valid idea and iterations remain| D
-    H -->|Valid idea or limit reached| I[Auto Research report]
-~~~
-
-Auto Research first freezes data/cohort/split, prediction outcome and horizon, evaluator input/output, metrics, and evaluation protocol. It then creates three input-representation, model, or training-strategy candidates per round. Each candidate uses an independent code copy and cannot write back to the base replication. The ordered audit checks data, prediction target, input representation, evaluator-facing output, training, and evaluation; only an audited idea can run at full scale. Assessment compares the primary metric with existing baseline evidence and records actual delta, relative change, and an evidence-bound score from -5 to 5. It is not tuning towards a paper-reported result.
-
-### Interfaces and protocol boundaries
-
-| Interface | Protocol / invariant |
-| --- | --- |
-| CLI → launcher | Use <code>./medai</code> on Linux/macOS or <code>medai.cmd</code> on Windows. Each invocation selects exactly one of <code>--replicate</code> and <code>--autoresearch</code>. |
-| Launcher → Docker | Paper, source repository, data, and CLI credentials enter as read-only bind mounts; only the run output is writable. |
-| Agent → stage | MedAI renders a Jinja2 prompt first; the agent writes stage-owned structured artifacts. A JSONL transcript is diagnostic evidence, never proof of completed work on its own. |
-| Artifacts → orchestrator | <code>manifest.json</code> records input fingerprint, overall/per-stage state, attempts, checkpoints, and outputs. On resume, completed stages are revalidated before they are skipped; invalid artifacts resume or fail explicitly. |
-| Remote compute → state | The adapter writes non-secret lifecycle state to <code>remote_compute/instance.json</code>. A cloud dataset also requires a per-file inventory; raw data never returns locally. |
-| Report → user | The final report maps paper claims and figure/table anchors to genuinely generated files, exposing uncertainty, divergence, and failure risk. |
-
-## Repository layout
-
-~~~text
-medai/
-├── medai / medai.cmd          # Linux/macOS and Windows launchers
-├── src/medai/                 # Orchestration, state, CLI, provider adapters
-├── docker/                    # Docker overlay and container entrypoint
-├── templates/                 # Stage prompts and runtime skills
-│   └── skills/computation_provider/
-│       ├── providers/         # Supported compute/drive metadata
-│       └── references/        # Provider procedures and safety contracts
-├── docs/                      # Execution, workflow, artifact, and agent contracts
-├── tests/                     # Local and mocked external-boundary tests
-├── .env.example               # Non-secret configuration template
-├── .medai/mineru/             # Host MinerU environment/models after init (default)
-└── runs/<run_id>/             # Auditable replication outputs (default)
-    ├── manifest.json
-    ├── preprocessing/
-    ├── codegen/
-    ├── plan/
-    ├── replication/
-    ├── report/reproduction_report.md
-    ├── remote_compute/
-    └── autoresearch/campaign_<NNN>/
-        ├── experiment_setup/
-        ├── idea_generation/
-        ├── rounds/
-        └── report/auto_research_report.md
-~~~
-
-For canonical paths, schemas, and validation rules, see the [documentation router](docs/README.md), [replication workflow](docs/replication.md), [Auto Research contract](docs/autoresearch.md), and [artifact contract](docs/artifacts.md).
-
-## Acknowledgement
-
-[Back to top](#readme-top)
