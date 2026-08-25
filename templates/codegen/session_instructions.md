@@ -75,6 +75,33 @@ First choose the computational stack, then outline the file structure.
 **Match the paper's computational demands.** You can refer to the extracted experiment at `{{ experiments_path }}` for computational demands of each experiment. If it is recorded `"NA"`, you need to infer the computational demands from the paper. Implement in the language and framework the methodology genuinely needs, not whichever is fastest to write. If the method's scale depends on compiled or GPU performance — a large-N numerical simulation, an iterative sampling or optimization procedure with many steps, large-scale model training or inference — use tools that deliver it: GPU-enabled libraries (PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba), C/C++ extensions via the available gcc toolchain, or R for R-native methods — pure Python/NumPy on CPU is the easy default, but it is only correct when the paper's own scale doesn't need more. An implementation that is faithful on paper but cannot run at the paper's scale will fail the replication.
 
 **Explicit paper GPU requirement.** When the paper explicitly reports GPU hardware used for its full experiment, treat its GPU count and per-GPU VRAM as a required capacity floor, even if the paper does not call GPU execution “mandatory.” If the paper gives a model but omits VRAM, obtain that model's VRAM from an authoritative manufacturer specification. A local GPU setup is sufficient only when it has at least the stated GPU count and per-GPU VRAM. If it does not, you must use the configured remote computation provider; CPU feasibility, a small final tabular cohort, or a smaller inferred workload are not substitutes for the paper-stated GPU capacity.
+
+**Local resource snapshot**: {{ local_resources | tojson }}
+
+Decide the execution location from the paper, every experiment's
+`computational_demand`, the full-scale data volume and algorithm, and this
+snapshot before using any computation provider:
+
+1. Decide whether faithful full-scale execution requires a GPU. Preserve every
+   explicit paper GPU count and per-GPU VRAM value as a hard floor.
+2. For a GPU workload, compare local GPU count and free VRAM plus the required
+   CPU, available RAM, and free disk against all inferred or explicit floors.
+3. For a CPU-only workload, compare the required CPU capacity with local
+   physical cores (use logical cores only when physical cores are unavailable).
+   Available RAM and free disk must each be at least 1.2 times the estimated
+   peak requirement, providing 20% headroom.
+4. Estimate the complete faithful runtime from the paper, data scale, algorithm
+   complexity, and, only when practical, a bounded representative timing. A
+   local estimate of 12 hours or more is insufficient. If the available
+   evidence cannot establish that local resources are sufficient, treat them
+   as insufficient.
+
+Use `computational_demand` and the persisted preflight snapshot as the evidence
+for this judgment. For a remote conclusion, record required floors, headroom,
+runtime estimate, and rationale as optional details inside the existing
+`remote_compute` object. For a local conclusion, keep `remote_compute` null and
+do not add a top-level plan field. Do not shrink the experiment to make local
+execution appear sufficient.
 {% if gpu_info %}
 
 **This environment has local GPU resources**: {{ gpu_info | tojson }}. Compare their
@@ -90,10 +117,11 @@ JAX) rather than implementing the GPU-dependent work on CPU.
 {% if cloud_drive_enabled|default(false) %}
 Cloud-backed data makes remote computation mandatory even when local hardware
 would otherwise be sufficient. Select the configured provider through the
-computation-provider skill. If the paper states a GPU requirement, preserve the
-existing capacity-floor selection rule; otherwise use the cloud-drive default
-resource specification defined by the selected provider reference and runtime
-environment. Do not choose a local, CPU, or weaker-resource fallback.
+computation-provider skill because no local raw-data path exists. If the paper
+states a GPU requirement, preserve the existing capacity-floor selection rule;
+otherwise derive the CPU, RAM, disk, and runtime requirements and follow the
+selected provider reference's documented CPU-only procedure. Do not choose a
+local or weaker-resource fallback.
 
 Before inspecting dataset documentation, schema, metadata, or content, create
 or safely resume the run-owned instance, read the drive document routed by the
@@ -127,14 +155,18 @@ procedure, then return one next monitor command. If recovery is not possible,
 make the Codex CLI exit nonzero rather than continuing without data.
 {% endif %}
 {% endif %}
-When the explicit paper GPU requirement above is not met locally, or other
-paper-required GPU resources are unavailable or insufficient locally, use the
-configured remote computation provider only through the resource- and
-image-selection procedure in
+For a non-cloud run, a configured provider is capacity fallback only: if the
+evidence above establishes that the complete workload fits locally, run locally
+and do not search offers, create an instance, or write remote instance state.
+Only when local GPU, CPU, available RAM, free disk, or estimated runtime is
+insufficient may you use the configured remote computation provider, and then
+only through the resource- and image-selection procedure in
 `{{ skills_dir }}/computation_provider/SKILL.md`. It first verifies that the
-requested GPU is in the provider's supported pool; when the paper's exact GPU
-is absent, it selects the closest pool GPU whose VRAM is at least the paper
-requirement and records the divergence. For paper-stated software versions,
+requested resource is supported and selects the lowest-price offer satisfying
+every CPU, RAM, disk, accelerator, reliability, and runtime hard floor. For a
+CPU-only workload, use only a CPU-only procedure explicitly documented by that
+provider reference; if it has none, stop explicitly rather than guessing how
+the provider represents CPU capacity. For paper-stated software versions,
 select the closest compatible provider image; otherwise use the configured
 default. Read the selected provider reference at
 `{{ computation_provider_reference|default("<selected-provider-reference>") }}` before performing any provider operation.
@@ -150,10 +182,11 @@ the selected GPU in the plan. If no eligible resource or compatible image
 exists, stop explicitly. Do not rent weaker hardware or reduce the experiment
 scale.
 {% else %}
-When the explicit paper GPU requirement above is not met locally, or other
-paper-required GPU resources are unavailable or insufficient locally, stop
-explicitly: no remote computation provider is configured. Do not reduce the
-experiment scale or silently substitute CPU execution.
+When the full-scale local resource or runtime judgment above is insufficient,
+stop explicitly during Codegen: no remote computation provider is configured.
+Report the local CPU, available RAM, free disk, GPU capacity, required floors,
+and estimated runtime in the failure. Do not reduce the experiment scale or
+silently substitute a different execution mode.
 {% endif %}
 
 **Unresolved remote-compute failures are terminal.** If remote compute is
@@ -196,7 +229,10 @@ to `{{ skill_corrections_path }}` instead:
 Use only non-secret information. Leave this initialized JSON array unchanged
 when no correction is needed.
 
-Before committing to a stack, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) to see actual CPU core count, RAM, and GPU VRAM — size your implementation to what is actually there instead of guessing capacity.
+The preflight snapshot above is the authoritative local CPU, memory, disk, and
+GPU observation for this decision. Run the `get-available-resources` skill
+(`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) again
+only if you have evidence that the snapshot is stale.
 
 Outline the file structure of your codebase before writing any code:
 

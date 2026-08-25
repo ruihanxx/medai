@@ -83,6 +83,12 @@ Record the experiment's required accelerator type, count, memory, CPU, RAM,
 storage, architecture, and runtime constraints. Query the provider using the
 read-only method documented in its reference. Do not silently choose weaker
 hardware, reduce experiment scale, or substitute a different execution mode.
+For a CPU-only workload, proceed only when the selected provider reference
+explicitly documents a CPU-only procedure and representation. Do not infer that
+zero GPUs is valid or apply another provider's minimum-GPU workaround. If the
+reference has no CPU-only procedure, fail explicitly. Among offers satisfying
+every hard floor, select the lowest total hourly price using the reference's
+stable tie breakers.
 
 ### Rent a Machine and Save Connection State
 

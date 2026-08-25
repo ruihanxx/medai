@@ -6,6 +6,7 @@ import binascii
 import copy
 import hashlib
 import json
+import math
 import os
 import shlex
 import subprocess
@@ -292,11 +293,23 @@ def load_state(path: Path) -> dict[str, Any]:
         raise RuntimeError("Vast state is missing provider_state.requested")
     for name in ("gpu_count", "min_gpu_ram_gb", "min_cpu_ram_gb", "max_dph", "disk_gb"):
         _required_number(requested, name, "provider_state.requested")
+    cpu_only = requested.get("cpu_only", False)
+    if not isinstance(cpu_only, bool):
+        raise RuntimeError("Vast state has an invalid provider_state.requested.cpu_only")
+    if cpu_only:
+        _required_number(requested, "min_cpu_cores", "provider_state.requested")
+    elif requested.get("min_cpu_cores") is not None:
+        _required_number(requested, "min_cpu_cores", "provider_state.requested")
     _required_string(requested, "image", "provider_state.requested")
     selected = provider_state.get("selected_offer")
     if not isinstance(selected, dict):
         raise RuntimeError("Vast state is missing provider_state.selected_offer")
-    _offer_record(selected)
+    selected_record = _offer_record(selected)
+    if cpu_only and (
+        "cpu_cores_effective" not in selected_record
+        or "disk_space_gb" not in selected_record
+    ):
+        raise RuntimeError("Vast CPU-only state is missing selected CPU or disk capacity")
     failed_create_retries = provider_state.get("failed_create_retries", 0)
     if (
         isinstance(failed_create_retries, bool)
@@ -327,7 +340,14 @@ def load_state(path: Path) -> dict[str, Any]:
             selected_entry = entry.get("selected_offer")
             if not isinstance(selected_entry, dict):
                 raise RuntimeError("Vast campaign instance pool member is missing its offer")
-            _offer_record(selected_entry)
+            selected_entry_record = _offer_record(selected_entry)
+            if cpu_only and (
+                "cpu_cores_effective" not in selected_entry_record
+                or "disk_space_gb" not in selected_entry_record
+            ):
+                raise RuntimeError(
+                    "Vast CPU-only pool state is missing selected CPU or disk capacity"
+                )
             if entry.get("creation_uncertain") is not True:
                 instance_ids.append(
                     _required_string(entry, "instance_id", "instance_pool member")
@@ -363,6 +383,15 @@ def _positive_offer_integer(offer: dict[str, Any], name: str) -> int:
     return int(value)
 
 
+def _optional_positive_offer_number(offer: dict[str, Any], name: str) -> float | None:
+    value = offer.get(name)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise RuntimeError(f"Vast offer has an invalid {name}")
+    return float(value)
+
+
 def _offer_record(offer: dict[str, Any]) -> dict[str, Any]:
     if {
         "id",
@@ -375,7 +404,7 @@ def _offer_record(offer: dict[str, Any]) -> dict[str, Any]:
         "dph_total",
         "reliability",
     } <= set(offer):
-        return {
+        record = {
             "id": _required_string(offer, "id", "offer"),
             "gpu_name": _required_string(offer, "gpu_name", "offer"),
             "cpu_arch": _required_string(offer, "cpu_arch", "offer"),
@@ -386,13 +415,22 @@ def _offer_record(offer: dict[str, Any]) -> dict[str, Any]:
             "dph_total": _required_number(offer, "dph_total", "offer"),
             "reliability": _required_number(offer, "reliability", "offer"),
         }
+        cpu_cores_effective = _optional_positive_offer_number(
+            offer, "cpu_cores_effective"
+        )
+        disk_space_gb = _optional_positive_offer_number(offer, "disk_space_gb")
+        if cpu_cores_effective is not None:
+            record["cpu_cores_effective"] = cpu_cores_effective
+        if disk_space_gb is not None:
+            record["disk_space_gb"] = disk_space_gb
+        return record
     gpu_name = offer.get("gpu_name")
     cpu_arch = offer.get("cpu_arch")
     if not isinstance(gpu_name, str) or not gpu_name:
         raise RuntimeError("Vast offer is missing gpu_name")
     if not isinstance(cpu_arch, str) or not cpu_arch:
         raise RuntimeError("Vast offer is missing cpu_arch")
-    return {
+    record = {
         "id": _offer_id(offer),
         "gpu_name": gpu_name,
         "cpu_arch": cpu_arch,
@@ -403,10 +441,29 @@ def _offer_record(offer: dict[str, Any]) -> dict[str, Any]:
         "dph_total": _number(offer, "dph_total"),
         "reliability": _number(offer, "reliability"),
     }
+    cpu_cores_effective = _optional_positive_offer_number(
+        offer, "cpu_cores_effective"
+    )
+    disk_space_gb = _optional_positive_offer_number(offer, "disk_space")
+    if cpu_cores_effective is not None:
+        record["cpu_cores_effective"] = cpu_cores_effective
+    if disk_space_gb is not None:
+        record["disk_space_gb"] = disk_space_gb
+    return record
 
 
 def _offer_matches(record: dict[str, Any], specification: dict[str, Any]) -> bool:
     gpu_name = specification.get("gpu_name")
+    min_cpu_cores = specification.get("min_cpu_cores")
+    cpu_only_capacity_matches = (
+        not specification.get("cpu_only")
+        or (
+            isinstance(record.get("cpu_cores_effective"), (int, float))
+            and record["cpu_cores_effective"] >= min_cpu_cores
+            and isinstance(record.get("disk_space_gb"), (int, float))
+            and record["disk_space_gb"] >= specification["disk_gb"]
+        )
+    )
     return (
         record["cpu_arch"].casefold() in {"amd64", "x86_64"}
         and (gpu_name is None or record["gpu_name"].casefold() == str(gpu_name).casefold())
@@ -415,6 +472,7 @@ def _offer_matches(record: dict[str, Any], specification: dict[str, Any]) -> boo
         and record["cpu_ram_mb"] >= specification["min_cpu_ram_gb"] * 1024
         and record["dph_total"] <= specification["max_dph"]
         and record["reliability"] >= specification["min_reliability"]
+        and cpu_only_capacity_matches
     )
 
 
@@ -450,6 +508,10 @@ def search_offers(
             ["id", "asc"],
         ],
     }
+    if specification.get("min_cpu_cores") is not None:
+        body["cpu_cores_effective"] = {
+            "gte": specification["min_cpu_cores"]
+        }
     if offer_id is not None:
         body["ask_contract_id"] = {
             "eq": int(offer_id) if offer_id.isdecimal() else offer_id
@@ -470,8 +532,25 @@ def search_offers(
 
 
 def _specification_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    gpu_count = args.gpu_count or _positive_integer("VASTAI_DEFAULT_GPU_COUNT", "1")
-    min_gpu_ram_gb = args.min_gpu_ram_gb or _positive_integer("VASTAI_MIN_GPU_RAM_GB", "24")
+    cpu_only = bool(getattr(args, "cpu_only", False))
+    min_cpu_cores = getattr(args, "min_cpu_cores", None)
+    if cpu_only:
+        if any(
+            getattr(args, name, None) is not None
+            for name in ("gpu_name", "gpu_count", "min_gpu_ram_gb")
+        ):
+            raise RuntimeError(
+                "Vast --cpu-only cannot be combined with GPU resource arguments"
+            )
+        if isinstance(min_cpu_cores, bool) or not isinstance(min_cpu_cores, int) or min_cpu_cores <= 0:
+            raise RuntimeError("Vast --cpu-only requires a positive --min-cpu-cores")
+        gpu_count = 1
+        min_gpu_ram_gb = 1
+    else:
+        if min_cpu_cores is not None:
+            raise RuntimeError("Vast --min-cpu-cores requires --cpu-only")
+        gpu_count = args.gpu_count or _positive_integer("VASTAI_DEFAULT_GPU_COUNT", "1")
+        min_gpu_ram_gb = args.min_gpu_ram_gb or _positive_integer("VASTAI_MIN_GPU_RAM_GB", "24")
     min_cpu_ram_gb = args.min_cpu_ram_gb or _positive_integer("VASTAI_MIN_CPU_RAM_GB", "32")
     disk_gb = args.disk_gb or _positive_integer("VASTAI_DISK_GB", "64")
     max_dph = args.max_dph or _positive_number("VASTAI_MAX_DPH", "2")
@@ -482,6 +561,8 @@ def _specification_from_args(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("Vast resource requirements must be positive")
     gpu_name = args.gpu_name.strip() if getattr(args, "gpu_name", None) else None
     return {
+        "cpu_only": cpu_only,
+        "min_cpu_cores": int(min_cpu_cores) if min_cpu_cores is not None else None,
         "gpu_name": gpu_name,
         "gpu_count": int(gpu_count),
         "min_gpu_ram_gb": int(min_gpu_ram_gb),
@@ -510,7 +591,19 @@ def _selected_offer(offer_id: str, specification: dict[str, Any]) -> dict[str, A
     return matches[0]
 
 
-def _stronger_or_equal(fallback: dict[str, Any], primary: dict[str, Any]) -> bool:
+def _stronger_or_equal(
+    fallback: dict[str, Any], primary: dict[str, Any], *, cpu_only: bool = False
+) -> bool:
+    if cpu_only:
+        return (
+            isinstance(fallback.get("cpu_cores_effective"), (int, float))
+            and isinstance(primary.get("cpu_cores_effective"), (int, float))
+            and fallback["cpu_cores_effective"] >= primary["cpu_cores_effective"]
+            and fallback["cpu_ram_mb"] >= primary["cpu_ram_mb"]
+            and isinstance(fallback.get("disk_space_gb"), (int, float))
+            and isinstance(primary.get("disk_space_gb"), (int, float))
+            and fallback["disk_space_gb"] >= primary["disk_space_gb"]
+        )
     return (
         fallback["gpu_count"] >= primary["gpu_count"]
         and fallback["gpu_ram_mb"] >= primary["gpu_ram_mb"]
@@ -518,6 +611,34 @@ def _stronger_or_equal(fallback: dict[str, Any], primary: dict[str, Any]) -> boo
         and fallback["total_flops"] >= primary["total_flops"]
         and fallback["dph_total"] <= primary["dph_total"]
     )
+
+
+def _cpu_only_replacement_specification(
+    requested: dict[str, Any], selected: dict[str, Any]
+) -> dict[str, Any]:
+    if not isinstance(selected.get("cpu_cores_effective"), (int, float)) or not isinstance(
+        selected.get("disk_space_gb"), (int, float)
+    ):
+        raise RuntimeError("Recorded Vast CPU-only offer lacks CPU or disk capacity")
+    return {
+        **requested,
+        "gpu_name": None,
+        "gpu_count": 1,
+        "min_gpu_ram_gb": 1,
+        "min_cpu_cores": max(
+            requested["min_cpu_cores"],
+            math.ceil(selected["cpu_cores_effective"]),
+        ),
+        "min_cpu_ram_gb": max(
+            requested["min_cpu_ram_gb"], math.ceil(selected["cpu_ram_mb"] / 1024)
+        ),
+        "disk_gb": max(
+            requested["disk_gb"], math.ceil(selected["disk_space_gb"])
+        ),
+        "min_reliability": min(
+            requested["min_reliability"], selected["reliability"]
+        ),
+    }
 
 
 def _manifest_resume_count(state_path: Path) -> int | None:
@@ -804,7 +925,9 @@ def create_instance(args: argparse.Namespace) -> str:
         fallback_specification = dict(specification)
         fallback_specification["gpu_name"] = None
         fallback = _selected_offer(str(args.fallback_offer_id), fallback_specification)
-        if not _stronger_or_equal(fallback, primary):
+        if not _stronger_or_equal(
+            fallback, primary, cpu_only=specification["cpu_only"]
+        ):
             raise RuntimeError("Vast fallback offer must be at least as capable as the primary offer")
 
     previous = load_state(args.state) if args.state.exists() else None
@@ -1209,17 +1332,25 @@ def _replacement_args(state_path: Path, state: dict[str, Any]) -> argparse.Names
     provider_state = state["provider_state"]
     requested = provider_state["requested"]
     selected = provider_state["selected_offer"]
-    _offer_record(selected)
+    selected = _offer_record(selected)
+    cpu_only = requested.get("cpu_only", False)
     replacement_specification = dict(requested)
-    replacement_specification.update(
-        {
-            "gpu_name": selected["gpu_name"],
-            "gpu_count": selected["gpu_count"],
-            "min_gpu_ram_gb": (selected["gpu_ram_mb"] + 1023) // 1024,
-            "min_cpu_ram_gb": (selected["cpu_ram_mb"] + 1023) // 1024,
-            "min_reliability": min(requested["min_reliability"], selected["reliability"]),
-        }
-    )
+    if cpu_only:
+        replacement_specification = _cpu_only_replacement_specification(
+            requested, selected
+        )
+    else:
+        replacement_specification.update(
+            {
+                "gpu_name": selected["gpu_name"],
+                "gpu_count": selected["gpu_count"],
+                "min_gpu_ram_gb": (selected["gpu_ram_mb"] + 1023) // 1024,
+                "min_cpu_ram_gb": (selected["cpu_ram_mb"] + 1023) // 1024,
+                "min_reliability": min(
+                    requested["min_reliability"], selected["reliability"]
+                ),
+            }
+        )
     primary_candidates = search_offers(replacement_specification)
     if not primary_candidates:
         raise RuntimeError("No current Vast offer can recreate the recorded primary resource")
@@ -1229,29 +1360,50 @@ def _replacement_args(state_path: Path, state: dict[str, Any]) -> argparse.Names
     if isinstance(fallback, dict):
         fallback_record = _offer_record(fallback)
         fallback_specification = dict(replacement_specification)
-        fallback_specification.update(
-            {
-                "gpu_name": fallback_record["gpu_name"],
-                "gpu_count": fallback_record["gpu_count"],
-                "min_gpu_ram_gb": (fallback_record["gpu_ram_mb"] + 1023) // 1024,
-                "min_cpu_ram_gb": (fallback_record["cpu_ram_mb"] + 1023) // 1024,
-            }
-        )
+        if cpu_only:
+            fallback_specification = _cpu_only_replacement_specification(
+                replacement_specification, fallback_record
+            )
+        else:
+            fallback_specification.update(
+                {
+                    "gpu_name": fallback_record["gpu_name"],
+                    "gpu_count": fallback_record["gpu_count"],
+                    "min_gpu_ram_gb": (
+                        fallback_record["gpu_ram_mb"] + 1023
+                    )
+                    // 1024,
+                    "min_cpu_ram_gb": (
+                        fallback_record["cpu_ram_mb"] + 1023
+                    )
+                    // 1024,
+                }
+            )
         fallback_candidates = search_offers(fallback_specification)
-        eligible = [candidate for candidate in fallback_candidates if _stronger_or_equal(candidate, primary)]
+        eligible = [
+            candidate
+            for candidate in fallback_candidates
+            if _stronger_or_equal(candidate, primary, cpu_only=cpu_only)
+        ]
         if eligible:
             fallback_id = eligible[0]["id"]
     return argparse.Namespace(
         state=state_path,
         offer_id=primary["id"],
         fallback_offer_id=fallback_id,
-        gpu_name=primary["gpu_name"],
-        gpu_count=primary["gpu_count"],
-        min_gpu_ram_gb=(primary["gpu_ram_mb"] + 1023) // 1024,
+        cpu_only=cpu_only,
+        min_cpu_cores=(
+            replacement_specification["min_cpu_cores"] if cpu_only else None
+        ),
+        gpu_name=None if cpu_only else primary["gpu_name"],
+        gpu_count=None if cpu_only else primary["gpu_count"],
+        min_gpu_ram_gb=(
+            None if cpu_only else (primary["gpu_ram_mb"] + 1023) // 1024
+        ),
         min_cpu_ram_gb=(primary["cpu_ram_mb"] + 1023) // 1024,
         max_dph=requested["max_dph"],
         min_reliability=min(requested["min_reliability"], primary["reliability"]),
-        disk_gb=requested["disk_gb"],
+        disk_gb=replacement_specification["disk_gb"],
         image=requested["image"],
     )
 
@@ -1262,23 +1414,29 @@ def _pool_replacement_offers(
     provider_state = state["provider_state"]
     requested = provider_state["requested"]
     selected = _offer_record(provider_state["selected_offer"])
+    cpu_only = requested.get("cpu_only", False)
     specification = dict(requested)
-    specification.update(
-        {
-            "gpu_name": selected["gpu_name"],
-            "gpu_count": selected["gpu_count"],
-            "min_gpu_ram_gb": (selected["gpu_ram_mb"] + 1023) // 1024,
-            "min_cpu_ram_gb": (selected["cpu_ram_mb"] + 1023) // 1024,
-            "min_reliability": min(requested["min_reliability"], selected["reliability"]),
-        }
-    )
+    if cpu_only:
+        specification = _cpu_only_replacement_specification(requested, selected)
+    else:
+        specification.update(
+            {
+                "gpu_name": selected["gpu_name"],
+                "gpu_count": selected["gpu_count"],
+                "min_gpu_ram_gb": (selected["gpu_ram_mb"] + 1023) // 1024,
+                "min_cpu_ram_gb": (selected["cpu_ram_mb"] + 1023) // 1024,
+                "min_reliability": min(
+                    requested["min_reliability"], selected["reliability"]
+                ),
+            }
+        )
     candidates = search_offers(specification)
     if not candidates:
         specification["gpu_name"] = None
         candidates = [
             candidate
             for candidate in search_offers(specification)
-            if _stronger_or_equal(candidate, selected)
+            if _stronger_or_equal(candidate, selected, cpu_only=cpu_only)
         ]
     if not candidates:
         raise RuntimeError("No current Vast offer can extend the campaign instance pool")
@@ -1287,7 +1445,7 @@ def _pool_replacement_offers(
         (
             candidate
             for candidate in candidates[1:]
-            if _stronger_or_equal(candidate, primary)
+            if _stronger_or_equal(candidate, primary, cpu_only=cpu_only)
         ),
         None,
     )
@@ -2050,6 +2208,8 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser = subparsers.add_parser("search")
     create = subparsers.add_parser("create")
     for command in (search_parser, create):
+        command.add_argument("--cpu-only", action="store_true")
+        command.add_argument("--min-cpu-cores", type=int)
         command.add_argument("--gpu-name")
         command.add_argument("--gpu-count", type=int)
         command.add_argument("--min-gpu-ram-gb", type=int)

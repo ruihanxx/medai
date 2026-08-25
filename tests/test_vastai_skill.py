@@ -27,7 +27,9 @@ def offer(
     gpu_name: str = "RTX 4090",
     gpu_count: int = 1,
     gpu_ram_mb: int = 24576,
+    cpu_cores_effective: float = 16.0,
     cpu_ram_mb: int = 65536,
+    disk_space_gb: float = 128.0,
     total_flops: float = 82.6,
     dph_total: float = 1.0,
     reliability: float = 0.995,
@@ -38,7 +40,9 @@ def offer(
         "cpu_arch": "amd64",
         "num_gpus": gpu_count,
         "gpu_ram": gpu_ram_mb,
+        "cpu_cores_effective": cpu_cores_effective,
         "cpu_ram": cpu_ram_mb,
+        "disk_space": disk_space_gb,
         "total_flops": total_flops,
         "dph_total": dph_total,
         "reliability": reliability,
@@ -314,6 +318,214 @@ def test_vastai_search_filters_and_stably_sorts_eligible_offers(tmp_path: Path):
             ["id", "asc"],
         ],
     }
+
+
+def test_vastai_cpu_only_search_bypasses_gpu_defaults_and_uses_cpu_capacity(
+    tmp_path: Path,
+):
+    del tmp_path
+    with vast_api(
+        {
+            ("POST", "/api/v0/bundles"): {
+                "offers": [
+                    offer("expensive", dph_total=0.9),
+                    offer("cheap", dph_total=0.4, total_flops=5.0),
+                    offer("zero-gpu", gpu_count=0, dph_total=0.1),
+                    offer("few-cores", cpu_cores_effective=8, dph_total=0.2),
+                    offer("little-ram", cpu_ram_mb=32768, dph_total=0.2),
+                    offer("little-disk", disk_space_gb=64, dph_total=0.2),
+                ]
+            }
+        }
+    ) as (base_url, requests):
+        completed = run_adapter(
+            [
+                "search",
+                "--cpu-only",
+                "--min-cpu-cores",
+                "12",
+                "--min-cpu-ram-gb",
+                "64",
+                "--disk-gb",
+                "100",
+            ],
+            {
+                **adapter_environment(base_url),
+                "VASTAI_DEFAULT_GPU_COUNT": "8",
+                "VASTAI_MIN_GPU_RAM_GB": "80",
+            },
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert [item["id"] for item in payload["offers"]] == ["cheap", "expensive"]
+    body = requests[0]["body"]
+    assert body["num_gpus"] == {"gte": 1}
+    assert body["gpu_ram"] == {"gte": 1024}
+    assert body["cpu_cores_effective"] == {"gte": 12}
+    assert body["cpu_ram"] == {"gte": 64 * 1024}
+    assert body["disk_space"] == {"gte": 100}
+
+
+@pytest.mark.parametrize(
+    "arguments, message",
+    [
+        (
+            ["--cpu-only", "--min-cpu-cores", "8", "--gpu-count", "1"],
+            "cannot be combined with GPU resource arguments",
+        ),
+        (["--cpu-only"], "requires a positive --min-cpu-cores"),
+        (["--min-cpu-cores", "8"], "requires --cpu-only"),
+    ],
+)
+def test_vastai_cpu_only_rejects_conflicting_or_incomplete_parameters(
+    arguments: list[str], message: str
+):
+    completed = run_adapter(
+        ["search", *arguments],
+        adapter_environment("http://127.0.0.1:1"),
+    )
+
+    assert completed.returncode != 0
+    assert message in completed.stderr
+
+
+def test_vastai_cpu_only_create_records_cpu_request_and_effective_capacity(
+    tmp_path: Path,
+):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    selected = offer(
+        "cpu-host",
+        gpu_name="RTX 3090",
+        gpu_ram_mb=24576,
+        cpu_cores_effective=20.0,
+        cpu_ram_mb=98304,
+        disk_space_gb=256,
+        total_flops=1.0,
+        dph_total=0.45,
+    )
+    with vast_api(
+        {
+            ("POST", "/api/v0/bundles"): {"offers": [selected]},
+            ("PUT", "/api/v0/asks/cpu-host/"): {
+                "success": True,
+                "new_contract": "instance-cpu",
+            },
+            ("GET", "/api/v0/instances/instance-cpu/"): {
+                "instances": {"actual_status": "running"}
+            },
+        }
+    ) as (base_url, _):
+        completed = run_adapter(
+            [
+                "create",
+                "--state",
+                str(state_path),
+                "--offer-id",
+                "cpu-host",
+                "--cpu-only",
+                "--min-cpu-cores",
+                "12",
+                "--min-cpu-ram-gb",
+                "64",
+                "--disk-gb",
+                "100",
+            ],
+            adapter_environment(base_url),
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    requested = state["provider_state"]["requested"]
+    recorded_offer = state["provider_state"]["selected_offer"]
+    assert requested["cpu_only"] is True
+    assert requested["min_cpu_cores"] == 12
+    assert requested["gpu_count"] == 1
+    assert requested["min_gpu_ram_gb"] == 1
+    assert recorded_offer["cpu_cores_effective"] == 20.0
+    assert recorded_offer["disk_space_gb"] == 256.0
+    validated = run_adapter(
+        ["validate-state", "--state", str(state_path)],
+        adapter_environment("http://127.0.0.1:1"),
+    )
+    assert validated.returncode == 0, validated.stderr
+
+
+def test_vastai_cpu_only_fallback_compares_cpu_ram_and_disk_not_gpu_flops():
+    module = load_vastai_module()
+    primary = module._offer_record(
+        offer("primary", cpu_cores_effective=12, total_flops=80, dph_total=0.3)
+    )
+    lower_gpu_flops = module._offer_record(
+        offer("fallback", cpu_cores_effective=16, total_flops=5, dph_total=0.8)
+    )
+    lower_cpu = module._offer_record(
+        offer("lower-cpu", cpu_cores_effective=8, total_flops=100, dph_total=0.2)
+    )
+
+    assert module._stronger_or_equal(lower_gpu_flops, primary, cpu_only=True)
+    assert not module._stronger_or_equal(lower_gpu_flops, primary)
+    assert not module._stronger_or_equal(lower_cpu, primary, cpu_only=True)
+
+
+def test_vastai_cpu_only_replacement_preserves_recorded_cpu_ram_and_disk(
+    tmp_path: Path, monkeypatch
+):
+    module = load_vastai_module()
+    selected = module._offer_record(
+        offer(
+            "old",
+            cpu_cores_effective=19.2,
+            cpu_ram_mb=98304,
+            disk_space_gb=256,
+            total_flops=80,
+        )
+    )
+    replacement = module._offer_record(
+        offer(
+            "new",
+            cpu_cores_effective=20,
+            cpu_ram_mb=98304,
+            disk_space_gb=256,
+            total_flops=5,
+            dph_total=0.8,
+        )
+    )
+    state = {
+        "provider_state": {
+            "requested": {
+                "cpu_only": True,
+                "min_cpu_cores": 12,
+                "gpu_name": None,
+                "gpu_count": 1,
+                "min_gpu_ram_gb": 1,
+                "min_cpu_ram_gb": 64,
+                "max_dph": 2.0,
+                "min_reliability": 0.99,
+                "disk_gb": 100,
+                "image": "image",
+            },
+            "selected_offer": selected,
+        }
+    }
+    specifications: list[dict[str, Any]] = []
+
+    def fake_search(specification, offer_id=None):
+        assert offer_id is None
+        specifications.append(specification)
+        return [replacement]
+
+    monkeypatch.setattr(module, "search_offers", fake_search)
+    args = module._replacement_args(tmp_path / "instance.json", state)
+
+    assert specifications[0]["min_cpu_cores"] == 20
+    assert specifications[0]["min_cpu_ram_gb"] == 96
+    assert specifications[0]["disk_gb"] == 256
+    assert specifications[0]["min_gpu_ram_gb"] == 1
+    assert args.cpu_only is True
+    assert args.gpu_name is None
+    assert args.gpu_count is None
+    assert args.min_gpu_ram_gb is None
 
 
 def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path: Path):

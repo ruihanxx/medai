@@ -1340,6 +1340,12 @@ def test_graph_routes_failed_audit_through_cohort_refine_once(monkeypatch):
 
 
 def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path):
+    local_resources = {
+        "cpu": {"logical_cores": 12, "physical_cores": 6},
+        "memory": {"total_gb": 32.0, "available_gb": 24.0},
+        "disk": {"total_gb": 512.0, "free_gb": 300.0},
+        "gpus": [],
+    }
     prompt_path = render_prompt(
         "codegen/session_instructions.md",
         tmp_path / "codegen.md",
@@ -1354,6 +1360,7 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
         dataset_patch_path=tmp_path / "patch.json",
         skill_corrections_path=tmp_path / "corrections.json",
         computation_provider_state_path=tmp_path / "instance.json",
+        local_resources=local_resources,
         gpu_info=[],
         computation_provider="AutoDL",
         resuming=False,
@@ -1363,6 +1370,14 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert "/skills/computation_provider/SKILL.md" in prompt
     assert str(tmp_path / "instance.json") in prompt
     assert "autodl" not in prompt.lower()
+    assert json.dumps(local_resources, sort_keys=True) in prompt
+    assert "physical cores" in prompt
+    assert "1.2 times" in prompt
+    assert "20% headroom" in prompt
+    assert "12 hours or more is insufficient" in prompt
+    assert "a configured provider is capacity fallback only" in prompt
+    assert "run locally\nand do not search offers" in prompt
+    assert "stop explicitly during Codegen" not in prompt
 
 
 def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
@@ -1386,6 +1401,12 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
         dataset_patch_path=tmp_path / "patch.json",
         skill_corrections_path=tmp_path / "corrections.json",
         computation_provider_state_path=tmp_path / "instance.json",
+        local_resources={
+            "cpu": {"logical_cores": 8, "physical_cores": 4},
+            "memory": {"total_gb": 16.0, "available_gb": 12.0},
+            "disk": {"total_gb": 256.0, "free_gb": 128.0},
+            "gpus": [],
+        },
         gpu_info=[],
         computation_provider="AutoDL",
         resuming=True,
@@ -1564,6 +1585,12 @@ def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path:
         dataset_patch_path=tmp_path / "patch.json",
         skill_corrections_path=tmp_path / "corrections.json",
         computation_provider_state_path=tmp_path / "instance.json",
+        local_resources={
+            "cpu": {"logical_cores": 8, "physical_cores": 4},
+            "memory": {"total_gb": 16.0, "available_gb": 12.0},
+            "disk": {"total_gb": 256.0, "free_gb": 128.0},
+            "gpus": [],
+        },
         gpu_info=[],
         computation_provider=None,
         resuming=False,
@@ -1576,6 +1603,8 @@ def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path:
     assert "Widely accepted medical knowledge and standard medical-research methods" in prompt
     assert "do not leave a TODO,\nsilently apply a library default" in prompt
     assert "where that\nchoice is implemented" in prompt
+    assert "stop explicitly during Codegen" in prompt
+    assert "Report the local CPU, available RAM, free disk, GPU capacity" in prompt
 
 
 def test_remote_plan_and_replication_prompts_require_power_off_not_release():

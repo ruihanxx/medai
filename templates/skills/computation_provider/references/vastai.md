@@ -44,6 +44,8 @@ password fallback.
 
 Use the reviewed adapter rather than the Vast CLI:
 
+For a real GPU workload:
+
 ```bash
 python <skill-dir>/scripts/vastai.py search \
   --gpu-count <required-count> \
@@ -59,12 +61,45 @@ python <skill-dir>/scripts/vastai.py create \
   --min-cpu-ram-gb <required-cpu-ram>
 ```
 
+For a CPU-only workload:
+
+```bash
+python <skill-dir>/scripts/vastai.py search \
+  --cpu-only \
+  --min-cpu-cores <required-effective-cores> \
+  --min-cpu-ram-gb <required-cpu-ram> \
+  --disk-gb <required-disk>
+
+python <skill-dir>/scripts/vastai.py create \
+  --state <run-state-path> \
+  --offer-id <selected-offer-id> \
+  --fallback-offer-id <optional-nonweaker-offer-id> \
+  --cpu-only \
+  --min-cpu-cores <required-effective-cores> \
+  --min-cpu-ram-gb <required-cpu-ram> \
+  --disk-gb <required-disk>
+```
+
 `search` is read-only. It accepts provider-default resource floors when no
 arguments are supplied, then returns only on-demand, verified, rentable,
 unrented AMD64 offers within the selected price and reliability limits. Its
 stable order is hourly price, descending reliability, then offer ID. Inspect
 the returned GPU name, count, per-GPU memory, CPU RAM, total FLOPS, price, and
 reliability before choosing an offer.
+
+Vast does not provide a supported standalone CPU instance through this
+adapter. CPU and RAM are portions of a GPU host bundle; live zero-GPU bundle
+records expose no usable CPU RAM and are therefore ineligible. For a CPU-only
+workload, `--cpu-only` deliberately requests Vast's minimum usable carrier of
+one GPU, but that GPU is incidental compute-provider capacity. The adapter
+requires `--min-cpu-cores`, filters on effective CPU cores, CPU RAM, disk,
+reliability, and total hourly price, and selects the cheapest eligible offer.
+It bypasses `VASTAI_DEFAULT_GPU_COUNT` and `VASTAI_MIN_GPU_RAM_GB`, using only an
+internal one-GPU/1-GiB eligibility floor; the normal default 24-GiB VRAM floor
+does not apply. Do not combine `--cpu-only` with `--gpu-name`, `--gpu-count`, or
+`--min-gpu-ram-gb`. The GPU may still appear in selected-offer state and billing
+because Vast uses it as the host bundle carrier; do not describe it as a
+scientific GPU requirement.
 
 Treat paper-stated GPU count and per-GPU VRAM as hard floors. If the exact GPU
 is unavailable, document the closest eligible substitute and the divergence in
@@ -74,6 +109,15 @@ all at least the primary offer's values. The adapter makes that one additional
 billable request only after an explicit primary no-inventory response and after
 it confirms that the primary did not create an instance. It never retries an
 ambiguous create response.
+
+For CPU-only requests, the optional fallback and every resume replacement must
+have at least the selected offer's effective CPU cores, CPU RAM, and disk
+capacity. Compare those fields rather than GPU model, VRAM, or total FLOPS; a
+lower-FLOPS incidental GPU is not a weaker CPU-only replacement. Every candidate
+must still meet the original price and reliability limits. State records
+`cpu_only`, the requested effective-core floor, and each selected offer's
+effective CPU cores and disk capacity. GPU requests retain the GPU comparison
+and stronger-resource fallback rules above.
 
 For a cloud-backed Auto Research campaign, read the completed Replicate state
 at the supplied base-state path. Its `provider_state.selected_offer` is the

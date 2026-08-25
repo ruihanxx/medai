@@ -1157,6 +1157,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         dataset_patch_path=dataset_patch_path,
         skill_corrections_path=skill_corrections_path,
         computation_provider_state_path=computation_provider_state_path,
+        local_resources=resources,
         gpu_info=resources["gpus"],
         computation_provider=config.computation_provider,
         resuming=previous_status in {"running", "failed", "invalidated"},

@@ -49,6 +49,19 @@ Provider-specific resource selection, create initialization, fallback, and
 retry behavior lives only in the metadata-selected computation-provider
 reference. Host orchestration never infers an undocumented alternative.
 
+Codegen receives the complete preflight CPU, available-memory, free-disk, and
+GPU snapshot. It first determines whether faithful full-scale execution needs a
+GPU, then judges local capacity. CPU-only work uses physical cores (logical only
+when physical is unavailable), requires 20% headroom over peak RAM and disk,
+and treats an evidenced estimate of 12 hours or more as locally insufficient.
+An inconclusive local-sufficiency judgment is also insufficient. A configured
+provider is only a fallback: sufficient local resources prohibit offer search,
+instance creation, and remote state. Insufficient resources use the selected
+provider's documented GPU or CPU-only procedure; absence of a provider or of a
+provider-specific CPU-only procedure fails Codegen without reducing experiment
+scale. `--clouddrive` remains remote regardless of local capacity because raw
+data has no local path.
+
 Auto Research requires `--replicate-run runs/<run_id>` and accepts an optional
 campaign `--output`. Without `--output`, the launcher atomically creates the
 next directory under `runs/<run_id>/autoresearch/campaign_NNN`, using one-based

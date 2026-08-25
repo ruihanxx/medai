@@ -74,7 +74,12 @@ foreground operation rather than run inside the agent turn.
   resulting `computational_demand` field is defined in `artifacts.md`.
 - Codegen may modify only the run's copied codebase and its declared plan or
   maintenance artifacts. It inspects data through bounded, read-only reads and
-  must stop on a missing required source artifact.
+  must stop on a missing required source artifact. It receives the complete
+  preflight resource snapshot and makes one evidence-bound local-first resource
+  decision from paper requirements, `computational_demand`, full data scale,
+  algorithm complexity, and bounded timing when feasible. Provider
+  configuration alone never authorizes remote execution; cloud-backed data is
+  the explicit data-locality exception.
 - Preprocessing audit treats `codegen/codebase/` and source data as read-only
   and writes only inside its attempt directory. Local-data audit never uses
   remote compute and may add an equivalent CPU, streaming, or small-batch
@@ -150,6 +155,9 @@ Remote access uses the `computation-provider` skill. The selected provider
 metadata and reference own resource selection, provider APIs, state validation,
 and lifecycle procedures. The shared SSH helper owns provider-independent
 key-first authentication, password fallback, command execution, and transfer.
+CPU-only rental is supported only when that provider reference explicitly
+defines how CPU capacity is represented and selected. Generic prompts never
+encode a provider's zero-GPU support or incidental minimum-GPU rule.
 
 Agents start with the selected reference and may consult official documentation
 for bounded, non-secret diagnostics. They never guess a provider operation or
