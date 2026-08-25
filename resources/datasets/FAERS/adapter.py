@@ -19,6 +19,30 @@ TABLE_FILE_RE = re.compile(
     re.IGNORECASE,
 )
 
+COLUMN_ALIASES = {
+    "demographics": {
+        "isr": "primaryid",
+        "case": "caseid",
+        "i_f_cod": "i_f_code",
+        "gndr_cod": "sex",
+    },
+    "drugs": {"isr": "primaryid", "lot_nbr": "lot_num"},
+    "indications": {"isr": "primaryid", "drug_seq": "indi_drug_seq"},
+    "outcomes": {"isr": "primaryid", "outc_code": "outc_cod"},
+    "reactions": {"isr": "primaryid"},
+    "report_sources": {"isr": "primaryid"},
+    "therapies": {"isr": "primaryid", "drug_seq": "dsg_drug_seq"},
+}
+
+
+def _canonicalize_column_name(column: object) -> str:
+    normalized = str(column).strip().lower()
+    if normalized.startswith("\ufeff"):
+        normalized = normalized[1:]
+    if normalized.startswith("ï»¿"):
+        normalized = normalized[3:]
+    return normalized
+
 
 class DatasetAdapterError(Exception):
     pass
@@ -36,9 +60,9 @@ class DatasetAdapter:
     """Partition-aware access layer for the local FAERS ASCII extracts.
 
     The seven logical tables are described once in resources.yaml and resolved
-    across quarter directories at runtime. Raw 2014Q1-Q2 schema differences are
-    normalized to the 2014Q3+ column contract without inventing values: fields
-    absent in the older release are returned as ``None``.
+    across quarter directories at runtime. Legacy AERS and early FAERS column
+    names are normalized to a loss-preserving union contract without inventing
+    values: fields absent in a release are returned as ``None``.
     """
 
     def __init__(self, root: str | Path):
@@ -116,7 +140,7 @@ class DatasetAdapter:
         if kind == "quarterly_archive":
             paths = []
             for quarter in selected:
-                paths.extend((self.raw / quarter).glob("faers_ascii_*.zip"))
+                paths.extend((self.raw / quarter).glob("*aers_ascii_*.zip"))
             return sorted(paths)
         if kind == "quarterly_documentation":
             paths = []
@@ -127,6 +151,20 @@ class DatasetAdapter:
                         path
                         for path in extracted.rglob("*")
                         if path.is_file() and path.suffix.lower() in {".doc", ".pdf"}
+                    )
+            return sorted(paths)
+        if kind == "quarterly_auxiliary_text":
+            paths = []
+            for quarter in selected:
+                extracted = self.raw / quarter / "extracted"
+                if extracted.exists():
+                    paths.extend(
+                        path
+                        for path in extracted.rglob("*")
+                        if path.is_file()
+                        and path.suffix.lower() == ".txt"
+                        and TABLE_FILE_RE.fullmatch(path.name) is None
+                        and "delet" not in path.as_posix().lower()
                     )
             return sorted(paths)
         if kind == "acquisition_support":
@@ -277,7 +315,8 @@ class DatasetAdapter:
                 if columns is not None and not normalize_schema:
                     self._check_columns(resource_id, columns, raw_header)
                 for raw_row in reader:
-                    if raw_row.get("_extra_fields"):
+                    extra_fields = raw_row.get("_extra_fields") or []
+                    if any(value not in {None, ""} for value in extra_fields):
                         raise DatasetAdapterError(f"row contains extra delimited fields in {path}")
                     raw_row.pop("_extra_fields", None)
                     row = (
@@ -458,7 +497,11 @@ class DatasetAdapter:
                     len(paths) == resource["count_summary"]["file_count"],
                     f"{len(paths)} files",
                 )
-            elif kind in {"quarterly_archive", "quarterly_documentation"}:
+            elif kind in {
+                "quarterly_archive",
+                "quarterly_auxiliary_text",
+                "quarterly_documentation",
+            }:
                 paths = self.get_resource_paths(resource_id)
                 add(
                     f"{resource_id}_files",
@@ -580,19 +623,22 @@ class DatasetAdapter:
         row: dict[str, str | None],
         canonical: list[str],
     ) -> dict[str, str | None]:
-        normalized = dict(row)
-        if resource_id == "demographics" and "sex" not in normalized:
-            normalized["sex"] = normalized.pop("gndr_cod", None)
+        normalized = {_canonicalize_column_name(column): value for column, value in row.items()}
+        for source, target in COLUMN_ALIASES.get(resource_id, {}).items():
+            if source in normalized and target not in normalized:
+                normalized[target] = normalized.pop(source)
         return {column: normalized.get(column) for column in canonical}
 
     @staticmethod
     def _normalize_frame(resource_id: str, frame: Any, canonical: list[str], pd: Any):
-        if (
-            resource_id == "demographics"
-            and "sex" not in frame.columns
-            and "gndr_cod" in frame.columns
-        ):
-            frame = frame.rename(columns={"gndr_cod": "sex"})
+        frame = frame.rename(columns=_canonicalize_column_name)
+        aliases = {
+            source: target
+            for source, target in COLUMN_ALIASES.get(resource_id, {}).items()
+            if source in frame.columns and target not in frame.columns
+        }
+        if aliases:
+            frame = frame.rename(columns=aliases)
         for column in canonical:
             if column not in frame.columns:
                 frame[column] = pd.NA

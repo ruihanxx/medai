@@ -1,39 +1,60 @@
 dataset_id: faers
-dataset_name: FDA Adverse Event Reporting System Quarterly ASCII Extracts
-version: 2014Q1-2024Q4
+dataset_name: FDA AERS/FAERS Quarterly ASCII Extracts (now AEMS)
+version: 2004Q1-2024Q4
 generated_at: '2026-08-25'
 raw_root: raw
 local_raw_root_note: >-
-  The downloaded quarterly directories, original ZIP files, extracted FDA files,
-  checksums, source URL list, and downloader are preserved beneath raw without
-  modifying their contents.
+  The original FDA ZIPs, extracted files, completion markers, checksums, source
+  URL list, and resumable range downloader are preserved beneath raw. Source
+  table contents are not rewritten during schema normalization.
+
 official_sources:
 - title: FDA AEMS latest quarterly data files
   url: https://www.fda.gov/drugs/fda-adverse-event-monitoring-system-aems/fda-adverse-event-monitoring-system-aems-latest-quarterly-data-files
-  accessed: '2026-08-24'
-  notes: FDA landing page; the system and page were formerly named FAERS.
-- title: FDA FAERS/AEMS quarterly data extract file index
+  accessed: '2026-08-25'
+  notes: FDA landing page; the system was formerly named FAERS and AERS.
+- title: FDA AERS/FAERS/AEMS quarterly data extract file index
   url: https://fis.fda.gov/extensions/FPD-QDE-FAERS/FPD-QDE-FAERS.html
-  accessed: '2026-08-24'
+  accessed: '2026-08-25'
   notes: Official quarter-by-quarter ASCII and XML download index.
-- title: Local FDA quarterly README and ASC_NTS documents
+- title: Local FDA quarterly README and ASCII notes
   path_spec:
-  - raw/{quarter}/extracted/Readme.{doc|pdf}
-  - raw/{quarter}/extracted/{ascii|ASCII}/ASC_NTS.{doc|pdf}
-  notes: FDA-supplied format, caveat, field, and relationship documentation repeated in each quarterly package.
+  - raw/{quarter}/extracted/{README|Readme}.{doc|pdf}
+  - raw/{quarter}/extracted/{ascii|ASCII}/{Asc_nts|ASC_NTS}.{doc|pdf}
+  notes: FDA-supplied field definitions, joins, release changes, and caveats.
 
 quarter_groups:
   all_quarters:
-    selector: 2014Q1..2024Q4
-    expected_count: 44
-  legacy_2014_h1:
+    selector: 2004Q1..2024Q4
+    expected_count: 84
+  legacy_aers:
+    selector: 2004Q1..2012Q3
+    expected_count: 35
+  aers_demo_without_reporter_country:
+    selector: 2004Q1..2005Q2
+    expected_count: 6
+  aers_demo_with_reporter_country:
+    selector: 2005Q3..2012Q3
+    expected_count: 29
+  faers_transition_q4:
     quarters:
-    - 2014Q1
-    - 2014Q2
-    expected_count: 2
+    - 2012Q4
+    expected_count: 1
+  faers_initial_schema:
+    selector: 2013Q1..2014Q2
+    expected_count: 6
+  faers_post_transition:
+    selector: 2013Q1..2024Q4
+    expected_count: 48
+  faers_pre_2014q3:
+    selector: 2012Q4..2014Q2
+    expected_count: 7
   current_schema:
     selector: 2014Q3..2024Q4
     expected_count: 42
+  all_faers:
+    selector: 2012Q4..2024Q4
+    expected_count: 49
   deleted_case_quarters:
     selector: 2019Q1..2024Q4
     expected_count: 24
@@ -41,120 +62,87 @@ quarter_groups:
 partition_contract:
   partition_key: quarter
   directory_pattern: raw/{YYYY}Q{Q}
-  archive_pattern: raw/{quarter}/faers_ascii_{YYYY}{q|Q}{Q}.zip
+  archive_pattern: raw/{quarter}/{aers|faers}_ascii_{YYYY}{q|Q}{Q}.zip
   extracted_table_pattern: raw/{quarter}/extracted/{ascii|ASCII}/{TABLE}{YY}Q{Q}[_new].txt
   delimiter: '$'
   text_encoding: latin-1
   line_endings: mixed CRLF/LF across releases
   reuse_rule: >-
-    Every logical resource below applies to a quarter group and is described once;
-    adapter.py resolves the repeated physical files case-insensitively instead of
-    storing a separate resource object for every year and quarter.
+    Each logical resource and graph relationship is declared once against a
+    reusable quarter group. adapter.py resolves the repeated physical files;
+    individual years and quarters are not separate resource objects.
   observed_path_variants:
-  - applies_to: 2014Q1..2019Q4
+  - applies_to: legacy_aers
+    archive_prefix: aers_ascii
+    ascii_directory: ascii
+  - applies_to: all_faers
+    archive_prefix: faers_ascii
+  - applies_to: 2012Q4..2019Q4
     ascii_directory: ascii
   - applies_to: 2020Q1..2024Q4
     ascii_directory: ASCII
   - applies_to: 2018Q1
     exception: The demographic filename is DEMO18Q1_new.txt.
-  - applies_to: 2019Q1..2024Q4
+  - applies_to: deleted_case_quarters
     exception: Deleted-case directory and filenames vary in capitalization and naming; adapter.py discovers them by role.
+  - applies_to: legacy_aers
+    exception: Data rows commonly contain one empty field after a trailing '$'; adapter.py accepts only empty trailing fields.
 
 schema_normalization:
-  canonical_schema: current_schema
+  canonical_schema: loss_preserving_union_2004_2024
   rules:
-  - resource_id: demographics
-    applies_to: legacy_2014_h1
+  - applies_to: legacy_aers
+    common_rename:
+      ISR: primaryid
+    resource_specific_rename:
+      demographics:
+        CASE: caseid
+        I_F_COD: i_f_code
+        GNDR_COD: sex
+      indications:
+        DRUG_SEQ: indi_drug_seq
+      therapies:
+        DRUG_SEQ: dsg_drug_seq
+    absent_fields: >-
+      CASEVERSION is not inferred from FOLL_SEQ. CASEID is null in normalized
+      legacy secondary tables because those files contain ISR only.
+  - applies_to: faers_transition_q4
+    cleanup:
+    - Strip the UTF-8 BOM decoded through latin-1 from DRUG primaryid.
+    - Strip surrounding header whitespace, including DEMO ' rept_dt'.
+    rename:
+      lot_nbr: lot_num
+      outc_code: outc_cod
+  - applies_to: faers_pre_2014q3
     rename:
       gndr_cod: sex
     fill_with_null:
-    - auth_num
-    - lit_ref
-    - age_grp
-  - resource_id: drugs
-    applies_to: legacy_2014_h1
+    - demographics.auth_num
+    - demographics.lit_ref
+    - demographics.age_grp
+    - drugs.prod_ai
+    - reactions.drug_rec_act
+  - applies_to: all_faers
     fill_with_null:
-    - prod_ai
-  - resource_id: reactions
-    applies_to: legacy_2014_h1
-    fill_with_null:
-    - drug_rec_act
+    - demographics.foll_seq
+    - demographics.image
+    - demographics.death_dt
+    - demographics.confid
   notes: >-
-    Normalization changes only column shape. It does not infer values absent from
-    the 2014Q1-Q2 extracts; adapter.py returns those cells as null.
+    Normalization changes column names and shape only. Missing values are null;
+    no legacy follow-up sequence, case version, date, or identifier is inferred.
 
 clinical_caveats:
-- A submitted report does not establish that a product caused an event.
-- Spontaneous-report counts cannot estimate incidence or comparative drug risk.
-- Quarter is extract/receipt provenance, not the adverse-event date; event and therapy dates may be partial YYYY, YYYYMM, or YYYYMMDD values.
-- The extract is case/version based and supplies the latest completed version available when a quarterly extract is produced.
-- Supporting frequency PDFs can differ slightly from physical file counts for older extracts; use physical files for local row counts.
+- A submitted spontaneous report does not establish that a product caused an event.
+- Report counts cannot estimate incidence or comparative drug risk.
+- Quarter is extract/receipt provenance, not the adverse-event date; dates may be partial YYYY, YYYYMM, or YYYYMMDD values.
+- Legacy AERS ISR values may reappear in later quarters with updated data, and a CASE value may change; retain quarter when combining extracts.
+- FAERS quarters are case/version based and can contain later CASEVERSION values for a CASEID; predeclare a cross-quarter version-selection rule.
+- Supporting frequency documents can differ slightly from physical file counts; use physical files for local row counts.
 
-resources:
-- resource_id: demographics
-  kind: quarterly_table
-  table_code: DEMO
-  applies_to: all_quarters
-  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/DEMO{YY}Q{Q}[_new].txt
-  modality: pharmacovigilance_tabular
-  file_format: dollar_delimited_text
-  compression: none
-  role: case_version_entity_table
-  canonical_columns:
-  - primaryid
-  - caseid
-  - caseversion
-  - i_f_code
-  - event_dt
-  - mfr_dt
-  - init_fda_dt
-  - fda_dt
-  - rept_cod
-  - auth_num
-  - mfr_num
-  - mfr_sndr
-  - lit_ref
-  - age
-  - age_cod
-  - age_grp
-  - sex
-  - e_sub
-  - wt
-  - wt_cod
-  - rept_dt
-  - to_mfr
-  - occp_cod
-  - reporter_country
-  - occr_country
-  raw_schema_variants:
-  - variant_id: legacy_2014_h1
-    applies_to: legacy_2014_h1
-    columns:
-    - primaryid
-    - caseid
-    - caseversion
-    - i_f_code
-    - event_dt
-    - mfr_dt
-    - init_fda_dt
-    - fda_dt
-    - rept_cod
-    - mfr_num
-    - mfr_sndr
-    - age
-    - age_cod
-    - gndr_cod
-    - e_sub
-    - wt
-    - wt_cod
-    - rept_dt
-    - to_mfr
-    - occp_cod
-    - reporter_country
-    - occr_country
-  - variant_id: current_schema
-    applies_to: current_schema
-    columns:
+column_sets:
+  demographics:
+    canonical: &demographics_canonical
     - primaryid
     - caseid
     - caseversion
@@ -180,76 +168,131 @@ resources:
     - occp_cod
     - reporter_country
     - occr_country
-  size_summary:
-    total_bytes: 2418081804
-    min_partition_bytes: 28309653
-    max_partition_bytes: 70973625
-  count_summary:
-    file_count: 44
-    row_count: not_counted_large_partitioned_files
-  readable: true
-  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
-  source_evidence:
-  - Local headers from every quarterly DEMO file
-  - FDA Readme and ASC_NTS documents
-  notes: One row per released case version within a quarterly extract; PRIMARYID links all seven tables.
-
-- resource_id: drugs
-  kind: quarterly_table
-  table_code: DRUG
-  applies_to: all_quarters
-  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/DRUG{YY}Q{Q}.txt
-  modality: pharmacovigilance_tabular
-  file_format: dollar_delimited_text
-  compression: none
-  role: medication_event_table
-  canonical_columns:
-  - primaryid
-  - caseid
-  - drug_seq
-  - role_cod
-  - drugname
-  - prod_ai
-  - val_vbm
-  - route
-  - dose_vbm
-  - cum_dose_chr
-  - cum_dose_unit
-  - dechal
-  - rechal
-  - lot_num
-  - exp_dt
-  - nda_num
-  - dose_amt
-  - dose_unit
-  - dose_form
-  - dose_freq
-  raw_schema_variants:
-  - variant_id: legacy_2014_h1
-    applies_to: legacy_2014_h1
-    columns:
+    - foll_seq
+    - image
+    - death_dt
+    - confid
+    aers_without_reporter_country: &demographics_aers_base
+    - ISR
+    - CASE
+    - I_F_COD
+    - FOLL_SEQ
+    - IMAGE
+    - EVENT_DT
+    - MFR_DT
+    - FDA_DT
+    - REPT_COD
+    - MFR_NUM
+    - MFR_SNDR
+    - AGE
+    - AGE_COD
+    - GNDR_COD
+    - E_SUB
+    - WT
+    - WT_COD
+    - REPT_DT
+    - OCCP_COD
+    - DEATH_DT
+    - TO_MFR
+    - CONFID
+    aers_with_reporter_country: &demographics_aers_country
+    - ISR
+    - CASE
+    - I_F_COD
+    - FOLL_SEQ
+    - IMAGE
+    - EVENT_DT
+    - MFR_DT
+    - FDA_DT
+    - REPT_COD
+    - MFR_NUM
+    - MFR_SNDR
+    - AGE
+    - AGE_COD
+    - GNDR_COD
+    - E_SUB
+    - WT
+    - WT_COD
+    - REPT_DT
+    - OCCP_COD
+    - DEATH_DT
+    - TO_MFR
+    - CONFID
+    - REPORTER_COUNTRY
+    faers_transition_q4: &demographics_transition
     - primaryid
     - caseid
-    - drug_seq
-    - role_cod
-    - drugname
-    - val_vbm
-    - route
-    - dose_vbm
-    - cum_dose_chr
-    - cum_dose_unit
-    - dechal
-    - rechal
-    - lot_num
-    - exp_dt
-    - nda_num
-    - dose_amt
-    - dose_unit
-    - dose_form
-    - dose_freq
-  - variant_id: current_schema
-    applies_to: current_schema
-    columns: &drug_columns
+    - caseversion
+    - i_f_code
+    - event_dt
+    - mfr_dt
+    - init_fda_dt
+    - fda_dt
+    - rept_cod
+    - mfr_num
+    - mfr_sndr
+    - age
+    - age_cod
+    - gndr_cod
+    - e_sub
+    - wt
+    - wt_cod
+    - ' rept_dt'
+    - to_mfr
+    - occp_cod
+    - reporter_country
+    - occr_country
+    faers_initial: &demographics_initial
+    - primaryid
+    - caseid
+    - caseversion
+    - i_f_code
+    - event_dt
+    - mfr_dt
+    - init_fda_dt
+    - fda_dt
+    - rept_cod
+    - mfr_num
+    - mfr_sndr
+    - age
+    - age_cod
+    - gndr_cod
+    - e_sub
+    - wt
+    - wt_cod
+    - rept_dt
+    - to_mfr
+    - occp_cod
+    - reporter_country
+    - occr_country
+    current: &demographics_current
+    - primaryid
+    - caseid
+    - caseversion
+    - i_f_code
+    - event_dt
+    - mfr_dt
+    - init_fda_dt
+    - fda_dt
+    - rept_cod
+    - auth_num
+    - mfr_num
+    - mfr_sndr
+    - lit_ref
+    - age
+    - age_cod
+    - age_grp
+    - sex
+    - e_sub
+    - wt
+    - wt_cod
+    - rept_dt
+    - to_mfr
+    - occp_cod
+    - reporter_country
+    - occr_country
+  drugs:
+    canonical: &drugs_canonical
     - primaryid
     - caseid
     - drug_seq
@@ -270,19 +313,225 @@ resources:
     - dose_unit
     - dose_form
     - dose_freq
-  size_summary:
-    total_bytes: 6778227738
-    min_partition_bytes: 51523678
-    max_partition_bytes: 226648175
-  count_summary:
-    file_count: 44
-    row_count: not_counted_large_partitioned_files
+    aers: &drugs_aers
+    - ISR
+    - DRUG_SEQ
+    - ROLE_COD
+    - DRUGNAME
+    - VAL_VBM
+    - ROUTE
+    - DOSE_VBM
+    - DECHAL
+    - RECHAL
+    - LOT_NUM
+    - EXP_DT
+    - NDA_NUM
+    faers_transition_q4: &drugs_transition
+    - ï»¿primaryid
+    - caseid
+    - drug_seq
+    - role_cod
+    - drugname
+    - val_vbm
+    - route
+    - dose_vbm
+    - cum_dose_chr
+    - cum_dose_unit
+    - dechal
+    - rechal
+    - lot_nbr
+    - exp_dt
+    - nda_num
+    - dose_amt
+    - dose_unit
+    - dose_form
+    - dose_freq
+    faers_initial: &drugs_initial
+    - primaryid
+    - caseid
+    - drug_seq
+    - role_cod
+    - drugname
+    - val_vbm
+    - route
+    - dose_vbm
+    - cum_dose_chr
+    - cum_dose_unit
+    - dechal
+    - rechal
+    - lot_num
+    - exp_dt
+    - nda_num
+    - dose_amt
+    - dose_unit
+    - dose_form
+    - dose_freq
+    current: &drugs_current
+    - primaryid
+    - caseid
+    - drug_seq
+    - role_cod
+    - drugname
+    - prod_ai
+    - val_vbm
+    - route
+    - dose_vbm
+    - cum_dose_chr
+    - cum_dose_unit
+    - dechal
+    - rechal
+    - lot_num
+    - exp_dt
+    - nda_num
+    - dose_amt
+    - dose_unit
+    - dose_form
+    - dose_freq
+  indications:
+    canonical: &indications_canonical
+    - primaryid
+    - caseid
+    - indi_drug_seq
+    - indi_pt
+    aers: &indications_aers
+    - ISR
+    - DRUG_SEQ
+    - INDI_PT
+    faers: &indications_faers
+    - primaryid
+    - caseid
+    - indi_drug_seq
+    - indi_pt
+  outcomes:
+    canonical: &outcomes_canonical
+    - primaryid
+    - caseid
+    - outc_cod
+    aers: &outcomes_aers
+    - ISR
+    - OUTC_COD
+    faers_transition_q4: &outcomes_transition
+    - primaryid
+    - caseid
+    - outc_code
+    faers: &outcomes_faers
+    - primaryid
+    - caseid
+    - outc_cod
+  reactions:
+    canonical: &reactions_canonical
+    - primaryid
+    - caseid
+    - pt
+    - drug_rec_act
+    aers: &reactions_aers
+    - ISR
+    - PT
+    faers_initial: &reactions_initial
+    - primaryid
+    - caseid
+    - pt
+    current: &reactions_current
+    - primaryid
+    - caseid
+    - pt
+    - drug_rec_act
+  report_sources:
+    canonical: &report_sources_canonical
+    - primaryid
+    - caseid
+    - rpsr_cod
+    aers: &report_sources_aers
+    - ISR
+    - RPSR_COD
+    faers: &report_sources_faers
+    - primaryid
+    - caseid
+    - rpsr_cod
+  therapies:
+    canonical: &therapies_canonical
+    - primaryid
+    - caseid
+    - dsg_drug_seq
+    - start_dt
+    - end_dt
+    - dur
+    - dur_cod
+    aers: &therapies_aers
+    - ISR
+    - DRUG_SEQ
+    - START_DT
+    - END_DT
+    - DUR
+    - DUR_COD
+    faers: &therapies_faers
+    - primaryid
+    - caseid
+    - dsg_drug_seq
+    - start_dt
+    - end_dt
+    - dur
+    - dur_cod
+
+resources:
+- resource_id: demographics
+  kind: quarterly_table
+  table_code: DEMO
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/DEMO{YY}Q{Q}[_new].txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  role: report_or_case_version_entity_table
+  canonical_columns: *demographics_canonical
+  raw_schema_variants:
+  - variant_id: aers_without_reporter_country
+    applies_to: aers_demo_without_reporter_country
+    columns: *demographics_aers_base
+  - variant_id: aers_with_reporter_country
+    applies_to: aers_demo_with_reporter_country
+    columns: *demographics_aers_country
+  - variant_id: faers_transition_q4
+    applies_to: faers_transition_q4
+    columns: *demographics_transition
+  - variant_id: faers_initial
+    applies_to: faers_initial_schema
+    columns: *demographics_initial
+  - variant_id: current
+    applies_to: current_schema
+    columns: *demographics_current
+  size_summary: {total_bytes: 3133274565, min_partition_bytes: 7401827, max_partition_bytes: 70973625}
+  count_summary: {file_count: 84, row_count: not_counted_large_partitioned_files}
   readable: true
   reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
-  source_evidence:
-  - Local headers from every quarterly DRUG file
-  - FDA Readme and ASC_NTS documents
-  notes: One or more drugs per case; join therapy and indication rows using PRIMARYID plus the corresponding drug sequence.
+  notes: AERS uses ISR/CASE/FOLL_SEQ; FAERS uses PRIMARYID/CASEID/CASEVERSION. The union retains both follow-up representations without equating them.
+
+- resource_id: drugs
+  kind: quarterly_table
+  table_code: DRUG
+  applies_to: all_quarters
+  path_spec: raw/{quarter}/extracted/{ascii|ASCII}/DRUG{YY}Q{Q}.txt
+  modality: pharmacovigilance_tabular
+  file_format: dollar_delimited_text
+  role: medication_event_table
+  canonical_columns: *drugs_canonical
+  raw_schema_variants:
+  - variant_id: aers
+    applies_to: legacy_aers
+    columns: *drugs_aers
+  - variant_id: faers_transition_q4
+    applies_to: faers_transition_q4
+    columns: *drugs_transition
+  - variant_id: faers_initial
+    applies_to: faers_initial_schema
+    columns: *drugs_initial
+  - variant_id: current
+    applies_to: current_schema
+    columns: *drugs_current
+  size_summary: {total_bytes: 7904248146, min_partition_bytes: 12830781, max_partition_bytes: 226648175}
+  count_summary: {file_count: 84, row_count: not_counted_large_partitioned_files}
+  readable: true
+  reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
+  notes: Link therapy and indication rows with the report key plus the corresponding drug sequence.
 
 - resource_id: indications
   kind: quarterly_table
@@ -291,30 +540,20 @@ resources:
   path_spec: raw/{quarter}/extracted/{ascii|ASCII}/INDI{YY}Q{Q}.txt
   modality: pharmacovigilance_tabular
   file_format: dollar_delimited_text
-  compression: none
   role: drug_indication_event_table
-  canonical_columns: &indication_columns
-  - primaryid
-  - caseid
-  - indi_drug_seq
-  - indi_pt
+  canonical_columns: *indications_canonical
   raw_schema_variants:
-  - variant_id: all_quarters
-    applies_to: all_quarters
-    columns: *indication_columns
-  size_summary:
-    total_bytes: 2200004127
-    min_partition_bytes: 18526184
-    max_partition_bytes: 77639413
-  count_summary:
-    file_count: 44
-    row_count: not_counted_large_partitioned_files
+  - variant_id: aers
+    applies_to: legacy_aers
+    columns: *indications_aers
+  - variant_id: faers
+    applies_to: all_faers
+    columns: *indications_faers
+  size_summary: {total_bytes: 2585684385, min_partition_bytes: 3000273, max_partition_bytes: 77639413}
+  count_summary: {file_count: 84, row_count: not_counted_large_partitioned_files}
   readable: true
   reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
-  source_evidence:
-  - Local headers from every quarterly INDI file
-  - FDA Readme and ASC_NTS documents
-  notes: MedDRA preferred terms for reported drug indications; INDI_DRUG_SEQ maps to DRUG_SEQ within PRIMARYID.
+  notes: AERS DRUG_SEQ and FAERS INDI_DRUG_SEQ normalize to INDI_DRUG_SEQ.
 
 - resource_id: outcomes
   kind: quarterly_table
@@ -323,29 +562,23 @@ resources:
   path_spec: raw/{quarter}/extracted/{ascii|ASCII}/OUTC{YY}Q{Q}.txt
   modality: pharmacovigilance_tabular
   file_format: dollar_delimited_text
-  compression: none
-  role: case_outcome_event_table
-  canonical_columns: &outcome_columns
-  - primaryid
-  - caseid
-  - outc_cod
+  role: report_outcome_event_table
+  canonical_columns: *outcomes_canonical
   raw_schema_variants:
-  - variant_id: all_quarters
-    applies_to: all_quarters
-    columns: *outcome_columns
-  size_summary:
-    total_bytes: 283577921
-    min_partition_bytes: 3646825
-    max_partition_bytes: 9683245
-  count_summary:
-    file_count: 44
-    row_count: not_counted_large_partitioned_files
+  - variant_id: aers
+    applies_to: legacy_aers
+    columns: *outcomes_aers
+  - variant_id: faers_transition_q4
+    applies_to: faers_transition_q4
+    columns: *outcomes_transition
+  - variant_id: faers
+    applies_to: faers_post_transition
+    columns: *outcomes_faers
+  size_summary: {total_bytes: 352255358, min_partition_bytes: 748710, max_partition_bytes: 9683245}
+  count_summary: {file_count: 84, row_count: not_counted_large_partitioned_files}
   readable: true
   reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
-  source_evidence:
-  - Local headers from every quarterly OUTC file
-  - FDA Readme and ASC_NTS documents
-  notes: Zero or more coded patient outcomes per released case version.
+  notes: 2012Q4 alone spells the outcome field OUTC_CODE; adapter normalizes it to OUTC_COD.
 
 - resource_id: reactions
   kind: quarterly_table
@@ -354,40 +587,23 @@ resources:
   path_spec: raw/{quarter}/extracted/{ascii|ASCII}/REAC{YY}Q{Q}.txt
   modality: pharmacovigilance_tabular
   file_format: dollar_delimited_text
-  compression: none
   role: adverse_reaction_event_table
-  canonical_columns:
-  - primaryid
-  - caseid
-  - pt
-  - drug_rec_act
+  canonical_columns: *reactions_canonical
   raw_schema_variants:
-  - variant_id: legacy_2014_h1
-    applies_to: legacy_2014_h1
-    columns:
-    - primaryid
-    - caseid
-    - pt
-  - variant_id: current_schema
+  - variant_id: aers
+    applies_to: legacy_aers
+    columns: *reactions_aers
+  - variant_id: faers_initial
+    applies_to: faers_pre_2014q3
+    columns: *reactions_initial
+  - variant_id: current
     applies_to: current_schema
-    columns:
-    - primaryid
-    - caseid
-    - pt
-    - drug_rec_act
-  size_summary:
-    total_bytes: 2066589541
-    min_partition_bytes: 23844821
-    max_partition_bytes: 60406816
-  count_summary:
-    file_count: 44
-    row_count: not_counted_large_partitioned_files
+    columns: *reactions_current
+  size_summary: {total_bytes: 2606205172, min_partition_bytes: 6975162, max_partition_bytes: 60406816}
+  count_summary: {file_count: 84, row_count: not_counted_large_partitioned_files}
   readable: true
   reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
-  source_evidence:
-  - Local headers from every quarterly REAC file
-  - FDA Readme and ASC_NTS documents
-  notes: One or more MedDRA preferred terms per case; term order does not imply clinical priority.
+  notes: Reported MedDRA preferred terms; row order does not imply clinical priority.
 
 - resource_id: report_sources
   kind: quarterly_table
@@ -396,29 +612,20 @@ resources:
   path_spec: raw/{quarter}/extracted/{ascii|ASCII}/RPSR{YY}Q{Q}.txt
   modality: pharmacovigilance_tabular
   file_format: dollar_delimited_text
-  compression: none
   role: report_source_event_table
-  canonical_columns: &report_source_columns
-  - primaryid
-  - caseid
-  - rpsr_cod
+  canonical_columns: *report_sources_canonical
   raw_schema_variants:
-  - variant_id: all_quarters
-    applies_to: all_quarters
-    columns: *report_source_columns
-  size_summary:
-    total_bytes: 15957108
-    min_partition_bytes: 109704
-    max_partition_bytes: 844524
-  count_summary:
-    file_count: 44
-    row_count: not_counted_large_partitioned_files
+  - variant_id: aers
+    applies_to: legacy_aers
+    columns: *report_sources_aers
+  - variant_id: faers
+    applies_to: all_faers
+    columns: *report_sources_faers
+  size_summary: {total_bytes: 43794850, min_partition_bytes: 109704, max_partition_bytes: 1192744}
+  count_summary: {file_count: 84, row_count: not_counted_large_partitioned_files}
   readable: true
   reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
-  source_evidence:
-  - Local headers from every quarterly RPSR file
-  - FDA Readme and ASC_NTS documents
-  notes: Zero or more source codes from the latest released version of a case.
+  notes: Zero or more coded report sources per released report/case version.
 
 - resource_id: therapies
   kind: quarterly_table
@@ -427,33 +634,20 @@ resources:
   path_spec: raw/{quarter}/extracted/{ascii|ASCII}/THER{YY}Q{Q}.txt
   modality: pharmacovigilance_tabular
   file_format: dollar_delimited_text
-  compression: none
   role: drug_therapy_interval_table
-  canonical_columns: &therapy_columns
-  - primaryid
-  - caseid
-  - dsg_drug_seq
-  - start_dt
-  - end_dt
-  - dur
-  - dur_cod
+  canonical_columns: *therapies_canonical
   raw_schema_variants:
-  - variant_id: all_quarters
-    applies_to: all_quarters
-    columns: *therapy_columns
-  size_summary:
-    total_bytes: 915256578
-    min_partition_bytes: 9576541
-    max_partition_bytes: 31130203
-  count_summary:
-    file_count: 44
-    row_count: not_counted_large_partitioned_files
+  - variant_id: aers
+    applies_to: legacy_aers
+    columns: *therapies_aers
+  - variant_id: faers
+    applies_to: all_faers
+    columns: *therapies_faers
+  size_summary: {total_bytes: 1204331965, min_partition_bytes: 3062870, max_partition_bytes: 31130203}
+  count_summary: {file_count: 84, row_count: not_counted_large_partitioned_files}
   readable: true
   reader_hint: DatasetAdapter.load_table for one quarter or iter_batches for cross-quarter streaming
-  source_evidence:
-  - Local headers from every quarterly THER file
-  - FDA Readme and ASC_NTS documents
-  notes: Zero or more therapy intervals per drug; DSG_DRUG_SEQ maps to DRUG_SEQ within PRIMARYID.
+  notes: AERS DRUG_SEQ and FAERS DSG_DRUG_SEQ normalize to DSG_DRUG_SEQ.
 
 - resource_id: deleted_cases
   kind: deleted_case_list
@@ -463,69 +657,56 @@ resources:
   - raw/{quarter}/extracted/Deleted/DELETE{YY}Q{Q}.txt
   modality: identifier_list
   file_format: line_delimited_text
-  compression: none
   role: case_deletion_notice
-  columns:
-  - caseid
-  size_summary:
-    total_bytes: 1962905
-    min_file_bytes: 26460
-    max_file_bytes: 814551
-  count_summary:
-    file_count: 25
-    nonblank_identifier_lines: 205133
+  columns: [caseid]
+  size_summary: {total_bytes: 1962905, min_file_bytes: 26460, max_file_bytes: 814551}
+  count_summary: {file_count: 25, nonblank_identifier_lines: 205133}
   readable: true
-  reader_hint: DatasetAdapter.iter_deleted_case_ids; historical AllDeletedCases.txt is excluded unless explicitly requested
-  source_evidence:
-  - Local file inspection
-  - FDA FAQ question 44 supplied with the extracts
-  notes: >-
-    FDA began supplying deletion lists in 2019Q1. That quarter contains both a
-    historical AllDeletedCases file and a quarter-specific list; later quarters
-    contain one quarter-specific list. Files have no header and some begin with a blank line.
+  reader_hint: DatasetAdapter.iter_deleted_case_ids; historical AllDeletedCases.txt is opt-in
+  notes: FDA began supplying deletion lists in 2019Q1; that quarter has both a historical cumulative file and a quarter-specific file.
 
 - resource_id: quarterly_documentation
   kind: quarterly_documentation
   applies_to: all_quarters
   path_spec:
-  - raw/{quarter}/extracted/Readme.{doc|pdf}
-  - raw/{quarter}/extracted/FAQs.{doc|pdf}
+  - raw/{quarter}/extracted/{README|Readme|FAQs}.{doc|pdf}
   - raw/{quarter}/extracted/{ascii|ASCII}/*.{doc|pdf}
   modality: documentation
   file_format: doc_or_pdf
-  compression: none
   role: official_documentation_and_frequency_reports
-  size_summary:
-    total_bytes: 62595737
-    min_file_bytes: 12803
-    max_file_bytes: 868813
-  count_summary:
-    file_count: 440
+  size_summary: {total_bytes: 72042826, min_file_bytes: 12803, max_file_bytes: 868813}
+  count_summary: {file_count: 560}
   readable: true
-  reader_hint: DOC/PDF reader; table-specific PDFs contain supporting counts rather than source rows
-  source_evidence: Local extracted FDA packages
-  notes: Repeated official format notes, FAQs, and table-specific frequency/null-count reports are grouped once here.
+  reader_hint: DOC/PDF reader; table PDFs are supporting counts, not source rows
+  notes: Repeated official notes and frequency/null-count reports are grouped once across the declared quarter range.
+
+- resource_id: quarterly_auxiliary_text
+  kind: quarterly_auxiliary_text
+  applies_to: legacy_aers
+  path_spec:
+  - raw/{quarter}/extracted/SIZE{YY}Q{Q}.TXT
+  - raw/{quarter}/extracted/ascii/STAT{YY}Q{Q}.TXT
+  modality: documentation
+  file_format: text
+  role: legacy_release_size_and_statistics_support
+  size_summary: {total_bytes: 451717, min_file_bytes: 944, max_file_bytes: 12121}
+  count_summary: {file_count: 70}
+  readable: true
+  reader_hint: Plain text supporting summaries; not relational source tables
+  notes: Exactly two auxiliary text files occur in each of the 35 legacy AERS quarters.
 
 - resource_id: quarterly_archives
   kind: quarterly_archive
   applies_to: all_quarters
-  path_spec: raw/{quarter}/faers_ascii_{YYYY}{q|Q}{Q}.zip
+  path_spec: raw/{quarter}/{aers|faers}_ascii_{YYYY}{q|Q}{Q}.zip
   modality: archive
   file_format: zip
-  compression: zip
   role: original_release_archive
-  size_summary:
-    total_bytes: 2521980367
-    min_partition_bytes: 25791893
-    max_partition_bytes: 74056668
-  count_summary:
-    file_count: 44
+  size_summary: {total_bytes: 3144225962, min_partition_bytes: 7416958, max_partition_bytes: 74056668}
+  count_summary: {file_count: 84}
   readable: true
   reader_hint: zipfile.ZipFile; adapter.validate(deep=True) checks CRC and SHA-256
-  source_evidence:
-  - FDA quarterly extract index
-  - raw/SHA256SUMS generated after local download
-  notes: One original FDA ASCII ZIP per quarter, retained alongside its extracted directory.
+  notes: One original FDA ASCII ZIP per quarter, retained beside the extracted directory.
 
 - resource_id: acquisition_support
   kind: acquisition_support
@@ -535,11 +716,8 @@ resources:
   - raw/download_and_extract.sh
   modality: provenance
   file_format: text_and_shell
-  compression: none
   role: local_acquisition_provenance
-  count_summary:
-    file_count: 3
+  count_summary: {file_count: 3}
   readable: true
-  reader_hint: Plain text and Bash; run download_and_extract.sh from its current raw directory for resumable acquisition
-  source_evidence: Locally generated during acquisition from the official FDA index
-  notes: These are local provenance/support artifacts, not files authored by FDA.
+  reader_hint: Bash downloader uses fixed-size Range chunks, exact-length checks, ZIP CRC, and resumable per-part state
+  notes: Local provenance/support artifacts generated from the official FDA index; they are not FDA-authored files.

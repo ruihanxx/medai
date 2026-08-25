@@ -3,8 +3,8 @@ generated_at: '2026-08-25'
 
 partition_contract:
   partition_key: quarter
-  selector: 2014Q1..2024Q4
-  expected_partition_count: 44
+  selector: 2004Q1..2024Q4
+  expected_partition_count: 84
   applies_to_resource_ids:
   - demographics
   - drugs
@@ -14,145 +14,188 @@ partition_contract:
   - report_sources
   - therapies
   reuse_rule: >-
-    The entity and relationship graph below applies identically within every
-    selected quarter. Resolve the seven physical table files through adapter.py;
-    do not duplicate this graph for individual years or quarters.
+    This entity/relationship graph applies within every selected quarter.
+    Resolve physical files through adapter.py; do not duplicate the graph for
+    individual years or quarters.
   cross_partition_rule: >-
-    Retain _quarter as provenance when combining partitions. A later quarter may
-    contain a later version of an existing CASEID, so cross-quarter cohorts must
-    define a version-selection rule instead of treating every row as a new case.
+    Retain _quarter as provenance and as a join guard. A legacy ISR may reappear
+    with updated data, and a FAERS CASEID may appear with later CASEVERSION
+    values, so no report row is globally unique by primaryid alone.
+
+identifier_regimes:
+- regime_id: legacy_aers
+  applies_to: 2004Q1..2012Q3
+  raw_report_key: ISR
+  canonical_report_key: primaryid
+  raw_case_key: CASE
+  canonical_case_key: caseid
+  followup_field: FOLL_SEQ
+  semantics: >-
+    ISR is the primary link between all seven files within a quarter. CASE
+    groups AERS reports, but an ISR can recur in a later extract with updated
+    data and its associated CASE can change. FOLL_SEQ is manufacturer-provided
+    and is not a case-version counter.
+- regime_id: faers
+  applies_to: 2012Q4..2024Q4
+  raw_report_key: PRIMARYID
+  canonical_report_key: primaryid
+  raw_case_key: CASEID
+  canonical_case_key: caseid
+  version_field: CASEVERSION
+  semantics: >-
+    PRIMARYID identifies a released FAERS case version; CASEID groups versions
+    and CASEVERSION represents version order. The 2012Q4 header anomalies do
+    not change these key semantics.
 
 schema_versions:
-- schema_id: legacy_2014_h1
-  applies_to:
-  - 2014Q1
-  - 2014Q2
+- schema_id: aers_without_reporter_country
+  applies_to: 2004Q1..2005Q2
   differences:
-  - DEMO uses GNDR_COD instead of SEX and lacks AUTH_NUM, LIT_REF, and AGE_GRP.
-  - DRUG lacks PROD_AI.
-  - REAC lacks DRUG_REC_ACT.
-  normalization: adapter.py renames GNDR_COD to SEX and fills absent canonical fields with null.
-- schema_id: current_schema
+  - Seven tables use uppercase AERS headers and ISR as their shared key.
+  - DEMO ends at CONFID and has no REPORTER_COUNTRY.
+  normalization: ISR/CASE and resource-specific drug-sequence aliases map into the canonical union; absent fields remain null.
+- schema_id: aers_with_reporter_country
+  applies_to: 2005Q3..2012Q3
+  differences:
+  - DEMO adds REPORTER_COUNTRY; the other six core headers are unchanged.
+  normalization: Same AERS identifier mapping as the preceding range.
+- schema_id: faers_transition_q4
+  applies_to:
+  - 2012Q4
+  differences:
+  - DEMO contains a leading space in the raw ' rept_dt' header.
+  - DRUG primaryid begins with a UTF-8 BOM decoded via latin-1 and uses LOT_NBR.
+  - OUTC uses OUTC_CODE rather than OUTC_COD.
+  normalization: Strip the BOM/whitespace and map LOT_NBR and OUTC_CODE to canonical names.
+- schema_id: faers_initial
+  applies_to: 2013Q1..2014Q2
+  differences:
+  - DEMO uses GNDR_COD and lacks AUTH_NUM, LIT_REF, and AGE_GRP.
+  - DRUG lacks PROD_AI; REAC lacks DRUG_REC_ACT.
+  normalization: Rename GNDR_COD to SEX and fill absent canonical fields with null.
+- schema_id: current
   applies_to: 2014Q3..2024Q4
   differences: []
-  normalization: Physical headers already match the canonical resource schemas.
+  normalization: Current physical headers match the modern subset of the canonical union; legacy-only DEMO fields are null.
 
 entities:
-- entity_id: adverse_event_case_version
-  description: One released FAERS case version in a quarterly extract.
+- entity_id: adverse_event_report_version
+  description: An AERS ISR report or a released FAERS case version in one quarterly extract.
   resource_ids:
   - demographics
   key_fields:
+  - _quarter
   - primaryid
-  case_identity_fields:
+  lineage_fields:
   - caseid
-  - caseversion
-  partition_field: _quarter
+  version_fields_by_regime:
+    legacy_aers: foll_seq
+    faers: caseversion
 
 - entity_id: reported_drug
-  description: One reported medicinal product within a released case version.
+  description: One reported medicinal product within an adverse-event report/version.
   resource_ids:
   - drugs
   key_fields:
+  - _quarter
   - primaryid
   - drug_seq
-  partition_field: _quarter
 
 - entity_id: adverse_reaction
-  description: One MedDRA preferred-term reaction row associated with a released case version.
+  description: One reported MedDRA preferred-term reaction row.
   resource_ids:
   - reactions
   key_fields:
+  - _quarter
   - primaryid
   - pt
-  partition_field: _quarter
 
 - entity_id: patient_outcome
-  description: One coded patient outcome associated with a released case version.
+  description: One coded patient outcome row.
   resource_ids:
   - outcomes
   key_fields:
+  - _quarter
   - primaryid
   - outc_cod
-  partition_field: _quarter
 
 - entity_id: report_source
-  description: One coded source associated with a released case version.
+  description: One coded report-source row.
   resource_ids:
   - report_sources
   key_fields:
+  - _quarter
   - primaryid
   - rpsr_cod
-  partition_field: _quarter
 
 - entity_id: drug_therapy_interval
-  description: One reported therapy interval for a drug within a released case version.
+  description: One reported therapy interval for a drug.
   resource_ids:
   - therapies
   key_fields:
+  - _quarter
   - primaryid
   - dsg_drug_seq
   - start_dt
   - end_dt
-  partition_field: _quarter
 
 - entity_id: drug_indication
-  description: One MedDRA preferred-term indication for a drug within a released case version.
+  description: One reported MedDRA preferred-term indication for a drug.
   resource_ids:
   - indications
   key_fields:
+  - _quarter
   - primaryid
   - indi_drug_seq
   - indi_pt
-  partition_field: _quarter
 
 - entity_id: deleted_case_notice
-  description: A released identifier for a case deleted by FDA or a manufacturer.
+  description: A case identifier listed by FDA as deleted.
   resource_ids:
   - deleted_cases
   key_fields:
+  - _quarter
   - caseid
-  partition_field: _quarter
 
 relationships:
-- relationship_id: drug_belongs_to_case_version
+- relationship_id: drug_belongs_to_report
   from_entity: reported_drug
-  to_entity: adverse_event_case_version
+  to_entity: adverse_event_report_version
   join_fields:
   - primaryid
   partition_guard: _quarter
   cardinality: many_to_one
-  evidence: FDA ASC_NTS defines PRIMARYID as the link field between all seven ASCII files and documents one or more drugs per demographic row.
+  evidence: Legacy Asc_nts defines ISR and modern ASC_NTS defines PRIMARYID as the primary link across the seven files.
   confidence: high
 
-- relationship_id: reaction_belongs_to_case_version
+- relationship_id: reaction_belongs_to_report
   from_entity: adverse_reaction
-  to_entity: adverse_event_case_version
+  to_entity: adverse_event_report_version
   join_fields:
   - primaryid
   partition_guard: _quarter
   cardinality: many_to_one
-  evidence: FDA ASC_NTS documents one or more reaction terms per demographic row, linked by PRIMARYID.
+  evidence: Both FDA identifier regimes use the report key to link REAC to DEMO.
   confidence: high
 
-- relationship_id: outcome_belongs_to_case_version
+- relationship_id: outcome_belongs_to_report
   from_entity: patient_outcome
-  to_entity: adverse_event_case_version
+  to_entity: adverse_event_report_version
   join_fields:
   - primaryid
   partition_guard: _quarter
   cardinality: many_to_one
-  evidence: FDA ASC_NTS documents zero or more outcome rows per demographic row, linked by PRIMARYID.
+  evidence: Both FDA identifier regimes use the report key to link OUTC to DEMO.
   confidence: high
 
-- relationship_id: report_source_belongs_to_case_version
+- relationship_id: report_source_belongs_to_report
   from_entity: report_source
-  to_entity: adverse_event_case_version
+  to_entity: adverse_event_report_version
   join_fields:
   - primaryid
   partition_guard: _quarter
   cardinality: many_to_one
-  evidence: FDA ASC_NTS documents zero or more report-source rows per demographic row, linked by PRIMARYID.
+  evidence: Both FDA identifier regimes use the report key to link RPSR to DEMO.
   confidence: high
 
 - relationship_id: therapy_belongs_to_reported_drug
@@ -163,7 +206,7 @@ relationships:
   - therapies.dsg_drug_seq=drugs.drug_seq
   partition_guard: _quarter
   cardinality: many_to_one
-  evidence: FDA ASC_NTS explicitly requires PRIMARYID plus the drug sequence to link THER to DRUG; multiple therapy intervals may exist for one drug.
+  evidence: FDA notes require the report key plus DRUG_SEQ; adapter normalizes legacy DRUG_SEQ to DSG_DRUG_SEQ in THER.
   confidence: high
 
 - relationship_id: indication_belongs_to_reported_drug
@@ -174,25 +217,34 @@ relationships:
   - indications.indi_drug_seq=drugs.drug_seq
   partition_guard: _quarter
   cardinality: many_to_one
-  evidence: FDA ASC_NTS explicitly maps INDI_DRUG_SEQ to DRUG_SEQ within PRIMARYID and permits zero or more indications per drug.
+  evidence: FDA notes require the report key plus DRUG_SEQ; adapter normalizes legacy DRUG_SEQ to INDI_DRUG_SEQ in INDI.
   confidence: high
 
 - relationship_id: deleted_notice_flags_case
   from_entity: deleted_case_notice
-  to_entity: adverse_event_case_version
+  to_entity: adverse_event_report_version
   join_fields:
   - deleted_cases.caseid=demographics.caseid
   partition_guard: null
-  cardinality: one_to_many_versions
-  evidence: FDA FAQ 44 states that deletion lists contain cases deleted by FDA or manufacturers; the files contain one unlabelled identifier per line.
+  cardinality: one_to_many_report_versions
+  evidence: FDA deletion-list documentation describes case-level removal; physical lists contain one unlabelled identifier per line.
   confidence: medium
 
 temporal_structure:
-  quarter: Extract partition covering reports received or completed for that quarter; it is not the adverse-event date.
-  case_version: CASEVERSION increments for follow-ups, while PRIMARYID identifies a specific case version and CASEID groups versions.
-  adverse_event_date: EVENT_DT can be partial YYYY, YYYYMM, or YYYYMMDD and must retain its submitted precision.
-  therapy_interval: START_DT and END_DT can be partial; a drug may have multiple intervals with the same PRIMARYID and drug sequence.
-  extract_semantics: The quarterly output supplies the latest completed version available when the extract is prepared; exceptional processing delays can move a case into a later extract.
+  quarter: Extract partition and receipt/release provenance; it is not the adverse-event date.
+  legacy_aers_report: >-
+    ISR identifies a report inside a partition. FDA legacy notes say a repeated
+    ISR in a later quarter is an updated record and may acquire a replacement
+    CASE value; analyses must predeclare whether later extracts replace earlier
+    ISR rows.
+  legacy_aers_case: >-
+    CASE groups reports. FOLL_SEQ is verbatim manufacturer follow-up data and
+    must not be translated into CASEVERSION. Legacy FDA notes suggest selecting
+    latest FDA_DT, then higher ISR on ties, when a task explicitly requires one
+    representative ISR per CASE.
+  faers_case_version: CASEVERSION orders follow-ups within CASEID; PRIMARYID identifies a released case version.
+  adverse_event_date: EVENT_DT can be partial YYYY, YYYYMM, or YYYYMMDD and must retain submitted precision.
+  therapy_interval: START_DT and END_DT can be partial; one drug can have multiple intervals under the same report key and drug sequence.
 
 semantic_value_changes:
 - applies_to: 2021Q4..2024Q4
@@ -206,22 +258,23 @@ semantic_value_changes:
   change: DN (Drug Not Administered) was added as a valid role code.
 
 alignment_notes:
-- Join the seven core tables within a quarter using PRIMARYID; retain _quarter as an explicit guard and provenance field.
-- Link THER and INDI to DRUG with both PRIMARYID and the table-specific drug sequence; a drug sequence is not globally unique.
-- Use CASEID plus CASEVERSION for cross-quarter version reasoning. Do not assume one physical row per real-world case across all partitions.
-- Preserve partial dates as strings or explicit interval/precision representations; do not impute missing month or day as 01.
-- MedDRA preferred terms in REAC and INDI are release-dependent coded labels; term casing and MedDRA versions can change over time.
-- Apply deleted-case notices when constructing longitudinal datasets. The 2019Q1 AllDeletedCases file is historical/cumulative and is excluded by the adapter unless explicitly requested.
+- Join all seven core tables within a quarter using canonical PRIMARYID plus _quarter; this maps to raw ISR in AERS and raw PRIMARYID in FAERS.
+- Link THER and INDI to DRUG with both the report key and drug sequence; a drug sequence is not globally unique.
+- Legacy secondary tables contain no CASE field, so their normalized caseid is null; join to DEMO on _quarter and primaryid when case-level fields are needed.
+- Do not compare or merge AERS FOLL_SEQ with FAERS CASEVERSION, and do not join across the 2012Q3/2012Q4 system boundary using primaryid alone.
+- Preserve partial dates as strings or explicit precision-aware intervals; do not impute missing month/day as 01.
+- MedDRA preferred-term labels and dictionary versions can change across releases.
+- Apply deletion notices when constructing longitudinal FAERS cohorts; the 2019Q1 AllDeletedCases file is cumulative and opt-in in the adapter.
 - Do not infer causality, incidence, or comparative product risk from spontaneous-report counts.
 
 unresolved_relationships:
 - source: deleted_cases.caseid
   target: demographics.caseid
-  issue: Deletion files have no header; the FDA FAQ calls their values cases but does not label the identifier field in the physical file.
-  suggested_resolution: Treat values as CASEID for case-level exclusion, retain source filename and quarter, and verify against the task-specific case population before destructive filtering.
+  issue: Physical deletion files have no header, and the supplied documentation describes values as cases without labelling the field in-file.
+  suggested_resolution: Treat values as case-level exclusion identifiers, retain source filename/quarter, and verify against the task-specific cohort before filtering.
   confidence: medium
-- source: cross-quarter case versions
+- source: cross-quarter report/case lineage
   target: analysis cohort
-  issue: A case may be represented by different versions in different extracts, and delayed processing can shift its appearance.
-  suggested_resolution: Predeclare whether the analysis is quarter-of-receipt, report-version, or latest-case based, then select by CASEID, CASEVERSION, and FDA receipt dates accordingly.
+  issue: Legacy ISR rows can be updated and CASE values can change; FAERS CASEIDs can have multiple CASEVERSION values across extracts.
+  suggested_resolution: Predeclare regime-specific replacement/version rules and retain raw identifiers plus quarter before deduplication.
   confidence: high
