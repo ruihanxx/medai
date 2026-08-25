@@ -37,10 +37,25 @@ class ClaimsFile(StrictModel):
         return self
 
 
+class ExperimentDataset(StrictModel):
+    name: str = Field(min_length=1)
+    role: str = Field(min_length=1)
+    usage: str = Field(min_length=1)
+
+    @field_validator("name", "role", "usage")
+    @classmethod
+    def nonblank_dataset_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Experiment dataset fields must not be blank")
+        return normalized
+
+
 class Experiment(StrictModel):
     experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     description: str
     computational_demand: str = Field(min_length=1)
+    datasets: list[ExperimentDataset] = Field(min_length=1)
     claims: list[str] = Field(min_length=1)
     artifacts: list[str]
 
@@ -50,6 +65,9 @@ class Experiment(StrictModel):
             raise ValueError("Experiment claim IDs must be unique")
         if len(self.artifacts) != len(set(self.artifacts)):
             raise ValueError("Experiment artifact labels must be unique")
+        dataset_names = [dataset.name.casefold() for dataset in self.datasets]
+        if len(dataset_names) != len(set(dataset_names)):
+            raise ValueError("Experiment dataset names must be unique")
         return self
 
 

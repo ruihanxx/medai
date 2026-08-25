@@ -1316,6 +1316,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         "cohort_refine/audit_session_instructions.md",
         config.output / "prompts" / f"audit_attempt_{scientific_attempt:03d}.md",
         paper_markdown=state["paper_markdown"],
+        experiments_path=state["experiments_path"],
         codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
         codebase_dir=state["codebase_dir"],
         data_dir=config.data,

@@ -29,7 +29,10 @@ second instance.
 Codegen prompt tests pin local dataset inventory before capacity selection, the
 eight-physical-core CPU-only default, probe-only uncertainty handling, planned
 peak-memory headroom, and the distinct remote versus read-only-local disk
-formulas.
+formulas. Experiment artifact and prompt coverage also requires a non-empty,
+unique dataset-use list for every experiment, explicit Codegen data-flow
+narration, per-dataset audit coverage, and exact dataset names and operations in
+replication-plan steps.
 
 Codex replication mocks cover thread-ID extraction, direct agent execution
 without a command output schema, final-only artifact validation, same-session

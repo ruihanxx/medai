@@ -74,8 +74,11 @@ foreground operation rather than run inside the agent turn.
 ## Replication agent boundaries
 
 - Preprocessing writes claims and experiment definitions under the artifact
-  contract. The executable prompt owns its paper-search procedure; the
-  resulting `computational_demand` field is defined in `artifacts.md`.
+  contract. It inventories the paper's named datasets, then records every
+  dataset consumed by each experiment with its experiment-specific role and
+  concrete usage. The executable prompt owns its paper-search procedure; the
+  resulting `computational_demand` and dataset-use fields are defined in
+  `artifacts.md`.
 - Codegen may modify only the run's copied codebase and its declared plan or
   maintenance artifacts. It inspects data through bounded, read-only reads and
   must stop on a missing required source artifact. It receives the complete
@@ -89,6 +92,10 @@ foreground operation rather than run inside the agent turn.
   execution. Cloud-only data is the explicit data-locality exception; with both
   sources, local execution uses local data and remote execution uses the
   provider's cloud data.
+- Codegen cross-checks every extracted experiment-dataset contract against the
+  paper and stops on an incomplete or conflicting contract. Its plan narration
+  names each dataset separately and records its path/configuration, role,
+  preprocessing or linkage, fitting/evaluation action, and outputs.
 - Preprocessing audit treats `codegen/codebase/` and source data as read-only
   and writes only inside its attempt directory. Local-data audit never uses
   remote compute and may add an equivalent CPU, streaming, or small-batch
@@ -97,6 +104,9 @@ foreground operation rather than run inside the agent turn.
   attempt, adds only audit instrumentation, and retrieves only aggregate
   statistics, logs, and the report; local CPU adapters, training, tuning, and
   evaluation are prohibited there.
+- Preprocessing audit receives the experiment artifact and covers every
+  experiment-dataset pair. Dataset-specific evidence remains separate before
+  linkage or pooling so a combined aggregate cannot conceal a missing input.
 - Cohort refinement may change only cohort construction, data loading,
   preprocessing, directly related data configuration, and the plan's
   `ambiguities`. It must fix and verify every reported issue. Models, training,
@@ -105,7 +115,9 @@ foreground operation rather than run inside the agent turn.
   may not rent, release, reauthorize, or rematerialize data.
 - A Replicate plan agent may edit the copied codebase for setup and smoke-test
   needs but may not change model semantics, introduce reduced or fallback
-  plans, or hard-code paper results.
+  plans, or hard-code paper results. Each data-touching step names the exact
+  datasets, their separate operations, and any merge, transfer, or comparison
+  boundary.
 - Replication receives the paper Markdown as a read-only scientific reference.
   Before changing model, training, evaluation, or derived-data semantics, it
   rereads the relevant paper text and implements any stated decision exactly.

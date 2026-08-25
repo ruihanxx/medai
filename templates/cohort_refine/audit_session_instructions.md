@@ -16,6 +16,7 @@ This retry does not represent another scientific refinement round.
 
 ## Inputs
 - Paper Markdown: `{{ paper_markdown }}`
+- Experiments and their required dataset uses: `{{ experiments_path }}`
 - Generated codebase (read-only for this audit): `{{ codebase_dir }}`
 - Code-generation plan and ambiguities: `{{ codegen_plan_path }}`
 {% if cloud_drive_enabled %}
@@ -92,6 +93,15 @@ sequence structure, target/group expectations, missing-data handling,
 deduplication, splitting, and any stated balancing such as SMOTE. Treat paper
 values as sanity context, never as numbers to hard-code or tune toward.
 
+Read `{{ experiments_path }}` and build an audit checklist containing every
+experiment and every entry in its `datasets` list. For each named dataset,
+check its stated role and usage against the paper and locate the corresponding
+generated loading/preprocessing path. A missing dataset path, a dataset used in
+the wrong role, or a generic loader that cannot distinguish the required
+datasets is an explicit issue. Do not mark the audit complete until every
+listed experiment-dataset pair has either been executed through its applicable
+preprocessing boundary or recorded as a diagnosed issue.
+
 ### 2. Identify and run the complete preprocessing
 
 Inspect the codebase and its entry points without modifying it. Run
@@ -142,6 +152,11 @@ When a remote-compute state exists, still complete all locally feasible work:
 {% endif %}
 
 Capture commands and outputs under `{{ results_dir }}`.
+
+Keep aggregate results attributable to the exact dataset name. When datasets
+are linked or pooled, record the pre-combination counts and checks separately
+for every input dataset, then record the linkage/pooling result; one aggregate
+for the combined data is not sufficient evidence that all inputs were used.
 
 ### 3. Perform basic statistical sanity checks
 

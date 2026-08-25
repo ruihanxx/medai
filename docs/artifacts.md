@@ -132,14 +132,21 @@ object contains exactly an identifiable `reference` and a `support` statement.
 Claims have unique `claim_id` values, are limited to `text` or `numeric`, and
 record a `final` or `validation` role plus a verbatim provenance quote.
 Experiments have unique `experiment_id` values and list their claim IDs, paper
-artifact labels, and an evidence-bound, one-sentence `computational_demand`.
+artifact labels, an evidence-bound, one-sentence `computational_demand`, and a
+non-empty `datasets` list. Each dataset entry records the paper's exact dataset
+name, its experiment-specific role, and its concrete cohort/split,
+preprocessing/linkage, fitting/evaluation, and comparison usage. Dataset names
+are unique within an experiment. This is the canonical logical-dataset contract
+even when all files share one mounted or materialized root directory.
 That sentence records paper-stated full-scale resources and clearly labels any
 inference for omitted resources. An unstated CPU-only requirement records the
 eight-physical-core sufficient default rather than inferring a higher count from
 data scale; implementation-dependent peak memory, work disk, and runtime remain
 labelled estimates until Codegen selects its data-access path and, when needed,
-runs a capacity probe. The replication plan
-uses ordered steps whose
+runs a capacity probe. The replication plan uses ordered steps whose
+descriptions name every dataset required by the experiment and state its
+separate operation; generic collective dataset references are not a substitute.
+The steps'
 `verifies` lists collectively cover those claim IDs and artifact labels. The
 replication log covers the plan steps in order, and every result-producing step
 names real output files or directories inside the copied codebase or replication

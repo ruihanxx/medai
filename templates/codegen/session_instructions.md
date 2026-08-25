@@ -70,6 +70,15 @@ Read the paper carefully. Prioritize:
 Read the claims at `{{ claims_path }}` and experiments at `{{ experiments_path }}` as supplement to make it clear the output to yield and the structure of the experiment.
 Validation claims may originate from a Figure/Table; their `provenance.section` identifies the source label. When needed, inspect the corresponding image linked from `{{ paper_markdown }}` to implement the intermediate check.
 
+For every experiment, read its complete `datasets` list and cross-check it
+against the paper's Methods, cohort/data, experiment, and external-validation
+text before planning files. Treat each dataset's `name`, `role`, and `usage` as
+a required experiment input contract. If a dataset used by the paper's
+experiment is missing from that list, or a listed role conflicts with the
+paper, stop explicitly instead of implementing only a subset or silently
+choosing a dataset. Never collapse named datasets into an ambiguous phrase such
+as "the data", "all datasets", or "the external dataset".
+
 You may also skim Results and Discussion sections for context, but
 do not memorize numerical results for hardcoding (see Self-Review).
 
@@ -85,13 +94,16 @@ First choose the computational stack, then outline the file structure.
 
 {% if data_dir %}
 Before deciding capacity for local or dual-source data, inspect `{{ data_dir }}`
-with bounded, read-only metadata operations. Record the dataset release/version,
-actual on-disk size, file and partition counts, formats and compression, and any
-available per-partition or row-count metadata. Use the actual source and planned
-work/output landing filesystems rather than an unrelated filesystem. Let `D` be
-the selected complete dataset's actual size in GiB. Keep paper-stated hardware
-requirements separate from conservative or measured estimates; an inferred
-value is never a paper hard floor.
+with bounded, read-only metadata operations. For every logical dataset named by
+an experiment, record its release/version and actual on-disk size. Record file and partition counts,
+formats and compression, and any available per-partition or row-count metadata.
+Also inventory the complete supplied root so files shared
+across experiments are counted once. Use the actual source and planned
+work/output landing filesystems rather than an unrelated filesystem. Let `D`
+be the complete supplied root's actual size in GiB, not the size of only the
+first or largest logical dataset. Keep paper-stated hardware requirements
+separate from conservative or measured estimates; an inferred value is never a
+paper hard floor.
 {% else %}
 No local dataset exists to inventory before the data-locality decision. Do not
 invent local capacity evidence. Obtain `D` from reviewed cloud-source metadata
@@ -317,6 +329,15 @@ Track Python dependencies in `pyproject.toml` or `requirements.txt` (your choice
 
 **Dataset Processing and Cohort Construction**
 
+Implement every experiment's dataset contract explicitly. For each named
+dataset, keep its path/configuration, cohort or split construction,
+preprocessing, linkage or pooling boundary, model-fitting/evaluation role, and
+outputs distinguishable in code. When datasets are combined, implement and
+describe each dataset-specific path before the merge and preserve dataset
+identity in intermediate checks and result outputs. Do not write one generic
+loader or configuration entry whose intended dataset changes implicitly by
+execution order.
+
 {% if cloud_drive_enabled|default(false) %}
 {% if data_dir %}
 For a local conclusion, inspect `{{ data_dir }}` directly and keep it read-only.
@@ -420,7 +441,7 @@ your decisions so they are inspectable and machine-readable. Schema:
   ],
   "dependency_order": ["src/dataset.py", "src/model.py", "..."],
   "entry_points": ["main.py"],
-  "shared_state": "What modules pass between them, e.g. 'Dataset returns (X, y) tuples consumed by trainer'.",
+  "shared_state": "For every experiment, name each dataset and state its exact path/config, role, preprocessing or linkage, fitting/evaluation action, and outputs passed between modules.",
   "remote_compute": null,
   "ambiguities": [
     {
@@ -453,6 +474,14 @@ question and the resolved implementation assumption, including the applicable
 medical or medical-research convention and its code/configuration location.
 Downstream phases use this to distinguish "paper-underspecified" from
 "agent-misimplemented" outcomes.
+
+In `shared_state` and relevant file `responsibility` entries, narrate the data
+flow experiment by experiment. Name every dataset from that experiment's
+`datasets` list and say separately what is read, derived, linked, fitted,
+evaluated, and emitted for it. Generic statements such as "load all datasets"
+or "evaluate on the external data" are incomplete. Before saving
+`codegen_plan.json`, verify that every extracted experiment and every one of its
+dataset names appears in this narration.
 
 Double check the following places during cohort construction where the paper are highly likely to undrespecifies the methodology and implementations:
 - index-time definition, time-window specification, baseline ascertainment

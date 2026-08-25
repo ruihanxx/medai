@@ -86,6 +86,32 @@ An 'experiment' refers to the entire end-to-end process from data preprocessing,
 
 For every experiment, infer its full-scale computational demand from the paper. Before writing it, search the paper Markdown case-insensitively for `nvidia`, `memory`, `gpu`, `cpu`, `GB`, and `rtx`. Record paper-stated processor, memory, GPU count/model/VRAM, and relevant workload scale when available. Clearly separate paper-stated hardware hard requirements from inferred capacity. For CPU-only work with no stated hardware, record that omission and use eight physical cores as the default sufficient capacity; do not infer a higher core requirement from dataset scale alone. Leave peak memory, work-disk, and runtime as implementation-dependent estimates when the intended streaming, chunked, or out-of-core path and a representative capacity probe are not yet known. Do not leave the field as `NA`.
 
+Before saving the experiments, make an explicit paper-level dataset inventory
+from the Methods, cohort/data, experiment, and external-validation sections.
+Then check every experiment against that inventory. Each experiment's
+`datasets` list must name every dataset that the experiment actually consumes,
+including training, internal validation, external validation, comparison,
+pooled, transfer-learning, and derived-cohort sources. Do not list a paper
+dataset in an experiment that does not use it.
+
+For every dataset entry:
+
+- `name` uses the paper's exact dataset or cohort name, not a generic phrase
+  such as "the data", "all datasets", or "the external dataset";
+- `role` states its experiment-specific role, such as training, internal
+  validation, external validation, comparison, or pooled analysis;
+- `usage` states concretely what the experiment does with that dataset,
+  including the applicable cohort/subset or split, preprocessing or linkage,
+  model fitting/evaluation action, and produced comparison when the paper
+  specifies them.
+
+When one experiment combines datasets, describe each dataset separately before
+describing the merge, transfer, or comparison. When a derived cohort is used,
+name its source dataset and describe the derivation in `usage`. Dataset names
+must be unique within an experiment. Before writing the artifact, cross-check
+the paper once more so no dataset used by an experiment is missing from its
+`datasets` list.
+
 DO NOT extract:
 - Configuration values, hyperparameters, or method choices the authors *prescribe* for their own run (these are inputs to the replication, not results to verify). They will be encoded in the replication plan separately.
 - Background, motivation, or related-work claims.
@@ -104,6 +130,7 @@ Each experiment object has these fields:
 | `experiment_id` | yes | Short identifier, e.g. `"E1"`, `"E2"`. Sequential. |
 | `description` | yes | One sentence: what the experiment is about. |
 | `computational_demand` | yes | One evidence-bound sentence describing the full-scale compute resources required for this experiment, including paper-stated hardware and clearly labelled inferences for omitted resources. |
+| `datasets` | yes | Every dataset used by this experiment. Each entry is `{"name": "<paper name>", "role": "<experiment-specific role>", "usage": "<concrete cohort/split, preprocessing/linkage, fitting/evaluation, and comparison procedure>"}`. Names are unique within the experiment. |
 | `claims` | yes | the list of `claim_id` of all the claims extracted previously that is relevent to this experiment, including validation anchors. |
 | `artifacts` | yes | All the Figure/Table result of this experiment, including Figure/Table sources of validation anchors, e.g. `"Table 2"`, `"Figure 3"`. |
 

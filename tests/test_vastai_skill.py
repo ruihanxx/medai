@@ -130,11 +130,12 @@ def cloud_inventory(dataset: str, digest: str = "a" * 64) -> str:
     )
 
 
-def test_vastai_inventory_program_globally_sorts_nested_paths(tmp_path: Path):
+def test_vastai_inventory_program_preserves_multiple_dataset_subtrees(tmp_path: Path):
     root = tmp_path / "dataset"
-    (root / "0-dir").mkdir(parents=True)
-    (root / "z.txt").write_text("root", encoding="utf-8")
-    (root / "0-dir" / "nested.txt").write_text("nested", encoding="utf-8")
+    (root / "dataset-a").mkdir(parents=True)
+    (root / "dataset-b").mkdir(parents=True)
+    (root / "dataset-a" / "records.csv").write_text("a", encoding="utf-8")
+    (root / "dataset-b" / "records.csv").write_text("b", encoding="utf-8")
     module = load_vastai_module()
 
     completed = subprocess.run(
@@ -146,8 +147,8 @@ def test_vastai_inventory_program_globally_sorts_nested_paths(tmp_path: Path):
     assert completed.returncode == 0, completed.stderr
     inventory = json.loads(completed.stdout)
     assert [item["path"] for item in inventory["files"]] == [
-        "0-dir/nested.txt",
-        "z.txt",
+        "dataset-a/records.csv",
+        "dataset-b/records.csv",
     ]
 
 

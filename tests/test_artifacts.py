@@ -56,6 +56,18 @@ def todo_payload():
                 "experiment_id": "E1",
                 "description": "Train and evaluate the model.",
                 "computational_demand": "The experiment needs the paper's stated GPU and memory capacity.",
+                "datasets": [
+                    {
+                        "name": "Development cohort",
+                        "role": "training and internal validation",
+                        "usage": "Construct the cohort, split it, fit the model, and evaluate the internal holdout.",
+                    },
+                    {
+                        "name": "External cohort",
+                        "role": "external validation",
+                        "usage": "Apply the fitted model without refitting and compute external metrics.",
+                    },
+                ],
                 "claims": ["C1"],
                 "artifacts": ["Figure 1"],
             }
@@ -106,11 +118,21 @@ def test_claim_and_experiment_coverage_is_exact():
         validate_experiment_coverage(claims, todo)
 
 
-def test_experiment_requires_a_computational_demand():
+def test_experiment_requires_compute_and_complete_unique_dataset_records():
     payload = todo_payload()
     del payload["experiments"][0]["computational_demand"]
 
     with pytest.raises(ValueError, match="computational_demand"):
+        ExperimentTodo.model_validate(payload)
+
+    payload = todo_payload()
+    del payload["experiments"][0]["datasets"]
+    with pytest.raises(ValueError, match="datasets"):
+        ExperimentTodo.model_validate(payload)
+
+    payload = todo_payload()
+    payload["experiments"][0]["datasets"][1]["name"] = "development cohort"
+    with pytest.raises(ValueError, match="dataset names must be unique"):
         ExperimentTodo.model_validate(payload)
 
 
@@ -328,6 +350,13 @@ def test_autoresearch_artifacts_enforce_refinement_and_weighted_score_contracts(
             "experiment_id": "E2",
             "description": "Estimate an association with a Cox model.",
             "computational_demand": "The statistical analysis runs on CPU.",
+            "datasets": [
+                {
+                    "name": "Development cohort",
+                    "role": "association analysis",
+                    "usage": "Fit the Cox model on the complete analysis cohort.",
+                }
+            ],
             "claims": ["C1"],
             "artifacts": ["Table 1"],
         }

@@ -60,6 +60,10 @@ artifact associated with each experiment must be reproduced.
 
 {% for experiment in experiments.experiments %}
 - **{{ experiment.experiment_id }}**: {{ experiment.description }}
+  - Datasets:
+{% for dataset in experiment.datasets %}
+    - **{{ dataset.name }}** — role: {{ dataset.role }}; usage: {{ dataset.usage }}
+{% endfor %}
   - Claims:
 {% for claim_id in experiment.claims %}
 {% set claim = claims.claims | selectattr("claim_id", "equalto", claim_id) | first %}
@@ -74,6 +78,23 @@ artifact associated with each experiment must be reproduced.
 
 Each plan step should produce evidence relevant to one or more claims/artifacts (except for pure setup steps); use the claim IDs (e.g. `C1`, `C2`) or artifacts index (e.g. Figure 2, Table 3) in the `verifies` field of each step. Reproduce experiment one after another.
 For a Figure/Table-sourced validation anchor, plan evidence for both its claim ID and its Figure/Table artifact label.
+
+For every experiment, cover every entry in its `datasets` list. In each step
+that reads, transforms, links, pools, trains on, or evaluates a dataset, name
+that dataset exactly in the step `description` and state the dataset-specific
+action. The `command_hint` must make distinct dataset paths, configuration
+keys, cohorts, splits, or modes explicit when the implementation exposes them.
+The `expected_outcome` must distinguish per-dataset intermediates/results or
+identify the provenance-preserving combined output. Do not use ambiguous phrases
+such as "the data", "all datasets", "respective datasets", or "external data"
+in place of the names.
+
+When a step combines datasets, describe each input dataset and its preparation
+separately before the merge, transfer, or comparison. When the same code is run
+once per dataset, say so and enumerate the invocations or configuration values.
+Before saving the plan, cross-check every experiment and ensure each of its
+dataset names occurs in at least one concrete execution step; setup-only steps
+that do not touch data are exempt.
 
 ## Your Task
 
@@ -137,6 +158,9 @@ Focus on the paper's **headline and supporting claims**. Do not attempt to repro
 - The agent may fix issues in the code to keep replication going (deprecated APIs, missing imports, configuration problems)
 - If you find multiple entry points or experiments, prioritize the one that targets the headline claim
 - Every result-producing step MUST have at least one claim ID or artifacts index in `verifies`. Setup-only steps may have an empty `verifies` list. Prefer 1-3 steps dedicated to one single experiment.
+- Every dataset listed for an experiment MUST be named in that experiment's
+  concrete step descriptions with its separate role and operation; never let
+  prioritization silently drop a dataset required by a retained experiment.
 - Step outputs produced by the planned commands must be written under `{{ codebase_dir }}/`. Do not write them beside the pipeline-managed plan artifact at `{{ replicate_plan_path }}` or into any other pipeline stage directory.
 - NEVER include the paper's reported numerical result values in `expected_outcome`.
 

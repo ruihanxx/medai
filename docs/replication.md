@@ -8,7 +8,9 @@ The LangGraph stages are:
    canonical Markdown and artifacts persist in the run directory.
 3. `preprocessing_agent`: audit `paper.md` in place by labeling linked
    Figure/Table assets with captions and correcting image-verified LaTeX,
-   then write text/numeric claims and experiment definitions.
+   then write text/numeric claims and experiment definitions. Every experiment
+   records all logical datasets it consumes, with exact paper names,
+   experiment-specific roles, and concrete usage.
 4. `codegen_agent`: inspect supplied data through bounded, read-only,
    non-executing reads, identify every paper-underspecified implementation
    decision before coding, resolve each using applicable medical knowledge and
@@ -31,6 +33,9 @@ The LangGraph stages are:
    local-first capacity decision as a local run, using local data when sufficient
    and the cloud source only with a remote plan. Remote plans record the
    completed state's read-only target as `remote_dataset_dir`.
+   Multiple logical datasets may share that root; Codegen inventories and
+   implements each experiment-dataset contract separately and stops when the
+   extracted contract conflicts with the paper.
 5. `audit_agent`: exhaustively run real-data preprocessing and every applicable
    independent paper-aware cohort and data-quality check, then write one compact
    JSON report containing the complete discovered issue set. A generated-code
@@ -42,12 +47,15 @@ The LangGraph stages are:
    complete preprocessing with small audit-only instrumentation, prohibit
    training/tuning/evaluation and local CPU adapters, and retrieve only
    aggregate statistics, logs, and the report—not raw or row-level data.
+   The audit covers every declared experiment-dataset pair and retains
+   per-dataset evidence before any linkage or pooling.
 6. `cohort_refine_agent`: after a failed audit, fix every reported cohort
    construction, data-loading, or preprocessing issue; it may update only the
    code-generation plan's `ambiguities` list and may not change models,
    training, evaluation, or generated results.
 7. `plan_agent`: check coverage, install dependencies, smoke-test, and write the
-   replication plan.
+   replication plan. Every data-touching step names the exact datasets and
+   explains their separate preparation, role, and combination or comparison.
 8. `replicate_agent`: execute every experiment and write evidence.
 9. `report_agents`: sequentially update one report with per-experiment
    claim/artifact comparisons, validation-anchor assessments, and a risk list

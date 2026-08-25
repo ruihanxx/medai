@@ -117,6 +117,8 @@ def _write_minimal_replicate_agent_inputs(config) -> dict[str, str]:
     codebase.mkdir(parents=True)
     claims_path = config.output / "preprocessing" / "claims.json"
     claims_path.parent.mkdir()
+    paper_markdown = claims_path.with_name("paper.md")
+    paper_markdown.write_text("# Paper\n", encoding="utf-8")
     claims_path.write_text(
         json.dumps(
             {
@@ -147,6 +149,13 @@ def _write_minimal_replicate_agent_inputs(config) -> dict[str, str]:
                         "experiment_id": "E1",
                         "description": "Train and evaluate.",
                         "computational_demand": "CPU",
+                        "datasets": [
+                            {
+                                "name": "Cohort dataset",
+                                "role": "training and evaluation",
+                                "usage": "Construct the cohort, train the model, and evaluate the fixed split.",
+                            }
+                        ],
                         "claims": ["C1"],
                         "artifacts": [],
                     }
@@ -181,6 +190,7 @@ def _write_minimal_replicate_agent_inputs(config) -> dict[str, str]:
     )
     return {
         "config": config,
+        "paper_markdown": str(paper_markdown),
         "claims_path": str(claims_path),
         "experiments_path": str(experiments_path),
         "replicate_plan_path": str(replicate_plan_path),
@@ -229,6 +239,13 @@ def test_plan_agent_resumes_same_codex_session_after_validation_failure(
                         "experiment_id": "E1",
                         "description": "Train and evaluate.",
                         "computational_demand": "CPU",
+                        "datasets": [
+                            {
+                                "name": "Cohort dataset",
+                                "role": "training and evaluation",
+                                "usage": "Construct the cohort, train the model, and evaluate the fixed split.",
+                            }
+                        ],
                         "claims": ["C1"],
                         "artifacts": ["Figure S2"],
                     }
@@ -549,6 +566,18 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                                 "experiment_id": "E1",
                                 "description": "Train and evaluate.",
                                 "computational_demand": "The experiment needs the paper's stated GPU and memory capacity.",
+                                "datasets": [
+                                    {
+                                        "name": "Development cohort",
+                                        "role": "training and internal validation",
+                                        "usage": "Construct the development cohort, fit the model, and evaluate its holdout.",
+                                    },
+                                    {
+                                        "name": "External cohort",
+                                        "role": "external validation",
+                                        "usage": "Apply the fitted model without refitting and compute external metrics.",
+                                    },
+                                ],
                                 "claims": ["C1"],
                                 "artifacts": ["Figure 1"],
                             }
@@ -603,14 +632,14 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                             },
                             {
                                 "id": 2,
-                                "description": "Run evaluation.",
+                                "description": "Train and internally validate on Development cohort.",
                                 "command_hint": "python run.py",
                                 "expected_outcome": "Writes metrics.json.",
                                 "verifies": ["C1"],
                             },
                             {
                                 "id": 3,
-                                "description": "Render the figure.",
+                                "description": "Evaluate External cohort and render the comparison figure.",
                                 "command_hint": "python plot.py",
                                 "expected_outcome": "Writes figure.png.",
                                 "verifies": ["Figure 1"],
@@ -741,14 +770,23 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert str(skill_corrections_path) in codegen_prompt
     assert '"file name": "dataset_graph.yaml"' in codegen_prompt
     assert "/explore-data/" not in codegen_prompt
+    assert "read its complete `datasets` list" in codegen_prompt
+    assert "narrate the data\nflow experiment by experiment" in codegen_prompt
     audit_prompt = (output / "prompts" / "audit_attempt_001.md").read_text(encoding="utf-8")
     assert str(data) in audit_prompt
+    assert str(output / "preprocessing" / "experiment_todo.json") in audit_prompt
+    assert "every\nexperiment and every entry in its `datasets` list" in audit_prompt
     assert "Do not connect to, query, stop, release" in audit_prompt
     assert "Run the complete preprocessing locally" in audit_prompt
     plan_prompt = (output / "prompts" / "plan.md").read_text(encoding="utf-8")
     assert '"environment"' in plan_prompt
     assert '"command_hint"' in plan_prompt
     assert '"verifies"' in plan_prompt
+    assert "Development cohort" in plan_prompt
+    assert "External cohort" in plan_prompt
+    assert "training and internal validation" in plan_prompt
+    assert "external validation" in plan_prompt
+    assert "every entry in its `datasets` list" in plan_prompt
     replication_prompt = (output / "prompts" / "replicate.md").read_text(encoding="utf-8")
     assert "replication_log.json" in replication_prompt
     assert "evidence_summary.json" in replication_prompt
@@ -829,6 +867,8 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
     )
     claims_path = output / "preprocessing" / "claims.json"
     claims_path.parent.mkdir()
+    paper_markdown = claims_path.with_name("paper.md")
+    paper_markdown.write_text("# Paper\n", encoding="utf-8")
     claims_path.write_text(
         json.dumps(
             {
@@ -859,6 +899,13 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
                         "experiment_id": "E1",
                         "description": "Train and evaluate.",
                         "computational_demand": "The experiment needs the paper's stated GPU and memory capacity.",
+                        "datasets": [
+                            {
+                                "name": "Cohort dataset",
+                                "role": "training and evaluation",
+                                "usage": "Construct the cohort, train the model, and evaluate the fixed split.",
+                            }
+                        ],
                         "claims": ["C1"],
                         "artifacts": ["Figure 1"],
                     }
@@ -976,6 +1023,7 @@ def test_smart_replicate_injects_anchors_and_requires_round_log(
     replicate_agent_node(
         {
             "config": config,
+            "paper_markdown": str(paper_markdown),
             "claims_path": str(claims_path),
             "experiments_path": str(experiments_path),
             "replicate_plan_path": str(replicate_plan_path),
@@ -999,6 +1047,8 @@ def test_codex_replication_validates_after_turn_and_repairs_same_session(
     codebase.mkdir(parents=True)
     claims_path = config.output / "preprocessing" / "claims.json"
     claims_path.parent.mkdir()
+    paper_markdown = claims_path.with_name("paper.md")
+    paper_markdown.write_text("# Paper\n", encoding="utf-8")
     claims_path.write_text(
         json.dumps(
             {
@@ -1029,6 +1079,13 @@ def test_codex_replication_validates_after_turn_and_repairs_same_session(
                         "experiment_id": "E1",
                         "description": "Train and evaluate.",
                         "computational_demand": "CPU",
+                        "datasets": [
+                            {
+                                "name": "Cohort dataset",
+                                "role": "training and evaluation",
+                                "usage": "Construct the cohort, train the model, and evaluate the fixed split.",
+                            }
+                        ],
                         "claims": ["C1"],
                         "artifacts": [],
                     }
@@ -1098,6 +1155,7 @@ def test_codex_replication_validates_after_turn_and_repairs_same_session(
     replicate_agent_node(
         {
             "config": config,
+            "paper_markdown": str(paper_markdown),
             "claims_path": str(claims_path),
             "experiments_path": str(experiments_path),
             "replicate_plan_path": str(replicate_plan_path),
@@ -1245,6 +1303,13 @@ def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
                     "experiment_id": "E1",
                     "description": "Train and evaluate.",
                     "computational_demand": "GPU",
+                    "datasets": [
+                        {
+                            "name": "Cohort dataset",
+                            "role": "training and evaluation",
+                            "usage": "Construct the cohort, train the model, and evaluate the fixed split.",
+                        }
+                    ],
                     "claims": ["C1"],
                     "artifacts": [],
                 }
@@ -1284,6 +1349,7 @@ def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
     replicate_agent_node(
         {
             "config": config,
+            "paper_markdown": "paper.md",
             "claims_path": "claims.json",
             "experiments_path": "experiments.json",
             "replicate_plan_path": "replicate_plan.json",
@@ -1407,7 +1473,8 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert str(tmp_path / "instance.json") in prompt
     assert "vast.ai" not in prompt.lower()
     assert json.dumps(local_resources, sort_keys=True) in prompt
-    assert "dataset release/version" in prompt
+    assert "record its release/version" in prompt
+    assert "complete supplied root's actual size" in prompt
     assert "file and partition counts" in prompt
     assert "eight physical cores as sufficient by default" in prompt
     assert "Never infer a requirement above eight cores\n   from dataset size alone" in prompt
