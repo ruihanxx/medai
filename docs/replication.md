@@ -20,9 +20,11 @@ The LangGraph stages are:
    feasibility cannot substitute when local capacity is below them. A
    paper-required file absent from the supplied dataset terminates codegen
    without invention or substitution, and preprocessing audit does not start.
-   Cloud-drive mode always selects the configured provider: codegen materializes
-   the complete dataset before any data inspection, then records the completed state's
-   read-only target as `remote_dataset_dir`.
+   Cloud-only mode always selects the configured provider and materializes the
+   complete dataset before inspection. A dual-source run makes the same
+   local-first capacity decision as a local run, using local data when sufficient
+   and the cloud source only with a remote plan. Remote plans record the
+   completed state's read-only target as `remote_dataset_dir`.
 5. `audit_agent`: exhaustively run real-data preprocessing and every applicable
    independent paper-aware cohort and data-quality check, then write one compact
    JSON report containing the complete discovered issue set. A generated-code
@@ -82,6 +84,14 @@ experiments, data transfers, provider provisioning, or lifecycle actions merely
 to repair an artifact contract. Other providers retain one-turn behavior and
 fail immediately on invalid artifacts. Completed-stage validation during an
 explicit CLI resume does not reuse a process-local session.
+
+Before direct-Codex codegen artifact validation, orchestration reads the strict
+stage result. `blocked` and `failed` terminate immediately with the recorded
+error and do not consume artifact-repair turns. `completed` permits validation
+but cannot complete the stage without valid canonical artifacts. The same
+result contract applies to codegen repair turns. Cloud-pull preparation uses an
+equivalent command-or-terminal result so a terminal condition never requires a
+fabricated monitor command or shell-level attempt to alter the Codex CLI exit.
 
 Each workflow node prints `enter <stage> stage` to standard output immediately
 when it starts.

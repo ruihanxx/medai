@@ -473,9 +473,11 @@ durable backup.
 - **API or HTTP error:** Preserve the complete non-secret error and stop the
   current operation. The only exception is the script's one preselected
   `--fallback-gpu-spec` attempt after an explicit no-inventory response; do not
-  choose another resource or retry billable creation beyond it. A failed
-  `create` must make the invoking Codex agent exit nonzero; do not continue the
-  run locally or with another rental.
+  choose another resource or retry billable creation beyond it. After a failed
+  `create`, do not continue the run locally or with another rental. When the
+  invoking stage supplies a structured result schema, return its `failed`
+  result with the preserved non-secret error; do not try to alter the Codex
+  process result with a shell command.
 - **Creation timeout or status-poll failure:** The current-run state is written
   as soon as AutoDL returns the instance UUID, before polling starts. Inspect
   that state with `status`, then power off the recorded instance if it cannot be

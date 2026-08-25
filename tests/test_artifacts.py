@@ -3,8 +3,10 @@ import json
 import pytest
 
 from medai.models import (
+    AgentStageResult,
     ClaimsFile,
     CodegenAudit,
+    CodegenCloudPullRequest,
     CodegenPlan,
     EligibilityResult,
     EvidenceSummary,
@@ -110,6 +112,21 @@ def test_experiment_requires_a_computational_demand():
 
     with pytest.raises(ValueError, match="computational_demand"):
         ExperimentTodo.model_validate(payload)
+
+
+def test_agent_terminal_results_require_explicit_errors():
+    AgentStageResult.model_validate({"status": "completed", "error": None})
+    AgentStageResult.model_validate({"status": "blocked", "error": "Missing input."})
+    CodegenCloudPullRequest.model_validate(
+        {"status": "command", "command": "python monitor.py", "error": None}
+    )
+
+    with pytest.raises(ValueError, match="non-empty error"):
+        AgentStageResult.model_validate({"status": "failed", "error": None})
+    with pytest.raises(ValueError, match="command=null"):
+        CodegenCloudPullRequest.model_validate(
+            {"status": "blocked", "command": "exit 1", "error": "Missing input."}
+        )
 
 
 def test_skill_correction_requires_reviewable_nonsecret_fields():

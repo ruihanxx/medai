@@ -37,7 +37,9 @@ temporary session across explicit orchestration handoffs:
 | Mode | Structured request | Orchestration boundary |
 | --- | --- | --- |
 | Replication | Stage-owned canonical artifacts | Codex executes and monitors its own commands during one agent turn; orchestration validates only after the turn ends and resumes the same session only for invalid final artifacts. |
-| Opted-in cloud codegen or Auto Research planning | `{"command":"<non-empty bash command>"}` | After agent-owned preparation and power-off, run the foreground cloud monitor locally, validate cloud state, and resume the same session. |
+| Direct-Codex codegen | `completed`, `blocked`, or `failed` plus a nullable error | `blocked` or `failed` terminates immediately; only `completed` proceeds to artifact validation and bounded same-session repair. |
+| Opted-in cloud codegen | `command`, `blocked`, or `failed` plus nullable command/error fields | After agent-owned preparation and power-off, run a returned foreground cloud monitor locally; terminal statuses run no command. |
+| Opted-in Auto Research planning | `{"command":"<non-empty bash command>"}` | After agent-owned preparation and power-off, run the foreground cloud monitor locally, validate cloud state, and resume the same session. |
 | Remote Auto Research experiment | One `remote_exec` or `download` operation | Select and prepare a campaign instance, execute the provider operation, persist its result, power off, validate local artifacts, and resume only when required. |
 | Preprocessing audit | Compact `audit_report.json` written in the attempt | Validate the report after every successful direct-Codex turn; if it is missing or invalid, resume the same session so existing local or remote work can finish. |
 | Other Replicate Agent outputs | Stage-owned canonical artifacts | Validate preprocessing, final codegen, cohort-refinement, plan, and per-experiment report artifacts; resume the same direct-Codex session for at most two repair turns with the exact error and owned paths. |
@@ -45,8 +47,10 @@ temporary session across explicit orchestration handoffs:
 Initial and resumed turns in one temporary session append to the same
 transcript. Explicit CLI resume preserves command artifacts but never reuses a
 prior process-local session ID. Exact request/result schemas and paths are
-defined in `artifacts.md`; stage completion is determined by artifact
-validation, not a status field, completion sentinel, `--last`, or command exit
+defined in `artifacts.md`. A direct-Codex codegen `completed` status is only a
+gate to artifact validation, which remains authoritative for completion;
+`blocked` and `failed` are terminal. Other stage completion is determined by
+artifact validation, not a completion sentinel, `--last`, or command exit
 status alone.
 
 Direct Codex may inspect files, edit within its stage boundary, and perform

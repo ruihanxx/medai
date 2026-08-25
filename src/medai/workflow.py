@@ -16,13 +16,14 @@ from medai.computation_providers import get_provider_adapter
 from medai.computation_providers import skills_dir as _skills_dir
 from medai.config import AutoResearchConfig, RunConfig
 from medai.models import (
+    AgentStageResult,
     ClaimsFile,
+    CodegenCloudPullRequest,
     CodegenPlan,
     DatasetPatchFile,
     EvidenceSummary,
     Experiment,
     ExperimentTodo,
-    ReplicationCommand,
     ReplicationLog,
     ReplicationPlan,
     SkillCorrectionsFile,
@@ -61,6 +62,12 @@ def skills_dir() -> Path:
     return _skills_dir()
 
 
+def _require_agent_stage_completion(result_path: Path, stage_name: str) -> None:
+    result = load_model(result_path, AgentStageResult)
+    if result.status != "completed":
+        raise RuntimeError(f"{stage_name} reported {result.status}: {result.error}")
+
+
 def _validate_agent_artifacts_with_resume(
     *,
     config: RunConfig,
@@ -70,6 +77,8 @@ def _validate_agent_artifacts_with_resume(
     transcript_path: Path,
     artifact_paths: list[Path],
     validate: Callable[[], object],
+    result_schema_path: Path | None = None,
+    result_path: Path | None = None,
 ) -> None:
     """Resume a direct Codex stage when its owned artifacts fail validation."""
     repair_turns = 0
@@ -92,9 +101,7 @@ def _validate_agent_artifacts_with_resume(
                 ) from exc
 
             resume_prompt_path = (
-                config.output
-                / "prompts"
-                / f"{stage_name}_validation_resume_{prompt_index:03d}.md"
+                config.output / "prompts" / f"{stage_name}_validation_resume_{prompt_index:03d}.md"
             )
             while resume_prompt_path.exists():
                 prompt_index += 1
@@ -109,6 +116,7 @@ def _validate_agent_artifacts_with_resume(
                 stage_name=stage_name,
                 artifact_paths=artifact_paths,
                 artifact_validation_error=str(exc),
+                structured_stage_result=result_schema_path is not None,
             )
             run_agent(
                 provider=config.provider,
@@ -118,8 +126,12 @@ def _validate_agent_artifacts_with_resume(
                 siliconflow_config_path=config.siliconflow_config,
                 codex_model=config.codex_model,
                 codex_reasoning_effort=config.codex_reasoning_effort,
+                output_schema_path=result_schema_path,
+                output_last_message_path=result_path,
                 resume_session_id=session_id,
             )
+            if result_path is not None:
+                _require_agent_stage_completion(result_path, stage_name)
             repair_turns += 1
             prompt_index += 1
 
@@ -266,8 +278,7 @@ def read_audit_verdict(report_path: Path) -> str:
             raise RuntimeError(f"Audit report is not valid JSON: {report_path}") from exc
         if not isinstance(report, dict) or set(report) != {"verdict", "issues"}:
             raise RuntimeError(
-                "Audit report must contain exactly `verdict` and `issues`: "
-                f"{report_path}"
+                f"Audit report must contain exactly `verdict` and `issues`: {report_path}"
             )
         verdict = report["verdict"]
         issues = report["issues"]
@@ -334,8 +345,7 @@ def validate_codegen_remote_compute(
         return
     if Path(remote_compute.state_path).resolve() != state_path.resolve():
         raise RuntimeError(
-            "Remote-compute state path does not match the current run: "
-            f"{remote_compute.state_path}"
+            f"Remote-compute state path does not match the current run: {remote_compute.state_path}"
         )
     if cloud_dataset is None:
         return None
@@ -370,9 +380,7 @@ def _uses_cloud_data(
     config: RunConfig | AutoResearchConfig,
     plan: CodegenPlan | ReplicationPlan,
 ) -> bool:
-    return config.clouddrive and (
-        config.data is None or plan.remote_compute is not None
-    )
+    return config.clouddrive and (config.data is None or plan.remote_compute is not None)
 
 
 def _load_computation_provider_state(state_path: Path) -> dict[str, Any]:
@@ -528,9 +536,11 @@ def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
         or config.drive_provider is None
     ):
         return False
-    return get_provider_adapter(config.computation_provider).drive(
-        config.drive_provider
-    ).cloud_pull_handoff
+    return (
+        get_provider_adapter(config.computation_provider)
+        .drive(config.drive_provider)
+        .cloud_pull_handoff
+    )
 
 
 def _cloud_drive_materialization_completed(
@@ -578,12 +588,14 @@ def _run_codegen_cloud_pull_handoff(
     codebase_dir: Path,
     prompt_path: Path,
     transcript_path: Path,
+    stage_result_schema_path: Path,
+    stage_result_path: Path,
 ) -> str:
     """Pause one Codex session while local orchestration monitors cloud materialization."""
     command_dir = config.output / "codegen" / "cloud_pull" / "commands"
     command_dir.mkdir(parents=True, exist_ok=True)
     command_schema_path = config.output / "prompts" / "codegen_cloud_pull_command.schema.json"
-    write_json(command_schema_path, ReplicationCommand.model_json_schema())
+    write_json(command_schema_path, CodegenCloudPullRequest.model_json_schema())
     session_id: str | None = None
     resume_prompt_path: Path | None = None
     command_index = _next_command_index(command_dir)
@@ -618,7 +630,14 @@ def _run_codegen_cloud_pull_handoff(
                 resume_session_id=session_id,
             )
 
-        command = load_model(command_request_path, ReplicationCommand).command
+        request = load_model(command_request_path, CodegenCloudPullRequest)
+        if request.status != "command":
+            raise RuntimeError(
+                "codegen_agent reported "
+                f"{request.status} during cloud-pull preparation: {request.error}"
+            )
+        assert request.command is not None
+        command = request.command
         log_path = command_dir / f"command_{command_index:03d}.log"
         result_path = command_dir / f"command_{command_index:03d}_result.json"
         result = _run_agent_command(
@@ -662,6 +681,8 @@ def _run_codegen_cloud_pull_handoff(
         siliconflow_config_path=config.siliconflow_config,
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
+        output_schema_path=stage_result_schema_path,
+        output_last_message_path=stage_result_path,
         resume_session_id=session_id,
     )
     return session_id
@@ -709,9 +730,7 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
     codebase_dir = output / "codegen" / "codebase"
     prompt_paths = [output / "prompts" / "replicate.md"]
     prompt_paths.extend(sorted((output / "prompts").glob("replicate_resume_*.md")))
-    prompt_paths.extend(
-        sorted((output / "prompts").glob("replicate_agent_validation_resume_*.md"))
-    )
+    prompt_paths.extend(sorted((output / "prompts").glob("replicate_agent_validation_resume_*.md")))
     prompt_paths.extend(sorted((output / "prompts").glob("replicate_command*.json")))
     prompt_paths.extend(sorted((output / "prompts").glob("report_*.md")))
     prompt_paths = [path for path in prompt_paths if path.is_file()]
@@ -894,8 +913,7 @@ def prepare_autoresearch_resume(config: AutoResearchConfig) -> dict[str, Any]:
     }
     try:
         if config.clouddrive and (
-            reconciliation["replaced"]
-            or reconciliation.get("materialization_required") is True
+            reconciliation["replaced"] or reconciliation.get("materialization_required") is True
         ):
             if config.cloud_dataset is None:
                 raise RuntimeError("Cloud-backed Auto Research is missing its dataset name")
@@ -912,9 +930,7 @@ def prepare_autoresearch_resume(config: AutoResearchConfig) -> dict[str, Any]:
                 expected_provider=config.computation_provider,
             )
             if not _cloud_drive_materialization_completed(config):
-                raise RuntimeError(
-                    "Replacement Auto Research instance has incomplete cloud data"
-                )
+                raise RuntimeError("Replacement Auto Research instance has incomplete cloud data")
     finally:
         power_off_run_computation_instance(config)
     return reconciliation
@@ -1010,9 +1026,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     transcript_path = config.output / "preprocessing" / "preprocessing_transcript.jsonl"
 
     def validate_outputs() -> None:
-        if not paper_markdown.is_file() or not paper_markdown.read_text(
-            encoding="utf-8"
-        ).strip():
+        if not paper_markdown.is_file() or not paper_markdown.read_text(encoding="utf-8").strip():
             raise RuntimeError(
                 f"Preprocessing agent left paper artifact missing or empty: {paper_markdown}"
             )
@@ -1147,6 +1161,12 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
 
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     cloud_pull_handoff = _cloud_pull_handoff_enabled(config)
+    result_schema_path: Path | None = None
+    result_path: Path | None = None
+    if config.provider == "codex":
+        result_schema_path = config.output / "prompts" / "codegen_agent_result.schema.json"
+        result_path = config.output / "codegen" / "codegen_agent_result.json"
+        write_json(result_schema_path, AgentStageResult.model_json_schema())
     prompt_path = render_prompt(
         "codegen/session_instructions.md",
         config.output / "prompts" / "codegen.md",
@@ -1171,14 +1191,19 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         local_resources=resources,
         gpu_info=resources["gpus"],
         computation_provider=config.computation_provider,
+        structured_stage_result=result_schema_path is not None,
         resuming=previous_status in {"running", "failed", "invalidated"},
     )
     if cloud_pull_handoff and not _cloud_drive_materialization_completed(config):
+        assert result_schema_path is not None
+        assert result_path is not None
         session_id = _run_codegen_cloud_pull_handoff(
             config=config,
             codebase_dir=codebase_dir,
             prompt_path=prompt_path,
             transcript_path=transcript_path,
+            stage_result_schema_path=result_schema_path,
+            stage_result_path=result_path,
         )
     else:
         session_id = run_agent(
@@ -1189,7 +1214,11 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             siliconflow_config_path=config.siliconflow_config,
             codex_model=config.codex_model,
             codex_reasoning_effort=config.codex_reasoning_effort,
+            output_schema_path=result_schema_path,
+            output_last_message_path=result_path,
         )
+    if result_path is not None:
+        _require_agent_stage_completion(result_path, "codegen_agent")
     _validate_agent_artifacts_with_resume(
         config=config,
         stage_name="codegen_agent",
@@ -1203,16 +1232,21 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             skill_corrections_path,
         ],
         validate=validate_outputs,
+        result_schema_path=result_schema_path,
+        result_path=result_path,
     )
+    outputs = [
+        str(codebase_dir),
+        str(codegen_plan_path),
+        str(dataset_patch_path),
+        str(skill_corrections_path),
+        str(transcript_path),
+    ]
+    if result_path is not None:
+        outputs.append(str(result_path))
     pipeline_state.complete_stage(
         "codegen_agent",
-        [
-            str(codebase_dir),
-            str(codegen_plan_path),
-            str(dataset_patch_path),
-            str(skill_corrections_path),
-            str(transcript_path),
-        ],
+        outputs,
     )
     return {"codebase_dir": str(codebase_dir)}
 
@@ -1226,12 +1260,8 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         raise RuntimeError("Preprocessing audit requires a completed codegen attempt")
 
     checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
-    cohort_refine_checkpoints = pipeline_state.get_stage_checkpoints(
-        "cohort_refine_agent"
-    )
-    completed_refine_round = int(
-        cohort_refine_checkpoints.get("completed_round", 0)
-    )
+    cohort_refine_checkpoints = pipeline_state.get_stage_checkpoints("cohort_refine_agent")
+    completed_refine_round = int(cohort_refine_checkpoints.get("completed_round", 0))
     audited_codegen_attempt = checkpoints.get("audited_codegen_attempt")
     audited_refine_round = int(checkpoints.get("audited_refine_round", 0))
     if (
@@ -1247,9 +1277,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         return {
             "audit_verdict": verdict,
             "audit_report_path": str(report_path),
-            "audit_refinement_exhausted": bool(
-                checkpoints.get("refinement_exhausted", False)
-            ),
+            "audit_refinement_exhausted": bool(checkpoints.get("refinement_exhausted", False)),
         }
 
     refine_rounds_used = int(checkpoints.get("refine_rounds_used", 0))
@@ -1280,7 +1308,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         else None
     )
     remote_audit_dir = (
-        f"{remote_working_dir.rstrip('/')}/preprocessing_audit/" f"attempt_{scientific_attempt:03d}"
+        f"{remote_working_dir.rstrip('/')}/preprocessing_audit/attempt_{scientific_attempt:03d}"
         if remote_working_dir
         else None
     )
@@ -1350,9 +1378,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
                 report_path=report_path,
                 results_dir=results_dir,
                 remote_audit_dir=remote_audit_dir,
-                remote_compute_state_path=(
-                    config.output / "remote_compute" / "instance.json"
-                ),
+                remote_compute_state_path=(config.output / "remote_compute" / "instance.json"),
             )
             run_agent(
                 provider=config.provider,
@@ -1428,9 +1454,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         f"Cohort preprocessing refined after failed audit: {audit_report_path}",
     )
     pipeline_state.start_stage("cohort_refine_agent")
-    attempt_dir = (
-        config.output / "codegen" / "cohort_refine" / f"attempt_{refine_round:03d}"
-    )
+    attempt_dir = config.output / "codegen" / "cohort_refine" / f"attempt_{refine_round:03d}"
     attempt_dir.mkdir(parents=True, exist_ok=True)
     transcript_path = attempt_dir / "cohort_refine_transcript.jsonl"
     codebase_dir = Path(state["codebase_dir"])
@@ -1534,9 +1558,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     cloud_data = config.clouddrive
     if config.clouddrive and config.data is not None:
-        codegen_plan = load_model(
-            Path(state["codebase_dir"]) / "codegen_plan.json", CodegenPlan
-        )
+        codegen_plan = load_model(Path(state["codebase_dir"]) / "codegen_plan.json", CodegenPlan)
         cloud_data = _uses_cloud_data(config, codegen_plan)
     prompt_path = render_prompt(
         "plan/session_instructions.md",
@@ -1777,12 +1799,8 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
         is_final_experiment = experiment.experiment_id == experiments.experiments[-1].experiment_id
 
         def validate_outputs() -> None:
-            if not report_path.is_file() or not report_path.read_text(
-                encoding="utf-8"
-            ).strip():
-                raise RuntimeError(
-                    f"Report agent did not write the shared report: {report_path}"
-                )
+            if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
+                raise RuntimeError(f"Report agent did not write the shared report: {report_path}")
             report_text = report_path.read_text(encoding="utf-8")
             validate_report_experiment(report_text, claims, experiment, codegen_plan)
             if is_final_experiment:

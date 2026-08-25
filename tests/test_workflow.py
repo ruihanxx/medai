@@ -304,9 +304,7 @@ def test_plan_agent_resumes_same_codex_session_after_validation_failure(
     assert result == {"replicate_plan_path": str(replicate_plan_path)}
     assert len(calls) == 2
     assert calls[1]["resume_session_id"] == "plan-thread-123"
-    assert (
-        config.output / "prompts" / "plan_agent_validation_resume_001.md"
-    ).is_file()
+    assert (config.output / "prompts" / "plan_agent_validation_resume_001.md").is_file()
     transcript = config.output / "plan" / "plan_transcript.jsonl"
     assert transcript.read_text(encoding="utf-8").count("turn.completed") == 2
     assert PipelineState(config.output).is_stage_completed("plan_agent")
@@ -475,9 +473,7 @@ def test_dual_source_downstream_uses_cloud_only_for_remote_plan(tmp_path: Path):
         "shared_state": "None",
         "ambiguities": [],
     }
-    local_plan = CodegenPlan.model_validate(
-        {**base_plan, "remote_compute": None}
-    )
+    local_plan = CodegenPlan.model_validate({**base_plan, "remote_compute": None})
     remote_plan = CodegenPlan.model_validate(
         {
             **base_plan,
@@ -582,6 +578,9 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                     }
                 ),
                 encoding="utf-8",
+            )
+            kwargs["output_last_message_path"].write_text(
+                json.dumps({"status": "completed", "error": None}), encoding="utf-8"
             )
         elif name == "audit_attempt_001.md":
             (working_dir / "audit_report.json").write_text(
@@ -758,9 +757,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert "evidence_summary.json" in replication_prompt
     assert str(output / "preprocessing" / "paper.md") in replication_prompt
     assert "Before changing any scientific semantics" in replication_prompt
-    assert (
-        "broadly accepted medical-research and data-processing convention" in replication_prompt
-    )
+    assert "broadly accepted medical-research and data-processing convention" in replication_prompt
     report_prompt = (output / "prompts" / "report_E1.md").read_text(encoding="utf-8")
     assert str(output / "plan" / "replicate_plan.json") in report_prompt
     assert "replication_log.json" in report_prompt
@@ -1418,12 +1415,8 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert "a configured provider is capacity fallback only" in prompt
     assert "run locally\nand do not search offers" in prompt
     assert "stop explicitly during Codegen" not in prompt
-    assert (
-        "already available to the reviewed adapter in\nthe process environment" in prompt
-    )
-    assert (
-        "Never treat a missing local `.env` file as missing\nconfiguration" in prompt
-    )
+    assert "already available to the reviewed adapter in\nthe process environment" in prompt
+    assert "Never treat a missing local `.env` file as missing\nconfiguration" in prompt
 
 
 def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
@@ -1509,6 +1502,117 @@ def test_codegen_dual_source_prefers_local_and_uses_cloud_only_for_remote(
     assert "it is\nmandatory for this cloud-backed run" not in prompt
 
 
+def test_codegen_structured_block_stops_before_artifact_repair(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    data = tmp_path / "data"
+    data.mkdir()
+    config = RunConfig(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        data=data,
+    )
+    PipelineState.create(config.output, {"paper": str(paper), "provider": "codex"})
+    resources_path = config.output / "preflight" / "resources.json"
+    resources_path.parent.mkdir(parents=True)
+    resources_path.write_text(
+        json.dumps({"cpu": {}, "memory": {}, "disk": {}, "gpus": []}),
+        encoding="utf-8",
+    )
+    preprocessing = config.output / "preprocessing"
+    preprocessing.mkdir()
+    paper_markdown = preprocessing / "paper.md"
+    claims_path = preprocessing / "claims.json"
+    experiments_path = preprocessing / "experiment_todo.json"
+    paper_markdown.write_text("# Paper\n", encoding="utf-8")
+    claims_path.write_text("{}\n", encoding="utf-8")
+    experiments_path.write_text("{}\n", encoding="utf-8")
+
+    calls = []
+
+    def blocked_agent(**kwargs):
+        calls.append(kwargs)
+        kwargs["output_last_message_path"].write_text(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "error": "Required external dataset is unavailable.",
+                }
+            ),
+            encoding="utf-8",
+        )
+        kwargs["transcript_path"].write_text('{"type":"turn.completed"}\n', encoding="utf-8")
+        return "thread-123"
+
+    monkeypatch.setattr("medai.workflow.run_agent", blocked_agent)
+
+    with pytest.raises(
+        RuntimeError,
+        match="codegen_agent reported blocked: Required external dataset is unavailable",
+    ):
+        codegen_agent_node(
+            {
+                "config": config,
+                "paper_markdown": str(paper_markdown),
+                "resources_path": str(resources_path),
+                "claims_path": str(claims_path),
+                "experiments_path": str(experiments_path),
+            }
+        )
+
+    assert len(calls) == 1
+    assert calls[0]["output_schema_path"].name == "codegen_agent_result.schema.json"
+    assert not list((config.output / "prompts").glob("codegen_agent_validation_resume_*.md"))
+
+
+def test_codegen_cloud_handoff_structured_block_runs_no_command(tmp_path: Path, monkeypatch):
+    import medai.workflow as workflow
+
+    config = RunConfig(
+        paper=tmp_path / "paper.pdf",
+        output=tmp_path / "output",
+        provider="codex",
+    )
+    codebase = config.output / "codegen" / "codebase"
+    codebase.mkdir(parents=True)
+    prompt_path = config.output / "prompts" / "codegen.md"
+    prompt_path.parent.mkdir()
+    prompt_path.write_text("prompt\n", encoding="utf-8")
+    result_schema_path = config.output / "prompts" / "codegen_agent_result.schema.json"
+    result_path = config.output / "codegen" / "codegen_agent_result.json"
+
+    def blocked_agent(**kwargs):
+        kwargs["output_last_message_path"].write_text(
+            json.dumps(
+                {
+                    "status": "blocked",
+                    "command": None,
+                    "error": "Cloud authorization is unavailable.",
+                }
+            ),
+            encoding="utf-8",
+        )
+        return "thread-123"
+
+    monkeypatch.setattr(workflow, "run_agent", blocked_agent)
+    monkeypatch.setattr(
+        workflow,
+        "_run_agent_command",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("unexpected command")),
+    )
+
+    with pytest.raises(RuntimeError, match="reported blocked during cloud-pull preparation"):
+        workflow._run_codegen_cloud_pull_handoff(
+            config=config,
+            codebase_dir=codebase,
+            prompt_path=prompt_path,
+            transcript_path=config.output / "codegen" / "codegen_transcript.jsonl",
+            stage_result_schema_path=result_schema_path,
+            stage_result_path=result_path,
+        )
+
+
 def test_codegen_cloud_handoff_resumes_same_codex_session_after_failed_monitor(
     tmp_path: Path, monkeypatch
 ):
@@ -1574,14 +1678,24 @@ def test_codegen_cloud_handoff_resumes_same_codex_session_after_failed_monitor(
 
     def fake_agent(**kwargs):
         agent_calls.append(kwargs)
-        if kwargs.get("output_schema_path") is not None:
+        if kwargs["output_schema_path"].name == "codegen_cloud_pull_command.schema.json":
             kwargs["output_last_message_path"].write_text(
-                json.dumps({"command": next(requested_commands)}), encoding="utf-8"
+                json.dumps(
+                    {
+                        "status": "command",
+                        "command": next(requested_commands),
+                        "error": None,
+                    }
+                ),
+                encoding="utf-8",
             )
             events.append("agent-command")
         else:
             _write_codegen_plan_with_remote_target(
                 Path(kwargs["working_dir"]) / "codegen_plan.json", state_path, target_path
+            )
+            kwargs["output_last_message_path"].write_text(
+                json.dumps({"status": "completed", "error": None}), encoding="utf-8"
             )
             events.append("agent-complete")
         mode = "a" if kwargs.get("resume_session_id") else "w"
@@ -1627,7 +1741,7 @@ def test_codegen_cloud_handoff_resumes_same_codex_session_after_failed_monitor(
     assert agent_calls[1]["resume_session_id"] == "thread-123"
     assert agent_calls[2]["resume_session_id"] == "thread-123"
     assert agent_calls[0]["output_schema_path"] == agent_calls[1]["output_schema_path"]
-    assert agent_calls[2].get("output_schema_path") is None
+    assert agent_calls[2]["output_schema_path"].name == "codegen_agent_result.schema.json"
     commands = config.output / "codegen" / "cloud_pull" / "commands"
     first_result = json.loads((commands / "command_001_result.json").read_text())
     assert first_result["exit_code"] == 1

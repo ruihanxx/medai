@@ -16,8 +16,12 @@ Read the result, relevant log sections, and the non-secret provider state at
 continue code generation. Perform only bounded, safe diagnostics. Before
 returning, repeat the selected drive reference's complete initialized-instance,
 SSH, target-path, permission, and stop preparation procedure, then return
-exactly one next non-empty foreground monitor Bash command using the required
-output schema. Do not run or monitor the returned command in this turn.
+the required structured result. For another prepared monitor, use `status:
+command`, a non-empty foreground monitor Bash command, and `error: null`. Do not
+run or monitor the returned command in this turn.
 
-If recovery is not possible, make the Codex CLI exit nonzero rather than
-returning a command or continuing without completed data.
+If an external prerequisite is irrecoverably unavailable, return `status:
+blocked`, `command: null`, and a non-empty `error`. If bounded provider or
+technical recovery fails, return `status: failed`, `command: null`, and a
+non-empty `error`. Do not use a shell `exit 1` or continue without completed
+data.

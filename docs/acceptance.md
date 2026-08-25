@@ -43,6 +43,9 @@ codegen remaining a single scientific stage.
 Replicate Agent artifact-repair mocks cover a rejected plan that resumes the
 same direct-Codex session, appends its transcript, persists the exact validation
 error in a repair prompt, and completes only after full claim/artifact coverage.
+Direct-Codex codegen mocks additionally cover strict completed/blocked/failed
+results, immediate terminal routing without artifact-repair turns, and
+command-or-terminal cloud-pull handoffs.
 
 Auto Research mocks cover input-representation, model, and training-strategy
 implementation plans; declared changed-file boundaries; preservation of data,

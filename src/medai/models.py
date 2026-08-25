@@ -172,6 +172,40 @@ class ReplicationLog(StrictModel):
         return self
 
 
+class AgentStageResult(StrictModel):
+    status: Literal["completed", "blocked", "failed"]
+    error: str | None
+
+    @model_validator(mode="after")
+    def status_matches_error(self) -> "AgentStageResult":
+        if self.status == "completed":
+            if self.error is not None:
+                raise ValueError("completed agent stage result must have error=null")
+        elif self.error is None or not self.error.strip():
+            raise ValueError(f"{self.status} agent stage result requires a non-empty error")
+        return self
+
+
+class CodegenCloudPullRequest(StrictModel):
+    status: Literal["command", "blocked", "failed"]
+    command: str | None
+    error: str | None
+
+    @model_validator(mode="after")
+    def status_matches_payload(self) -> "CodegenCloudPullRequest":
+        if self.status == "command":
+            if self.command is None or not self.command.strip():
+                raise ValueError("cloud-pull command result requires a non-empty command")
+            if self.error is not None:
+                raise ValueError("cloud-pull command result must have error=null")
+        else:
+            if self.command is not None:
+                raise ValueError(f"{self.status} cloud-pull result must have command=null")
+            if self.error is None or not self.error.strip():
+                raise ValueError(f"{self.status} cloud-pull result requires a non-empty error")
+        return self
+
+
 class ReplicationCommand(StrictModel):
     command: str = Field(min_length=1)
 
@@ -310,9 +344,7 @@ class IdeaGenerationArtifact(StrictModel):
 
     @model_validator(mode="after")
     def exact_round_idea_ids(self) -> "IdeaGenerationArtifact":
-        expected_ids = [
-            f"R{self.round_index:02d}-I{idea_index:02d}" for idea_index in range(1, 4)
-        ]
+        expected_ids = [f"R{self.round_index:02d}-I{idea_index:02d}" for idea_index in range(1, 4)]
         actual_ids = [idea.idea_id for idea in self.ideas]
         if actual_ids != expected_ids:
             raise ValueError(f"Ideas must use exactly these IDs in order: {expected_ids}")
@@ -424,8 +456,7 @@ class IdeaImplementationPlan(StrictModel):
         overlap = set(refine_paths) & set(new_paths)
         if overlap:
             raise ValueError(
-                f"Files cannot appear in both refine_file_list and new_file_list: "
-                f"{sorted(overlap)}"
+                f"Files cannot appear in both refine_file_list and new_file_list: {sorted(overlap)}"
             )
         if not refine_paths and not new_paths:
             raise ValueError("An implementation plan must declare at least one file change")
@@ -594,7 +625,9 @@ class ExperimentMetricComparison(StrictModel):
                 rel_tol=1e-6,
                 abs_tol=1e-9,
             ):
-                raise ValueError("weighted_score is inconsistent with the assessment score and weight")
+                raise ValueError(
+                    "weighted_score is inconsistent with the assessment score and weight"
+                )
         return self
 
 
@@ -739,9 +772,7 @@ def validate_experiment_contracts(
     expected = [experiment.experiment_id for experiment in weights.experiments]
     actual = [experiment.experiment_id for experiment in contracts.experiments]
     if actual != expected:
-        raise ValueError(
-            "Experiment contracts must cover every weighted prediction experiment"
-        )
+        raise ValueError("Experiment contracts must cover every weighted prediction experiment")
 
 
 def validate_candidate_pool_for_selection(pool: IdeaCandidatePool) -> None:
@@ -756,9 +787,7 @@ def validate_candidate_pool_for_selection(pool: IdeaCandidatePool) -> None:
                 f"Candidate {candidate.candidate_id} lacks paper or experiment evidence"
             )
         if "literature" not in sources:
-            raise ValueError(
-                f"Candidate {candidate.candidate_id} lacks literature evidence"
-            )
+            raise ValueError(f"Candidate {candidate.candidate_id} lacks literature evidence")
 
 
 def validate_idea_generation_artifact(
@@ -784,9 +813,7 @@ def validate_idea_implementation_plan(
             *contract.integration_paths,
         )
     }
-    invalid_paths = {
-        item.file_path for item in plan.refine_file_list
-    } - permitted_paths
+    invalid_paths = {item.file_path for item in plan.refine_file_list} - permitted_paths
     if invalid_paths:
         raise ValueError(
             "Implementation plan refines paths outside the frozen boundary: "
@@ -824,16 +851,12 @@ def validate_autoresearch_experiment_plan(
     actual = [experiment.experiment_id for experiment in plan.experiments]
     if actual != expected:
         raise ValueError("Auto Research experiment plan must cover every experiment in order")
-    contracts_by_id = {
-        contract.experiment_id: contract for contract in contracts.experiments
-    }
+    contracts_by_id = {contract.experiment_id: contract for contract in contracts.experiments}
     for experiment in plan.experiments:
         commands = {step.command_hint.strip() for step in experiment.steps}
         baseline_commands = {
             command.strip()
-            for command in contracts_by_id[
-                experiment.experiment_id
-            ].baseline_entry_points
+            for command in contracts_by_id[experiment.experiment_id].baseline_entry_points
         }
         if commands & baseline_commands:
             raise ValueError(f"Auto Research plan reruns a baseline: {experiment.experiment_id}")
@@ -878,8 +901,7 @@ def validate_smart_replicate_log(
 ) -> None:
     if log.experiment_id != experiment.experiment_id:
         raise ValueError(
-            f"Smart-replicate log ID {log.experiment_id} does not match "
-            f"{experiment.experiment_id}"
+            f"Smart-replicate log ID {log.experiment_id} does not match {experiment.experiment_id}"
         )
     if set(anchors) != set(experiment.claims):
         raise ValueError(
@@ -903,7 +925,7 @@ def validate_reproduction_report(
     invalid_sections = [section for section in required_sections if report_text.count(section) != 1]
     if invalid_sections:
         raise ValueError(
-            "Report must contain exactly one of each required section: " f"{invalid_sections}"
+            f"Report must contain exactly one of each required section: {invalid_sections}"
         )
     section_positions = [report_text.index(section) for section in required_sections]
     if section_positions != sorted(section_positions):

@@ -169,17 +169,23 @@ its initialized running state, verify SSH and the exact run-owned staging and
 target paths, verify write permission with the reviewed probe, and stop the
 instance. Do not return until that procedure confirms the instance is stopped.
 
-Then return exactly one non-empty foreground Bash command using the required
-output schema. It must be the selected drive reference's reviewed monitor
-command, not a detached/background command. Do not run or monitor that command
-in this turn. Local orchestration will run it while this Codex process exits,
-then resume this same session after the monitor reaches a terminal result.
+Then return the required structured cloud-pull result. When preparation is
+complete, set `status` to `command`, put exactly one non-empty foreground Bash
+monitor command in `command`, and set `error` to `null`. The command must be the
+selected drive reference's reviewed monitor command, not a detached/background
+command. Do not run or monitor it in this turn. Local orchestration will run it
+while this Codex process exits, then resume this same session after the monitor
+reaches a terminal result.
 
 Do not inspect cloud data or continue code generation before that resumed turn
 confirms `provider_state.cloud_drive.completed`. If a later resumed turn reports
 an incomplete pull, diagnose safely, repeat the complete preparation and stop
-procedure, then return one next monitor command. If recovery is not possible,
-make the Codex CLI exit nonzero rather than continuing without data.
+procedure, then return one next `command` result. If an external prerequisite is
+irrecoverably unavailable, return `status: blocked`, `command: null`, and a
+non-empty `error`. If a provider or technical operation remains unsuccessful
+after its bounded recovery procedure, return `status: failed`, `command: null`,
+and a non-empty `error`. Do not try to signal either outcome by running a shell
+`exit 1`; a tool command's exit code is not the Codex process result.
 {% endif %}
 {% endif %}
 {% if not cloud_drive_enabled|default(false) or data_dir %}
@@ -233,8 +239,10 @@ an interaction fails, inspect the complete non-secret error, consult the
 provider's official online documentation when useful, and reason through a
 small, bounded sequence of multiple distinct, safe recovery attempts. Do not
 blindly repeat a billable operation. If the interaction remains unsuccessful after
-those attempts, immediately make the Codex agent CLI exit nonzero. Do not
-continue with local work or a later workflow phase.
+those attempts, stop without continuing local work or a later workflow phase.
+{% if structured_stage_result|default(false) %}Return the structured `failed`
+stage result described below; do not try to change the Codex process exit code
+from a shell tool command.{% endif %}
 
 The single stronger-GPU retry described by the selected provider reference is
 the only permitted no-inventory substitution. Separately, if `create`
@@ -307,11 +315,14 @@ results.
 Strictly follow the paper's dataset processing and cohort construction procedures.
 
 If the paper requires any data file that is absent from the supplied dataset,
-immediately make the Codex CLI exit nonzero and terminate this workflow. This is
-terminal regardless of whether the likely cause is a dataset-version mismatch,
-an incomplete download, an error in the paper, or another source mismatch. Do
-not invent a missing file or derived artifact, write code that waits for it,
-substitute other data, or continue to the preprocessing audit.
+stop immediately and terminate this workflow. This is terminal regardless of
+whether the likely cause is a dataset-version mismatch, an incomplete download,
+an error in the paper, or another source mismatch.
+{% if structured_stage_result|default(false) %}Return the structured `blocked`
+stage result with a non-empty error; do not try to alter the Codex process exit
+code from a shell tool command.{% endif %} Do not invent a missing file or
+derived artifact, write code that waits for it, substitute other data, or
+continue to the preprocessing audit.
 
 For large raw tables/dataframes, use this processing pattern: Reads large raw
 tables/dataframe in chunks or bounded batches, applies chunk-eligible
@@ -594,3 +605,22 @@ such as downsampling after chunk-processed compact data is merged.
 - Do not commit (no `git commit`) — the host-side EXIT trap captures
   the diff against an empty initial state.
 - Do not run the methodology end-to-end; that is the next phase.
+
+{% if structured_stage_result|default(false) %}
+## Required final stage result
+
+Except for an intermediate cloud-pull handoff described above, end the turn with
+exactly the structured result required by the supplied output schema:
+
+```json
+{"status": "completed", "error": null}
+```
+
+Use `completed` only when you believe every owned codegen artifact is ready for
+orchestration validation. Use `blocked` with a non-empty `error` for an
+irrecoverable missing external prerequisite. Use `failed` with a non-empty
+`error` for a provider, infrastructure, or technical operation that remains
+unsuccessful after its bounded recovery procedure. Do not create placeholder
+artifacts to obtain `completed`, and do not run a shell `exit 1` to report either
+terminal status.
+{% endif %}

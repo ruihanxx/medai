@@ -13,6 +13,7 @@ runs/<run_id>/
 ├── preprocessing/preprocessing_transcript.jsonl
 ├── codegen/codebase/codegen_plan.json
 ├── codegen/codegen_transcript.jsonl
+├── codegen/codegen_agent_result.json  # direct Codex terminal status
 ├── codegen/cloud_pull/commands/  # opted-in Codex cloud handoff only
 │   ├── command_001.json
 │   ├── command_001.log
@@ -37,6 +38,7 @@ runs/<run_id>/
 │   ├── audit_attempt_001_resume_001.md  # incomplete direct-Codex audit only
 │   ├── <stage>_validation_resume_001.md  # bounded direct-Codex artifact repair
 │   ├── cohort_refine_attempt_001.md  # only after a failed audit
+│   ├── codegen_agent_result.schema.json  # direct Codex only
 │   ├── codegen_cloud_pull_command.schema.json  # opted-in cloud handoff only
 │   ├── codegen_cloud_pull_resume_001.md
 │   └── replicate_agent_validation_resume_001.md
@@ -153,11 +155,20 @@ these prompts and also preserve legacy command artifacts from earlier runs.
 
 For an opted-in Codex cloud handoff, each
 `codegen/cloud_pull/commands/command_<NNN>.json` is the single requested
-foreground monitor command. Its `.log` contains merged local stdout/stderr and
+foreground monitor request. It contains `status`, nullable `command`, and
+nullable `error`: `command` runs the reviewed monitor, while `blocked` or
+`failed` terminates codegen before local orchestration executes anything. Its
+`.log` contains merged local stdout/stderr and
 its `_result.json` records the command, exit code, duration, log path, and the
 cloud-state validation error when the same Codex session must prepare and hand
 off another monitor command. These command artifacts survive an explicit CLI
 resume, but the temporary Codex session ID does not.
+
+Every direct-Codex codegen turn writes `codegen_agent_result.json` with required
+`status` and nullable `error` fields. `completed` requires `error: null` and is
+necessary but not sufficient for stage completion; orchestration then validates
+the canonical codegen artifacts. `blocked` and `failed` require a non-empty
+error and terminate the stage before artifact-repair resumes.
 
 Auto Research planning cloud handoff stores the same request/log/result triplet
 under each idea's `plan/cloud_pull/commands/`; its schema and resume prompts are
