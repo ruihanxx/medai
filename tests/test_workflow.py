@@ -1418,6 +1418,12 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert "a configured provider is capacity fallback only" in prompt
     assert "run locally\nand do not search offers" in prompt
     assert "stop explicitly during Codegen" not in prompt
+    assert (
+        "already available to the reviewed adapter in\nthe process environment" in prompt
+    )
+    assert (
+        "Never treat a missing local `.env` file as missing\nconfiguration" in prompt
+    )
 
 
 def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(

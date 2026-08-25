@@ -87,10 +87,12 @@ mount into the container's ephemeral HOME so computation-provider SSH operations
 can use OpenSSH config and identities without modifying host credentials. The
 project `.env` is passed to Docker with `--env-file`, so provider skills must
 tolerate Docker's literal preservation of optional surrounding quotes in
-credential values. A new replication invocation creates a unique run directory
-under the repository-root `runs/` directory, named from its UTC start time and
-paper filename. Passing its existing directory through replication `--output`
-resumes it.
+credential values. The file itself is not mounted into an agent stage working
+directory: provider adapters read the inherited process environment, and an
+absent stage-local `.env` is not a configuration failure. A new replication
+invocation creates a unique run directory under the repository-root `runs/`
+directory, named from its UTC start time and paper filename. Passing its existing
+directory through replication `--output` resumes it.
 
 Auto Research restores paper, repository, and data locations from the base
 manifest, skips MinerU, and requires the base run to be completed with all eight

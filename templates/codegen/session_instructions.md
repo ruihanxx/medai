@@ -119,6 +119,14 @@ JAX) rather than implementing the GPU-dependent work on CPU.
 {% endif %}
 
 {% if computation_provider %}
+The computation provider and any selected drive were resolved before this stage,
+so their required configuration is already available to the reviewed adapter in
+the process environment. The host project `.env` is intentionally not mounted in
+this working directory. Never treat a missing local `.env` file as missing
+configuration, copy credentials into the run, or print secret values. Invoke the
+reviewed adapter directly; if a safe presence-only diagnostic is necessary,
+check environment variable names without revealing their values.
+
 {% if cloud_drive_enabled|default(false) %}
 {% if data_dir %}
 Both local and cloud data are available. Complete the local resource judgment

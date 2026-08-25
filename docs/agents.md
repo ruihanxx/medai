@@ -168,3 +168,9 @@ than editing runtime skills during the run. Host orchestration owns plan and
 artifact validation, operation execution outside agent turns, resume
 reconciliation, power-off, replacement, and release as defined in
 `execution.md`.
+
+Provider configuration is inherited by the agent process after orchestration
+validates the metadata-declared required variables. The host `.env` is not a
+stage artifact and need not exist in the agent working directory; agents never
+use its absence as evidence that configuration is missing or expose values while
+checking the environment.

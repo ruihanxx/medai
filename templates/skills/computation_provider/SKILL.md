@@ -66,6 +66,12 @@ selected; otherwise allow OpenSSH to use its normal config and default identitie
 Never configure `COMPUTATION_PROVIDER_SSH_PASSWORD` in `.env`; reserve it for a
 provider adapter to pass an ephemeral fallback password to the SSH child process.
 
+The host launcher injects the selected configuration into the agent process
+environment; it does not mount the project `.env` into the stage working
+directory. Never infer that provider configuration is missing because `.env` is
+absent there. Invoke the reviewed adapter, which reads the inherited environment,
+or check only whether required variable names are set without printing values.
+
 Never copy secrets into a run state file, generated prompt, transcript, command
 output, remote log, or result artifact. Persist only the non-secret identifiers
 and connection metadata required to resume or clean up the current run.
