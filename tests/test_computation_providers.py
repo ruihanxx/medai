@@ -210,35 +210,3 @@ def test_multiple_configured_providers_require_explicit_selection(tmp_path: Path
             data=None,
             siliconflow_config=None,
         )
-
-
-@pytest.mark.parametrize("version", [1, 2])
-def test_legacy_manifest_migrates_provider_specific_configuration(
-    tmp_path: Path, version: int
-):
-    output = tmp_path / "output"
-    output.mkdir()
-    (output / "manifest.json").write_text(
-        json.dumps(
-            {
-                "version": version,
-                "inputs": {
-                    "computation_provider": "autodl",
-                    "autodl_image_uuid": "image-1",
-                    "drive_provider": "aliyun",
-                },
-                "stages": {},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    state = PipelineState(output)
-
-    assert state.state["version"] == 3
-    assert state.state["inputs"]["computation_provider_config"] == {
-        "provider": "autodl",
-        "drive": "aliyun",
-        "values": {"AUTODL_IMAGE_UUID": "image-1"},
-    }
-    assert "autodl_image_uuid" not in state.state["inputs"]

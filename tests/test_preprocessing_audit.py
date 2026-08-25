@@ -419,7 +419,7 @@ def test_remote_state_is_local_only_audit_context(
     assert isinstance(config, RunConfig)
     remote_state_path = config.output / "remote_compute" / "instance.json"
     remote_state_path.parent.mkdir()
-    original_state = '{"provider":"autodl","released":false}\n'
+    original_state = '{"provider":"example-provider","released":false}\n'
     remote_state_path.write_text(original_state, encoding="utf-8")
     monkeypatch.setattr("medai.workflow.run_agent", _fake_agents(["PASS"], []))
 
@@ -445,24 +445,24 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
         local_config,
         data=None,
         clouddrive=True,
-        drive_provider="aliyun",
+        drive_provider="example-drive",
         cloud_dataset="mimic-iv",
     )
     state["config"] = config
     remote_state_path = config.output / "remote_compute" / "instance.json"
     remote_state_path.parent.mkdir()
-    remote_dataset = "/root/autodl-tmp/medai/mimic-iv"
+    remote_dataset = "/remote/data/mimic-iv"
     remote_state_path.write_text(
         json.dumps(
             {
-                "provider": "autodl",
+                "provider": "example-provider",
                 "created_by_run": True,
                 "released": False,
                 "provider_state": {
                     "instance_uuid": "instance",
                     "cloud_drive": {
                         "completed": True,
-                        "drive": "aliyun",
+                        "drive": "example-drive",
                         "dataset": "mimic-iv",
                         "target_path": remote_dataset,
                     },
@@ -481,7 +481,7 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
                 "shared_state": "Files",
                 "remote_compute": {
                     "state_path": str(remote_state_path),
-                    "remote_working_dir": "/root/autodl-tmp/run-001",
+                    "remote_working_dir": "/remote/run-001",
                     "remote_dataset_dir": remote_dataset,
                 },
                 "ambiguities": [
@@ -507,7 +507,7 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
         encoding="utf-8"
     )
     assert remote_dataset in prompt
-    assert "/root/autodl-tmp/run-001/preprocessing_audit/attempt_001" in prompt
+    assert "/remote/run-001/preprocessing_audit/attempt_001" in prompt
     assert "Execute the complete dataset preprocessing remotely" in prompt
     assert "make only small audit instrumentation" in prompt
     assert "Download only aggregate statistics" in prompt
@@ -525,7 +525,7 @@ def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(
     cohort_prompt = cohort_prompts[0]
     assert str(remote_state_path) in cohort_prompt
     assert remote_dataset in cohort_prompt
-    assert "/root/autodl-tmp/run-001" in cohort_prompt
+    assert "/remote/run-001" in cohort_prompt
     assert "reuse the existing instance" in cohort_prompt
     assert "do not\nrent, release, reauthorize, or rematerialize data" in cohort_prompt
     assert "model definitions, training" in cohort_prompt

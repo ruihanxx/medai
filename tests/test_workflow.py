@@ -42,14 +42,11 @@ def _write_remote_state(path: Path) -> None:
     path.write_text(
         json.dumps(
             {
-                "provider": "autodl",
+                "provider": "vastai",
                 "created_by_run": True,
                 "released": False,
                 "provider_state": {
-                    "instance_uuid": "old-instance",
-                    "gpu_spec_uuid": "v-32g-p",
-                    "gpu_count": 1,
-                    "image_uuid": "image",
+                    "instance_id": "old-instance",
                 },
             }
         ),
@@ -313,9 +310,9 @@ def test_plan_agent_resumes_same_codex_session_after_validation_failure(
 def test_cloud_drive_preflight_accepts_remote_only_data(tmp_path: Path, monkeypatch):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
-    monkeypatch.setenv("AUTODL_TOKEN", "token")
-    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image")
-    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "password")
+    monkeypatch.setenv("VAST_API_KEY", "token")
+    monkeypatch.setenv("VASTAI_IMAGE", "image")
+    monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "connection-id")
     config = RunConfig.create(
         paper=paper,
         output=tmp_path / "output",
@@ -384,10 +381,10 @@ def test_codegen_remote_compute_requires_only_static_paths(tmp_path: Path):
 def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
     state_path.parent.mkdir(parents=True)
-    target = "/root/autodl-tmp/medai/mimic-iv"
+    target = "/workspace/medai/run-token/data/mimic-iv"
     remote_compute = {
         "state_path": str(state_path),
-        "remote_working_dir": "/root/autodl-tmp/medai-run",
+        "remote_working_dir": "/workspace/medai/run-token/work",
         "remote_dataset_dir": target,
     }
     plan = CodegenPlan.model_validate(
@@ -401,14 +398,14 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
         }
     )
     envelope = {
-        "provider": "autodl",
+        "provider": "vastai",
         "created_by_run": True,
         "released": False,
         "provider_state": {
             "instance_uuid": "instance",
             "cloud_drive": {
                 "completed": True,
-                "drive": "aliyun",
+                "drive": "google-drive",
                 "dataset": "mimic-iv",
                 "target_path": target,
             },
@@ -420,7 +417,7 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
         plan,
         state_path,
         cloud_dataset="mimic-iv",
-        drive_provider="aliyun",
+        drive_provider="google-drive",
     )
     assert cloud is not None and cloud["target_path"] == target
 
@@ -431,7 +428,7 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
             plan,
             state_path,
             cloud_dataset="mimic-iv",
-            drive_provider="aliyun",
+            drive_provider="google-drive",
         )
 
     envelope["provider_state"]["cloud_drive"]["completed"] = True
@@ -442,13 +439,13 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
             plan,
             state_path,
             cloud_dataset="mimic-iv",
-            drive_provider="aliyun",
+            drive_provider="google-drive",
         )
     validate_codegen_remote_compute(
         plan,
         state_path,
         cloud_dataset="mimic-iv",
-        drive_provider="aliyun",
+        drive_provider="google-drive",
         require_active=False,
     )
 
@@ -1200,7 +1197,7 @@ def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
         output=base.output,
         provider="claude",
         clouddrive=True,
-        drive_provider="aliyun",
+        drive_provider="google-drive",
         cloud_dataset="mimic-iv",
     )
     PipelineState.create(config.output, {"provider": "claude"})
@@ -1401,14 +1398,14 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
         computation_provider_state_path=tmp_path / "instance.json",
         local_resources=local_resources,
         gpu_info=[],
-        computation_provider="AutoDL",
+        computation_provider="Vast.ai",
         resuming=False,
     )
 
     prompt = prompt_path.read_text(encoding="utf-8")
     assert "/skills/computation_provider/SKILL.md" in prompt
     assert str(tmp_path / "instance.json") in prompt
-    assert "autodl" not in prompt.lower()
+    assert "vast.ai" not in prompt.lower()
     assert json.dumps(local_resources, sort_keys=True) in prompt
     assert "dataset release/version" in prompt
     assert "file and partition counts" in prompt
@@ -1442,7 +1439,7 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
         data_dir=None,
         cloud_drive_enabled=True,
         cloud_dataset="mimic-iv",
-        drive_provider="aliyun",
+        drive_provider="google-drive",
         cloud_source="medai/mimic-iv",
         infrastructure_resume=True,
         skills_dir=Path("/skills"),
@@ -1457,7 +1454,7 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
             "gpus": [],
         },
         gpu_info=[],
-        computation_provider="AutoDL",
+        computation_provider="Vast.ai",
         resuming=True,
     )
 
@@ -1485,7 +1482,7 @@ def test_codegen_dual_source_prefers_local_and_uses_cloud_only_for_remote(
         data_dir=local_data,
         cloud_drive_enabled=True,
         cloud_dataset="mimic-iv",
-        drive_provider="aliyun",
+        drive_provider="google-drive",
         cloud_source="medai/mimic-iv",
         skills_dir=Path("/skills"),
         codegen_plan_path=tmp_path / "codegen_plan.json",
@@ -1499,7 +1496,7 @@ def test_codegen_dual_source_prefers_local_and_uses_cloud_only_for_remote(
             "gpus": [],
         },
         gpu_info=[],
-        computation_provider="AutoDL",
+        computation_provider="Vast.ai",
         resuming=False,
     )
 
@@ -2041,7 +2038,7 @@ def test_resume_cloud_replacement_materializes_before_archive(
         output=base.output,
         provider=base.provider,
         clouddrive=True,
-        drive_provider="aliyun",
+        drive_provider="google-drive",
         cloud_dataset="mimic-iv",
     )
     state = PipelineState.create(config.output, {"provider": "codex"})
@@ -2094,15 +2091,14 @@ def test_computation_cleanup_dispatches_provider_and_skips_released_state(
         return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
 
     monkeypatch.setattr("medai.workflow.subprocess.run", fake_run)
-    monkeypatch.setenv("AUTODL_RELEASE_ON_FINISH", "false")
 
     state_path.write_text(
         json.dumps(
             {
-                "provider": "autodl",
+                "provider": "vastai",
                 "created_by_run": True,
                 "released": True,
-                "provider_state": {"instance_uuid": "instance"},
+                "provider_state": {"instance_id": "instance"},
             }
         ),
         encoding="utf-8",
@@ -2113,10 +2109,10 @@ def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     state_path.write_text(
         json.dumps(
             {
-                "provider": "autodl",
+                "provider": "vastai",
                 "created_by_run": True,
                 "released": False,
-                "provider_state": {"instance_uuid": "instance"},
+                "provider_state": {"instance_id": "instance"},
             }
         ),
         encoding="utf-8",
@@ -2124,16 +2120,16 @@ def test_computation_cleanup_dispatches_provider_and_skips_released_state(
     release_run_computation_instance(config)
     assert len(calls) == 1
     command, kwargs = calls[0]
-    assert command[1].endswith("/computation_provider/scripts/autodl.py")
+    assert command[1].endswith("/computation_provider/scripts/vastai.py")
     assert command[2:] == ["release", "--state", str(state_path)]
-    assert kwargs["timeout"] == 120
+    assert kwargs["timeout"] == 300
 
     calls.clear()
     power_off_run_computation_instance(config)
     assert len(calls) == 1
     command, kwargs = calls[0]
     assert command[2:] == ["power-off", "--state", str(state_path)]
-    assert kwargs["timeout"] == 120
+    assert kwargs["timeout"] == 300
 
 
 def test_autoresearch_resume_replacement_uses_offline_cloud_pull(

@@ -89,9 +89,9 @@ def test_cloud_drive_config_and_manifest_are_remote_only(
 ):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
-    monkeypatch.setenv("AUTODL_TOKEN", "api-secret")
-    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image-id")
-    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "panel-secret")
+    monkeypatch.setenv("VAST_API_KEY", "api-secret")
+    monkeypatch.setenv("VASTAI_IMAGE", "image-id")
+    monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "connection-id")
 
     config = RunConfig.create(
         paper=paper,
@@ -106,12 +106,12 @@ def test_cloud_drive_config_and_manifest_are_remote_only(
 
     assert config.data is None
     assert config.cloud_dataset == "mimic-iv"
-    assert config.drive_provider == "aliyun"
+    assert config.drive_provider == "google-drive"
     assert inputs["data"] is None
     assert inputs["data_source"] is None
     assert inputs["clouddrive"] is True
     assert inputs["cloud_source"] == "medai/mimic-iv"
-    assert "panel-secret" not in json.dumps(inputs)
+    assert "api-secret" not in json.dumps(inputs)
 
 
 def test_local_and_cloud_data_are_recorded_together(tmp_path: Path, monkeypatch):
@@ -119,9 +119,9 @@ def test_local_and_cloud_data_are_recorded_together(tmp_path: Path, monkeypatch)
     paper.write_bytes(b"%PDF")
     data = tmp_path / "mimic-iv"
     data.mkdir()
-    monkeypatch.setenv("AUTODL_TOKEN", "api-secret")
-    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image-id")
-    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "panel-secret")
+    monkeypatch.setenv("VAST_API_KEY", "api-secret")
+    monkeypatch.setenv("VASTAI_IMAGE", "image-id")
+    monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "connection-id")
 
     config = RunConfig.create(
         paper=paper,
@@ -148,9 +148,9 @@ def test_cloud_drive_rejects_unsafe_dataset_names(
 ):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
-    monkeypatch.setenv("AUTODL_TOKEN", "token")
-    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image")
-    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "password")
+    monkeypatch.setenv("VAST_API_KEY", "token")
+    monkeypatch.setenv("VASTAI_IMAGE", "image")
+    monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "connection-id")
 
     with pytest.raises(ValueError, match="safe directory name"):
         RunConfig.create(
@@ -164,11 +164,13 @@ def test_cloud_drive_rejects_unsafe_dataset_names(
         )
 
 
-def test_cloud_drive_requires_supported_provider_and_password(tmp_path: Path, monkeypatch):
+def test_cloud_drive_requires_supported_provider_and_connection(
+    tmp_path: Path, monkeypatch
+):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
-    monkeypatch.setenv("AUTODL_TOKEN", "token")
-    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image")
+    monkeypatch.setenv("VAST_API_KEY", "token")
+    monkeypatch.setenv("VASTAI_IMAGE", "image")
     monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "other")
 
     with pytest.raises(ValueError, match="does not support drive"):
@@ -182,8 +184,8 @@ def test_cloud_drive_requires_supported_provider_and_password(tmp_path: Path, mo
             clouddrive=True,
         )
 
-    monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "aliyun")
-    with pytest.raises(ValueError, match="AUTODL_AUTOPANEL_PASSWORD"):
+    monkeypatch.setenv("MEDAI_DRIVE_PROVIDER", "google-drive")
+    with pytest.raises(ValueError, match="VASTAI_GOOGLE_DRIVE_CONNECTION_ID"):
         RunConfig.create(
             paper=paper,
             output=tmp_path / "output",
