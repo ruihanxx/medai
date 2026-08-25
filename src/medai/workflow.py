@@ -5,8 +5,8 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Callable
-from pathlib import Path
+from collections.abc import Callable, Sequence
+from pathlib import Path, PurePosixPath
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -334,46 +334,84 @@ def validate_codegen_remote_compute(
     state_path: Path,
     *,
     cloud_dataset: str | None = None,
+    cloud_datasets: Sequence[str] | None = None,
     drive_provider: str | None = None,
     computation_provider: str | None = None,
     require_active: bool = True,
 ) -> dict[str, Any] | None:
+    expected_datasets = tuple(cloud_datasets or ((cloud_dataset,) if cloud_dataset else ()))
     remote_compute = plan.remote_compute
     if remote_compute is None:
-        if cloud_dataset is not None:
+        if expected_datasets:
             raise RuntimeError("Cloud-drive mode requires a remote-compute plan")
         return
     if Path(remote_compute.state_path).resolve() != state_path.resolve():
         raise RuntimeError(
             f"Remote-compute state path does not match the current run: {remote_compute.state_path}"
         )
-    if cloud_dataset is None:
+    if not expected_datasets:
         return None
     try:
         provider_envelope = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Cloud-drive state is missing or invalid: {state_path}") from exc
     provider_state = provider_envelope.get("provider_state")
-    cloud_drive = provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
     provider = provider_envelope.get("provider")
-    if not isinstance(provider, str) or not provider or not isinstance(cloud_drive, dict):
+    if not isinstance(provider, str) or not provider or not isinstance(provider_state, dict):
         raise RuntimeError("Cloud-drive mode requires completed provider state")
     if computation_provider is not None and provider != computation_provider:
         raise RuntimeError("Cloud-drive state provider does not match the run configuration")
     if require_active and provider_envelope.get("released") is True:
         raise RuntimeError("Cloud-drive instance was already released")
-    if (
-        cloud_drive.get("completed") is not True
-        or cloud_drive.get("drive") != drive_provider
-        or cloud_drive.get("dataset") != cloud_dataset
-    ):
-        raise RuntimeError("Cloud-drive materialization is incomplete or inconsistent")
-    target_path = cloud_drive.get("target_path")
-    if not isinstance(target_path, str) or not target_path:
-        raise RuntimeError("Cloud-drive state is missing its materialized target path")
+    cloud_drives = _provider_cloud_drives(provider_state)
+    selected: dict[str, dict[str, Any]] = {}
+    for dataset in expected_datasets:
+        cloud_drive = cloud_drives.get(dataset)
+        if not isinstance(cloud_drive, dict) or (
+            cloud_drive.get("completed") is not True
+            or cloud_drive.get("drive") != drive_provider
+            or cloud_drive.get("dataset") != dataset
+        ):
+            raise RuntimeError("Cloud-drive materialization is incomplete or inconsistent")
+        target_path = cloud_drive.get("target_path")
+        if not isinstance(target_path, str) or not target_path:
+            raise RuntimeError("Cloud-drive state is missing its materialized target path")
+        selected[dataset] = cloud_drive
+    target_path = _cloud_dataset_root(selected)
     if remote_compute.remote_dataset_dir != target_path:
         raise RuntimeError("Remote plan dataset path does not match completed cloud-drive state")
-    return cloud_drive
+    if len(selected) == 1:
+        return next(iter(selected.values()))
+    return {"completed": True, "target_path": target_path, "datasets": selected}
+
+
+def _provider_cloud_drives(provider_state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    plural = provider_state.get("cloud_drives")
+    if isinstance(plural, dict):
+        return {
+            name: value
+            for name, value in plural.items()
+            if isinstance(name, str) and isinstance(value, dict)
+        }
+    legacy = provider_state.get("cloud_drive")
+    if isinstance(legacy, dict) and isinstance(legacy.get("dataset"), str):
+        return {legacy["dataset"]: legacy}
+    return {}
+
+
+def _cloud_dataset_root(cloud_drives: dict[str, dict[str, Any]]) -> str:
+    targets = {
+        dataset: str(cloud["target_path"])
+        for dataset, cloud in cloud_drives.items()
+    }
+    if len(targets) == 1:
+        return next(iter(targets.values()))
+    parents = {str(PurePosixPath(target).parent) for target in targets.values()}
+    if len(parents) != 1 or any(
+        PurePosixPath(target).name != dataset for dataset, target in targets.items()
+    ):
+        raise RuntimeError("Cloud datasets do not share the provider-defined dataset root")
+    return parents.pop()
 
 
 def _uses_cloud_data(
@@ -516,15 +554,16 @@ def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> 
 def _cloud_pull(config: RunConfig, *, use_cloud: bool) -> None:
     if not use_cloud:
         return
-    if config.cloud_dataset is None:
+    if not config.selected_cloud_datasets:
         raise RuntimeError("Cloud-drive mode is missing its dataset name")
     state_path = config.output / "remote_compute" / "instance.json"
-    _run_computation_provider_action(
-        state_path,
-        "cloud-pull",
-        arguments=["--dataset", config.cloud_dataset],
-        expected_provider=config.computation_provider,
-    )
+    for dataset in config.selected_cloud_datasets:
+        _run_computation_provider_action(
+            state_path,
+            "cloud-pull",
+            arguments=["--dataset", dataset],
+            expected_provider=config.computation_provider,
+        )
 
 
 def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
@@ -546,7 +585,7 @@ def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
 def _cloud_drive_materialization_completed(
     config: RunConfig | AutoResearchConfig,
 ) -> bool:
-    if not config.clouddrive or config.cloud_dataset is None:
+    if not config.clouddrive or not config.selected_cloud_datasets:
         return False
     state_path = config.output / "remote_compute" / "instance.json"
     if not state_path.is_file():
@@ -557,21 +596,25 @@ def _cloud_drive_materialization_completed(
     if state.get("released") is True:
         raise RuntimeError("Cloud-drive instance was already released")
     provider_state = state.get("provider_state")
-    cloud_drive = provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
-    if cloud_drive is None:
-        return False
-    if not isinstance(cloud_drive, dict):
+    if not isinstance(provider_state, dict):
         raise RuntimeError("Cloud-drive state is invalid")
-    if (
-        cloud_drive.get("drive") != config.drive_provider
-        or cloud_drive.get("dataset") != config.cloud_dataset
-    ):
-        raise RuntimeError("Cloud-drive state does not match the run configuration")
-    if cloud_drive.get("completed") is not True:
+    cloud_drives = _provider_cloud_drives(provider_state)
+    if not cloud_drives:
         return False
-    target_path = cloud_drive.get("target_path")
-    if not isinstance(target_path, str) or not target_path:
-        raise RuntimeError("Cloud-drive state is missing its materialized target path")
+    for dataset in config.selected_cloud_datasets:
+        cloud_drive = cloud_drives.get(dataset)
+        if not isinstance(cloud_drive, dict):
+            return False
+        if (
+            cloud_drive.get("drive") != config.drive_provider
+            or cloud_drive.get("dataset") != dataset
+        ):
+            raise RuntimeError("Cloud-drive state does not match the run configuration")
+        if cloud_drive.get("completed") is not True:
+            return False
+        target_path = cloud_drive.get("target_path")
+        if not isinstance(target_path, str) or not target_path:
+            raise RuntimeError("Cloud-drive state is missing its materialized target path")
     return True
 
 
@@ -915,20 +958,21 @@ def prepare_autoresearch_resume(config: AutoResearchConfig) -> dict[str, Any]:
         if config.clouddrive and (
             reconciliation["replaced"] or reconciliation.get("materialization_required") is True
         ):
-            if config.cloud_dataset is None:
+            if not config.selected_cloud_datasets:
                 raise RuntimeError("Cloud-backed Auto Research is missing its dataset name")
-            _run_computation_provider_action(
-                state_path,
-                "cloud-pull",
-                arguments=["--dataset", config.cloud_dataset, "--prepare"],
-                expected_provider=config.computation_provider,
-            )
-            _run_computation_provider_action(
-                state_path,
-                "cloud-pull",
-                arguments=["--dataset", config.cloud_dataset, "--monitor"],
-                expected_provider=config.computation_provider,
-            )
+            for dataset in config.selected_cloud_datasets:
+                _run_computation_provider_action(
+                    state_path,
+                    "cloud-pull",
+                    arguments=["--dataset", dataset, "--prepare"],
+                    expected_provider=config.computation_provider,
+                )
+                _run_computation_provider_action(
+                    state_path,
+                    "cloud-pull",
+                    arguments=["--dataset", dataset, "--monitor"],
+                    expected_provider=config.computation_provider,
+                )
             if not _cloud_drive_materialization_completed(config):
                 raise RuntimeError("Replacement Auto Research instance has incomplete cloud data")
     finally:
@@ -1117,7 +1161,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         validate_codegen_remote_compute(
             codegen_plan,
             computation_provider_state_path,
-            cloud_dataset=config.cloud_dataset if cloud_data else None,
+            cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
             require_active=require_active,
@@ -1175,10 +1219,14 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
         data_dir=config.data,
+        datasets=config.dataset_names,
+        data_paths=config.dataset_paths,
         cloud_drive_enabled=config.clouddrive,
-        cloud_dataset=config.cloud_dataset,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=config.selected_cloud_datasets,
         drive_provider=config.drive_provider,
-        cloud_source=config.cloud_source,
+        cloud_source=", ".join(config.selected_cloud_sources),
+        cloud_sources=config.selected_cloud_sources,
         cloud_pull_handoff=cloud_pull_handoff,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
@@ -1298,7 +1346,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     cloud_drive_state = validate_codegen_remote_compute(
         codegen_plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if cloud_data else None,
+        cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
     )
@@ -1320,8 +1368,11 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
         codebase_dir=state["codebase_dir"],
         data_dir=config.data,
+        datasets=config.dataset_names,
+        data_paths=config.dataset_paths,
         cloud_drive_enabled=cloud_data,
-        cloud_dataset=config.cloud_dataset,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=config.selected_cloud_datasets,
         drive_provider=config.drive_provider,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
@@ -1465,7 +1516,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
     cloud_drive_state = validate_codegen_remote_compute(
         codegen_plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if cloud_data else None,
+        cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
     )
@@ -1482,8 +1533,11 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         codegen_plan_path=codegen_plan_path,
         audit_report_path=audit_report_path,
         data_dir=config.data,
+        datasets=config.dataset_names,
+        data_paths=config.dataset_paths,
         cloud_drive_enabled=cloud_data,
-        cloud_dataset=config.cloud_dataset,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=config.selected_cloud_datasets,
         drive_provider=config.drive_provider,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
@@ -1541,7 +1595,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         validate_codegen_remote_compute(
             plan,
             config.output / "remote_compute" / "instance.json",
-            cloud_dataset=config.cloud_dataset if cloud_data else None,
+            cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
             require_active=not pipeline_state.is_stage_completed("report_agents"),
@@ -1567,8 +1621,11 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         codebase_dir=state["codebase_dir"],
         paper_markdown=state["paper_markdown"],
         data_dir=config.data,
+        datasets=config.dataset_names,
+        data_paths=config.dataset_paths,
         cloud_drive_enabled=cloud_data,
-        cloud_dataset=config.cloud_dataset,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=config.selected_cloud_datasets,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         computation_provider_reference=config.computation_provider_reference,
@@ -1618,7 +1675,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     validate_codegen_remote_compute(
         plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if cloud_data else None,
+        cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         require_active=not pipeline_state.is_stage_completed("report_agents"),
@@ -1645,7 +1702,8 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         skills_dir=skills_dir(),
         computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
         cloud_drive_enabled=cloud_data,
-        cloud_dataset=config.cloud_dataset,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=config.selected_cloud_datasets,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         computation_provider_reference=config.computation_provider_reference,

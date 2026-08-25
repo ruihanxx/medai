@@ -12,12 +12,13 @@ from typing import Any
 from medai.computation_providers import migrate_legacy_provider_inputs
 from medai.config import AutoResearchConfig, RunConfig
 
-MANIFEST_VERSION = 3
-SUPPORTED_MANIFEST_VERSIONS = {1, 2, MANIFEST_VERSION}
+MANIFEST_VERSION = 4
+SUPPORTED_MANIFEST_VERSIONS = {1, 2, 3, MANIFEST_VERSION}
 
 
 def build_run_inputs(config: RunConfig) -> dict[str, Any]:
     """Build the output-affecting input fingerprint stored with a run."""
+    data_sources = _host_data_sources(config.data, config.dataset_paths)
     inputs = {
         "paper": str(config.paper),
         "paper_source": os.environ.get("MEDAI_HOST_PAPER", str(config.paper)),
@@ -29,15 +30,15 @@ def build_run_inputs(config: RunConfig) -> dict[str, Any]:
         )
         or None,
         "data": str(config.data) if config.data else None,
-        "data_source": os.environ.get(
-            "MEDAI_HOST_DATA",
-            str(config.data) if config.data else "",
-        )
-        or None,
+        "data_source": _legacy_data_source(config.data, config.dataset_names),
+        "datasets": list(config.dataset_names),
+        "data_sources": data_sources,
         "clouddrive": config.clouddrive,
         "drive_provider": config.drive_provider,
         "cloud_dataset": config.cloud_dataset,
         "cloud_source": config.cloud_source,
+        "cloud_datasets": list(config.selected_cloud_datasets),
+        "cloud_sources": list(config.selected_cloud_sources),
         "provider": config.provider,
         "codex_model": config.codex_model,
         "codex_reasoning_effort": config.codex_reasoning_effort,
@@ -61,21 +62,22 @@ def build_run_inputs(config: RunConfig) -> dict[str, Any]:
 
 def build_autoresearch_inputs(config: AutoResearchConfig) -> dict[str, Any]:
     """Build the immutable campaign fingerprint for an Auto Research run."""
+    data_sources = _host_data_sources(config.data, config.dataset_paths)
     inputs = {
         "workflow": "autoresearch",
         "base_run": str(config.base_run),
         "base_run_source": os.environ.get("MEDAI_HOST_BASE_RUN", str(config.base_run)),
         "base_artifact_fingerprint": _base_artifact_fingerprint(config.base_run),
         "data": str(config.data) if config.data else None,
-        "data_source": os.environ.get(
-            "MEDAI_HOST_DATA",
-            str(config.data) if config.data else "",
-        )
-        or None,
+        "data_source": _legacy_data_source(config.data, config.dataset_names),
+        "datasets": list(config.dataset_names),
+        "data_sources": data_sources,
         "clouddrive": config.clouddrive,
         "drive_provider": config.drive_provider,
         "cloud_dataset": config.cloud_dataset,
         "cloud_source": config.cloud_source,
+        "cloud_datasets": list(config.selected_cloud_datasets),
+        "cloud_sources": list(config.selected_cloud_sources),
         "provider": config.provider,
         "codex_model": config.codex_model,
         "codex_reasoning_effort": config.codex_reasoning_effort,
@@ -123,7 +125,9 @@ class PipelineState:
         ):
             raise RuntimeError(f"Pipeline state has an invalid structure: {self.path}")
         if version != MANIFEST_VERSION:
-            self.state["inputs"] = migrate_legacy_provider_inputs(self.state["inputs"])
+            self.state["inputs"] = _migrate_dataset_inputs(
+                migrate_legacy_provider_inputs(self.state["inputs"])
+            )
             self.state["version"] = MANIFEST_VERSION
             self._save()
 
@@ -314,6 +318,57 @@ def _sha256(path: Path | None) -> str | None:
     return digest.hexdigest()
 
 
+def _host_data_sources(data: Path | None, data_paths: tuple[Path, ...]) -> list[str]:
+    encoded = os.environ.get("MEDAI_HOST_DATA_SOURCES")
+    if encoded:
+        try:
+            values = json.loads(encoded)
+        except json.JSONDecodeError as exc:
+            raise ValueError("MEDAI_HOST_DATA_SOURCES must be a JSON array") from exc
+        if not isinstance(values, list) or not all(
+            isinstance(value, str) and value for value in values
+        ):
+            raise ValueError("MEDAI_HOST_DATA_SOURCES must be a JSON array of paths")
+        return values
+    legacy = os.environ.get("MEDAI_HOST_DATA")
+    if legacy:
+        return [legacy]
+    if data_paths:
+        return [str(path) for path in data_paths]
+    return [str(data)] if data is not None else []
+
+
+def _legacy_data_source(data: Path | None, datasets: tuple[str, ...]) -> str | None:
+    legacy = os.environ.get("MEDAI_HOST_DATA")
+    if legacy:
+        return legacy
+    return str(data) if data is not None and len(datasets) <= 1 else None
+
+
+def _migrate_dataset_inputs(inputs: dict[str, Any]) -> dict[str, Any]:
+    migrated = dict(inputs)
+    data = migrated.get("data")
+    data_source = migrated.get("data_source")
+    cloud_dataset = migrated.get("cloud_dataset")
+    cloud_source = migrated.get("cloud_source")
+    if not isinstance(migrated.get("datasets"), list):
+        dataset_identity = data_source if isinstance(data_source, str) else data
+        migrated["datasets"] = (
+            [Path(dataset_identity).name]
+            if isinstance(dataset_identity, str) and dataset_identity
+            else []
+        )
+    if not isinstance(migrated.get("data_sources"), list):
+        migrated["data_sources"] = [data_source] if isinstance(data_source, str) else []
+    if not isinstance(migrated.get("cloud_datasets"), list):
+        migrated["cloud_datasets"] = (
+            [cloud_dataset] if isinstance(cloud_dataset, str) else []
+        )
+    if not isinstance(migrated.get("cloud_sources"), list):
+        migrated["cloud_sources"] = [cloud_source] if isinstance(cloud_source, str) else []
+    return migrated
+
+
 def _base_artifact_fingerprint(base_run: Path) -> str:
     required_files = [
         "manifest.json",
@@ -342,9 +397,25 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         raise ValueError(f"Base run manifest is invalid: {base_run / 'manifest.json'}") from exc
     inputs = manifest.get("inputs") if isinstance(manifest, dict) else None
     if isinstance(inputs, dict) and inputs.get("clouddrive") is True:
+        state_relative = "remote_compute/instance.json"
+        state_path = base_run / state_relative
+        if not state_path.is_file():
+            raise ValueError(f"Base run artifact is missing: {state_path}")
+        try:
+            remote_state = json.loads(state_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Base run artifact is invalid: {state_path}") from exc
+        provider_state = remote_state.get("provider_state", {})
+        clouds = provider_state.get("cloud_drives")
+        if not isinstance(clouds, dict):
+            legacy = provider_state.get("cloud_drive")
+            clouds = {legacy.get("dataset"): legacy} if isinstance(legacy, dict) else {}
+        inventory_names = sorted(
+            {_cloud_inventory_name(cloud) for cloud in clouds.values() if isinstance(cloud, dict)}
+        )
         for relative in (
-            "remote_compute/instance.json",
-            "remote_compute/cloud-inventory.v1.json",
+            state_relative,
+            *(f"remote_compute/{name}" for name in inventory_names),
         ):
             path = base_run / relative
             if not path.is_file():
@@ -383,6 +454,18 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         ignored_names,
     )
     return digest.hexdigest()
+
+
+def _cloud_inventory_name(cloud: dict[str, Any]) -> str:
+    name = cloud.get("inventory_path", "cloud-inventory.v1.json")
+    if (
+        not isinstance(name, str)
+        or Path(name).name != name
+        or not name.startswith("cloud-inventory")
+        or not name.endswith(".v1.json")
+    ):
+        raise ValueError("Base run cloud inventory path is invalid")
+    return name
 
 
 def _update_digest_from_directory(

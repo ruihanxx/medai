@@ -421,7 +421,7 @@ def test_autoresearch_mounts_base_read_only_and_skips_mineru(tmp_path: Path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")
-def test_cloud_drive_dataset_is_not_mounted_from_host(tmp_path: Path):
+def test_cloud_drive_datasets_are_not_mounted_from_host(tmp_path: Path):
     launcher, env, command_log, _ = prepare_launcher(tmp_path)
     initialized = subprocess.run(
         [str(launcher), "init"],
@@ -445,6 +445,8 @@ def test_cloud_drive_dataset_is_not_mounted_from_host(tmp_path: Path):
             "--clouddrive",
             "--data",
             "mimic-iv",
+            "--data",
+            "eicu",
         ],
         cwd=tmp_path,
         env=env,
@@ -455,12 +457,14 @@ def test_cloud_drive_dataset_is_not_mounted_from_host(tmp_path: Path):
 
     assert run.returncode == 0, run.stderr
     calls = command_log.read_text(encoding="utf-8")
-    assert "--clouddrive --data mimic-iv" in calls
+    assert "--clouddrive --data mimic-iv --data eicu" in calls
     assert "dst=/workspace/data" not in calls
 
     dataset_root = tmp_path / "datasets"
     local_dataset = dataset_root / "mimic-iv"
+    second_local_dataset = dataset_root / "eicu"
     local_dataset.mkdir(parents=True)
+    second_local_dataset.mkdir()
     command_log.write_text("", encoding="utf-8")
     dual_source_run = subprocess.run(
         [
@@ -470,6 +474,8 @@ def test_cloud_drive_dataset_is_not_mounted_from_host(tmp_path: Path):
             str(paper),
             "--data",
             "mimic-iv",
+            "--data",
+            "eicu",
             "--dataset-path",
             str(dataset_root),
             "--clouddrive",
@@ -483,5 +489,11 @@ def test_cloud_drive_dataset_is_not_mounted_from_host(tmp_path: Path):
 
     assert dual_source_run.returncode == 0, dual_source_run.stderr
     calls = command_log.read_text(encoding="utf-8")
-    assert f"src={local_dataset},dst=/workspace/data,readonly" in calls
-    assert "--data /workspace/data --clouddrive --cloud-dataset mimic-iv" in calls
+    assert f"src={local_dataset},dst=/workspace/data/mimic-iv,readonly" in calls
+    assert f"src={second_local_dataset},dst=/workspace/data/eicu,readonly" in calls
+    assert (
+        "--data /workspace/data/mimic-iv --dataset-name mimic-iv "
+        "--data /workspace/data/eicu --dataset-name eicu --clouddrive "
+        "--cloud-dataset mimic-iv --cloud-dataset eicu"
+        in calls
+    )

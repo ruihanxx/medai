@@ -71,17 +71,22 @@ def run(
         help="Provider (replicate default: codex; Auto Research default: inherit)",
     ),
     repo: Optional[Path] = typer.Option(None, "--repo", help="Optional code repository"),
-    data: Optional[str] = typer.Option(
+    data: Optional[list[str]] = typer.Option(
         None,
         "--data",
-        help="Local data directory, or one dataset name with --clouddrive",
+        help="Repeat for each local data directory or cloud dataset name",
+    ),
+    dataset_name: Optional[list[str]] = typer.Option(
+        None,
+        "--dataset-name",
+        hidden=True,
     ),
     clouddrive: bool = typer.Option(
         False,
         "--clouddrive",
         help="Make the configured provider cloud dataset available for remote execution",
     ),
-    cloud_dataset: Optional[str] = typer.Option(
+    cloud_dataset: Optional[list[str]] = typer.Option(
         None,
         "--cloud-dataset",
         hidden=True,
@@ -141,6 +146,7 @@ def run(
                 provider=provider or "codex",
                 repo=repo,
                 data=data,
+                datasets=dataset_name,
                 siliconflow_config=siliconflow_config,
                 codex_model=codex_model,
                 codex_reasoning_effort=codex_reasoning_effort,
@@ -156,12 +162,13 @@ def run(
                 paper is not None
                 or repo is not None
                 or data is not None
+                or dataset_name is not None
                 or smart_replicate
                 or clouddrive
                 or cloud_dataset is not None
             ):
                 raise ValueError(
-                    "--autoresearch does not accept --paper, --repo, --data, "
+                    "--autoresearch does not accept --paper, --repo, --data, --dataset-name, "
                     "--clouddrive, --cloud-dataset, or --smart-replicate"
                 )
             if replicate_run is None:

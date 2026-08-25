@@ -377,7 +377,11 @@ def _run_parser() -> argparse.ArgumentParser:
     mode.add_argument("--autoresearch", action="store_true")
     parser.add_argument("--paper", type=Path)
     parser.add_argument("--repo", type=Path)
-    parser.add_argument("--data")
+    parser.add_argument(
+        "--data",
+        action="append",
+        help="Dataset name; repeat once for every dataset used by the paper",
+    )
     parser.add_argument("--dataset-path", type=Path)
     parser.add_argument("--clouddrive", action="store_true")
     parser.add_argument("--output", type=Path)
@@ -518,8 +522,9 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
     args, forwarded = _run_parser().parse_known_args(argv)
     paper = None
     repo = None
-    data = None
-    cloud_dataset = None
+    data: list[Path] = []
+    dataset_names: list[str] = []
+    cloud_datasets: list[str] = []
     base_run = None
     autoresearch_output = None
     inherited_inputs: dict[str, object] = {}
@@ -536,24 +541,30 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         if paper.suffix.casefold() != ".pdf":
             raise LauncherError(f"--paper must be a PDF: {paper}")
         repo = _optional_directory(args.repo, "--repo")
-        dataset = (args.data or "").strip()
-        if (
+        dataset_names = [value.strip() for value in (args.data or [])]
+        if not dataset_names or any(
             not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", dataset)
             or dataset in {".", ".."}
+            for dataset in dataset_names
         ):
-            raise LauncherError("--replicate requires --data as one safe dataset name")
+            raise LauncherError(
+                "--replicate requires each --data as one safe dataset name; repeat --data for multiple datasets"
+            )
+        if len(set(dataset_names)) != len(dataset_names):
+            raise LauncherError("--data dataset names must be unique")
         if args.dataset_path is None and not args.clouddrive:
             raise LauncherError(
                 "--replicate requires --dataset-path, --clouddrive, or both"
             )
         if args.clouddrive:
-            cloud_dataset = dataset
+            cloud_datasets = list(dataset_names)
         if args.dataset_path is not None:
             dataset_root = _optional_directory(args.dataset_path, "--dataset-path")
             assert dataset_root is not None
-            data = (dataset_root / dataset).resolve()
-            if not data.is_dir():
-                raise LauncherError(f"Local dataset directory does not exist: {data}")
+            data = [(dataset_root / dataset).resolve() for dataset in dataset_names]
+            missing = [path for path in data if not path.is_dir()]
+            if missing:
+                raise LauncherError(f"Local dataset directory does not exist: {missing[0]}")
         provider = (args.provider or "codex").strip().casefold()
         codex_model = args.codex_model
         codex_reasoning_effort = args.codex_reasoning_effort
@@ -609,9 +620,25 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             codex_model = args.codex_model
             codex_reasoning_effort = args.codex_reasoning_effort
 
-        data_source = inherited_inputs.get("data_source")
-        if data_source:
-            data = _optional_directory(Path(str(data_source)), "base run data")
+        data_sources = inherited_inputs.get("data_sources")
+        if isinstance(data_sources, list) and data_sources:
+            dataset_names = [
+                str(value)
+                for value in inherited_inputs.get("datasets", [])
+                if isinstance(value, str)
+            ]
+            if len(dataset_names) != len(data_sources):
+                raise LauncherError("Base run records inconsistent local dataset sources")
+            data = [
+                _optional_directory(Path(str(source)), "base run data")
+                for source in data_sources
+            ]
+            data = [path for path in data if path is not None]
+        elif (data_source := inherited_inputs.get("data_source")):
+            resolved_data = _optional_directory(Path(str(data_source)), "base run data")
+            if resolved_data is not None:
+                data = [resolved_data]
+                dataset_names = [resolved_data.name]
         elif inherited_inputs.get("data"):
             raise LauncherError(
                 "Base run uses local data but does not record its host source path"
@@ -768,22 +795,34 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
                 str(assessment_threshold),
             ]
         if data:
+            host_sources = [str(path) for path in data]
             docker_args.extend(
                 [
                     "--env",
-                    f"MEDAI_HOST_DATA={data}",
-                    "--mount",
-                    _mount(data, "/workspace/data", readonly=True),
+                    f"MEDAI_HOST_DATA_SOURCES={json.dumps(host_sources)}",
                 ]
             )
-            if args.replicate:
-                cli_args.extend(["--data", "/workspace/data"])
-        if cloud_dataset:
+            if len(data) == 1:
+                docker_args.extend(["--env", f"MEDAI_HOST_DATA={data[0]}"])
+            for dataset_name, path in zip(dataset_names, data, strict=True):
+                container_path = (
+                    "/workspace/data"
+                    if len(data) == 1
+                    else f"/workspace/data/{dataset_name}"
+                )
+                docker_args.extend(
+                    ["--mount", _mount(path, container_path, readonly=True)]
+                )
+                if args.replicate:
+                    cli_args.extend(
+                        ["--data", container_path, "--dataset-name", dataset_name]
+                    )
+        if cloud_datasets:
             cli_args.append("--clouddrive")
-            if data:
-                cli_args.extend(["--cloud-dataset", cloud_dataset])
-            else:
-                cli_args.extend(["--data", cloud_dataset])
+            for cloud_dataset in cloud_datasets:
+                cli_args.extend(
+                    ["--cloud-dataset" if data else "--data", cloud_dataset]
+                )
         if siliconflow_config:
             docker_args.extend(
                 [

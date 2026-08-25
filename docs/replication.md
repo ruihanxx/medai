@@ -147,8 +147,8 @@ technical retry instead of producing an incomplete scientific verdict.
 
 `manifest.json` is the canonical pipeline state. It records a versioned input
 fingerprint, overall and per-stage status, attempts, timestamps, outputs, and
-stage checkpoints. On reuse of an output directory, version 1 manifests are
-migrated, the paper hash and output-affecting configuration must match, and
+stage checkpoints. On reuse of an output directory, manifest versions 1–3 are
+migrated to the plural dataset fields, the paper hash and output-affecting configuration must match, and
 only stages marked `completed` are skipped. Every skipped stage reloads and
 validates its canonical artifacts before downstream work proceeds. A `running`
 or `failed` stage before replication starts another attempt while retaining its

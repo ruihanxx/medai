@@ -467,6 +467,74 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
     )
 
 
+def test_cloud_remote_compute_requires_every_dataset_and_common_root(tmp_path: Path):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    state_path.parent.mkdir(parents=True)
+    root = "/workspace/medai/run-token/data"
+    plan = CodegenPlan.model_validate(
+        {
+            "files": [{"path": "run.py", "responsibility": "Run"}],
+            "dependency_order": ["run.py"],
+            "entry_points": ["run.py"],
+            "shared_state": "None",
+            "ambiguities": [],
+            "remote_compute": {
+                "state_path": str(state_path),
+                "remote_working_dir": "/workspace/medai/run-token/work",
+                "remote_dataset_dir": root,
+            },
+        }
+    )
+    clouds = {
+        dataset: {
+            "completed": True,
+            "drive": "google-drive",
+            "dataset": dataset,
+            "target_path": f"{root}/{dataset}",
+        }
+        for dataset in ("mimic-iv", "eicu")
+    }
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "vastai",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"cloud_drives": clouds},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cloud = validate_codegen_remote_compute(
+        plan,
+        state_path,
+        cloud_datasets=("mimic-iv", "eicu"),
+        drive_provider="google-drive",
+    )
+
+    assert cloud is not None and cloud["target_path"] == root
+    clouds["eicu"]["completed"] = False
+    state_path.write_text(
+        json.dumps(
+            {
+                "provider": "vastai",
+                "created_by_run": True,
+                "released": False,
+                "provider_state": {"cloud_drives": clouds},
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="incomplete or inconsistent"):
+        validate_codegen_remote_compute(
+            plan,
+            state_path,
+            cloud_datasets=("mimic-iv", "eicu"),
+            drive_provider="google-drive",
+        )
+
+
 def test_dual_source_downstream_uses_cloud_only_for_remote_plan(tmp_path: Path):
     import medai.workflow as workflow
 

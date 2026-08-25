@@ -63,6 +63,7 @@ from medai.resources import detect_resources
 from medai.workflow import (
     _cloud_drive_materialization_completed,
     _next_command_index,
+    _provider_cloud_drives,
     _run_agent_command,
     _run_computation_provider_action,
     power_off_run_computation_instance,
@@ -429,49 +430,70 @@ def _load_base_cloud_state(config: AutoResearchConfig) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"Base remote-compute state is invalid: {state_path}") from exc
     provider_state = state.get("provider_state") if isinstance(state, dict) else None
-    cloud = provider_state.get("cloud_drive") if isinstance(provider_state, dict) else None
+    clouds = _provider_cloud_drives(provider_state) if isinstance(provider_state, dict) else {}
     if (
         state.get("provider") != config.computation_provider
         or state.get("created_by_run") is not True
         or state.get("released") is not True
-        or not isinstance(cloud, dict)
-        or cloud.get("completed") is not True
-        or cloud.get("drive") != config.drive_provider
-        or cloud.get("dataset") != config.cloud_dataset
-        or not isinstance(cloud.get("target_path"), str)
+        or set(clouds) != set(config.selected_cloud_datasets)
     ):
         raise RuntimeError(
             "Cloud-backed Auto Research requires a released base instance with "
             "completed state for the inherited drive and dataset"
         )
-    inventory_path = config.base_run / "remote_compute" / "cloud-inventory.v1.json"
-    try:
-        inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Base cloud inventory is invalid: {inventory_path}") from exc
-    if (
-        not isinstance(inventory, dict)
-        or inventory.get("dataset") != config.cloud_dataset
-        or not isinstance(inventory.get("files"), list)
-        or not inventory["files"]
-    ):
-        raise RuntimeError(f"Base cloud inventory is invalid: {inventory_path}")
+    for dataset, cloud in clouds.items():
+        if (
+            cloud.get("completed") is not True
+            or cloud.get("drive") != config.drive_provider
+            or cloud.get("dataset") != dataset
+            or not isinstance(cloud.get("target_path"), str)
+        ):
+            raise RuntimeError("Base cloud-drive dataset state is invalid")
+        inventory_name = _cloud_inventory_name(cloud)
+        inventory_path = config.base_run / "remote_compute" / inventory_name
+        try:
+            inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Base cloud inventory is invalid: {inventory_path}") from exc
+        if (
+            not isinstance(inventory, dict)
+            or inventory.get("dataset") != dataset
+            or not isinstance(inventory.get("files"), list)
+            or not inventory["files"]
+        ):
+            raise RuntimeError(f"Base cloud inventory is invalid: {inventory_path}")
     return state
 
 
 def _copy_base_cloud_inventory(config: AutoResearchConfig) -> None:
     if not config.clouddrive:
         return
-    source = config.base_run / "remote_compute" / "cloud-inventory.v1.json"
-    destination = config.output / "remote_compute" / "cloud-inventory.v1.json"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.is_file():
-        if destination.read_bytes() != source.read_bytes():
-            raise RuntimeError(
-                "Auto Research cloud inventory differs from its base replicate run"
-            )
-        return
-    shutil.copy2(source, destination)
+    state = _load_base_cloud_state(config)
+    clouds = _provider_cloud_drives(state["provider_state"])
+    for cloud in clouds.values():
+        name = _cloud_inventory_name(cloud)
+        source = config.base_run / "remote_compute" / name
+        destination = config.output / "remote_compute" / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.is_file():
+            if destination.read_bytes() != source.read_bytes():
+                raise RuntimeError(
+                    "Auto Research cloud inventory differs from its base replicate run"
+                )
+            continue
+        shutil.copy2(source, destination)
+
+
+def _cloud_inventory_name(cloud: dict[str, Any]) -> str:
+    name = cloud.get("inventory_path", "cloud-inventory.v1.json")
+    if (
+        not isinstance(name, str)
+        or Path(name).name != name
+        or not name.startswith("cloud-inventory")
+        or not name.endswith(".v1.json")
+    ):
+        raise RuntimeError("Base cloud-drive inventory path is invalid")
+    return name
 
 
 def _autoresearch_cloud_pull_handoff_enabled(config: AutoResearchConfig) -> bool:
@@ -1083,7 +1105,7 @@ def _run_experiment_plan(
         validate_codegen_remote_compute(
             plan,
             config.output / "remote_compute" / "instance.json",
-            cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+            cloud_datasets=config.selected_cloud_datasets if config.clouddrive else (),
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
             require_active=not pipeline_state.is_stage_completed("final_report"),
@@ -1115,8 +1137,11 @@ def _run_experiment_plan(
         audit_path=audit_path,
         codebase_dir=codebase_dir,
         data_dir=config.data,
+        datasets=config.dataset_names,
+        data_paths=config.dataset_paths,
         cloud_drive_enabled=config.clouddrive,
-        cloud_dataset=config.cloud_dataset,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=config.selected_cloud_datasets,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         computation_provider_reference=config.computation_provider_reference,
@@ -1161,7 +1186,7 @@ def _run_experiment_plan(
         validate_codegen_remote_compute(
             plan,
             config.output / "remote_compute" / "instance.json",
-            cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+            cloud_datasets=config.selected_cloud_datasets if config.clouddrive else (),
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
         )
@@ -1432,14 +1457,15 @@ def _prepare_autoresearch_command_instance(
     acquisition = power_on_run_computation_instance(config)
     state_path = config.output / "remote_compute" / "instance.json"
     if config.clouddrive and acquisition.get("materialization_required") is True:
-        if config.cloud_dataset is None:
+        if not config.selected_cloud_datasets:
             raise RuntimeError("Cloud-backed Auto Research is missing its dataset name")
-        _run_computation_provider_action(
-            state_path,
-            "cloud-pull",
-            arguments=["--dataset", config.cloud_dataset],
-            expected_provider=config.computation_provider,
-        )
+        for dataset in config.selected_cloud_datasets:
+            _run_computation_provider_action(
+                state_path,
+                "cloud-pull",
+                arguments=["--dataset", dataset],
+                expected_provider=config.computation_provider,
+            )
         if not _cloud_drive_materialization_completed(config):
             raise RuntimeError("Selected campaign instance has incomplete cloud data")
 
@@ -1697,7 +1723,7 @@ def _run_experiment(
     validate_codegen_remote_compute(
         plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+        cloud_datasets=config.selected_cloud_datasets if config.clouddrive else (),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         require_active=not pipeline_state.is_stage_completed("final_report"),
@@ -1747,8 +1773,11 @@ def _run_experiment(
         audit_path=audit_path,
         codebase_dir=codebase_dir,
         data_dir=config.data,
+        datasets=config.dataset_names,
+        data_paths=config.dataset_paths,
         cloud_drive_enabled=config.clouddrive,
-        cloud_dataset=config.cloud_dataset,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=config.selected_cloud_datasets,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         computation_provider_reference=config.computation_provider_reference,

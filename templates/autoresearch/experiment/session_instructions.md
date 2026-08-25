@@ -10,7 +10,7 @@ Execute the planned refinement experiments for `{{ idea_id }}`.
 - Passing audit: `{{ audit_path }}`
 - Writable idea codebase: `{{ codebase_dir }}`
 {% if cloud_drive_enabled %}
-- Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
+- Cloud datasets: {% for dataset in cloud_datasets %}`{{ dataset }}`{% if not loop.last %}, {% endif %}{% endfor %} (drive provider: `{{ drive_provider }}`),
   available only at the completed read-only target in provider state.
 - Selected provider reference: `{{ computation_provider_reference }}`
 - Selected drive reference: `{{ drive_reference }}`

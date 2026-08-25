@@ -25,18 +25,22 @@ implementation of the paper's methodology.
 ## Inputs
 - Paper Markdown: `{{ paper_markdown }}`
 {% if cloud_drive_enabled|default(false) %}
-- Cloud dataset name: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`)
-- Cloud source descriptor: `{{ cloud_source }}`. Resolve its materialized remote
-  path only through the computation-provider state.
+- Cloud datasets (drive provider: `{{ drive_provider }}`):
+{% for dataset in cloud_datasets|default([cloud_dataset]) %}
+  - `{{ dataset }}`{% if cloud_sources|default([])|length > loop.index0 %}, source `{{ cloud_sources[loop.index0] }}`{% endif %}
+{% endfor %}
+  Resolve every materialized path only through the computation-provider state.
 {% if data_dir %}
-- Local data (read-only and preferred for local execution): `{{ data_dir }}`
+- Local data root (read-only and preferred for local execution): `{{ data_dir }}`
+- Selected local dataset directories: {% for path in data_paths|default([data_dir]) %}`{{ path }}`{% if not loop.last %}, {% endif %}{% endfor %}
 {% else %}
 - No local raw-data path exists.
 {% endif %}
 - Selected provider reference: `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
 - Selected drive reference: `{{ drive_reference|default("<selected-drive-reference>") }}`
 {% else %}
-- Data: `{{ data_dir or "not supplied" }}`
+- Data root: `{{ data_dir or "not supplied" }}`
+{% if data_dir %}- Selected dataset directories: {% for path in data_paths|default([data_dir]) %}`{{ path }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
 {% endif %}
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
@@ -181,9 +185,10 @@ the cloud dataset; do not upload the local dataset as a substitute.
 
 For a remote conclusion, create or safely resume the run-owned instance, read
 the selected drive document, and invoke its reviewed cloud materialization
-command for `{{ cloud_dataset }}` before any remote dataset inspection. Continue
-only after provider state reports cloud drive `completed`, and use that state's
-target as `remote_dataset_dir` for later stages.
+command once for every cloud dataset listed above before inspecting any of
+them. Continue only after every corresponding `provider_state.cloud_drives`
+entry reports `completed`, and use their common read-only parent as
+`remote_dataset_dir` for later stages.
 {% else %}
 Cloud-backed data makes remote computation mandatory even when local hardware
 would otherwise be sufficient. Select the configured provider through the
@@ -195,10 +200,11 @@ local or weaker-resource fallback.
 
 Before inspecting dataset documentation, schema, metadata, or content, create
 or safely resume the run-owned instance, read the drive document routed by the
-parent skill, and invoke its reviewed cloud materialization command for
-`{{ cloud_dataset }}`. Continue only after the provider state reports the cloud
-drive `completed`. Use that state's materialized target path as
-`remote_dataset_dir` for codegen, audit, planning, and replication. Never copy
+parent skill, and invoke its reviewed cloud materialization command once for
+each cloud dataset listed above. Continue only after every corresponding
+`provider_state.cloud_drives` entry reports `completed`. Use the common parent
+of the materialized dataset directories as `remote_dataset_dir` for codegen,
+audit, planning, and replication. Never copy
 raw cloud data into the local run.
 {% endif %}
 {% if cloud_pull_handoff|default(false) %}
@@ -222,7 +228,7 @@ while this Codex process exits, then resume this same session after the monitor
 reaches a terminal result.
 
 Do not inspect cloud data or continue code generation before that resumed turn
-confirms `provider_state.cloud_drive.completed`. If a later resumed turn reports
+confirms every selected entry in `provider_state.cloud_drives` is completed. If a later resumed turn reports
 an incomplete pull, diagnose safely, repeat the complete preparation and stop
 procedure, then return one next `command` result. If an external prerequisite is
 irrecoverably unavailable, return `status: blocked`, `command: null`, and a

@@ -87,7 +87,7 @@ runs/<run_id>/autoresearch/campaign_<NNN>/
 ├── prompts/
 └── remote_compute/
     ├── instance.json
-    └── cloud-inventory.v1.json  # cloud-backed campaigns only
+    └── cloud-inventory*.v1.json  # one provider-recorded baseline per cloud dataset
 ```
 
 Each Auto Research experiment contract records immutable data, prediction, and
@@ -258,29 +258,36 @@ only `state_path`, `remote_working_dir`, and `remote_dataset_dir`. The directory
 fields identify the run-owned remote workspace and the remote read-only dataset
 location. Additional provider, resource, image, connection, setup, and rationale
 fields are accepted. Schema validation is limited to these three required
-fields. Codegen orchestration additionally verifies that `state_path` is the
+fields. For one cloud dataset, `remote_dataset_dir` is its completed target; for
+multiple cloud datasets it is their common read-only parent, with one named
+child per dataset. Codegen orchestration additionally verifies that `state_path` is the
 current run's canonical remote-state path; provider-specific lifecycle
 validation remains a runtime provider-script responsibility.
 
-Replication manifest inputs distinguish local and cloud data. A cloud run sets
-`clouddrive: true`, `computation_provider`, `computation_provider_config`,
-`drive_provider`, `cloud_dataset`, and `cloud_source`, while both `data` and
-`data_source` remain null. These fields are part of the resume fingerprint.
+Replication manifest inputs distinguish local and cloud data. `datasets` and
+`data_sources` record the complete ordered local selection; `data` is the
+container data directory and `data_source` remains the single-source
+compatibility field. A cloud run sets `clouddrive: true`,
+`computation_provider`, `computation_provider_config`, `drive_provider`,
+`cloud_datasets`, and `cloud_sources`. `cloud_dataset` and `cloud_source` remain
+populated only for a single-dataset compatibility case. These fields are part of the resume fingerprint.
 `computation_provider_config` contains only metadata-declared non-secret values.
 Local runs set the cloud fields to false/null and retain the existing `data` and
 `data_source` behavior. Secrets are never persistent artifacts.
 
-A cloud-backed Auto Research manifest inherits the same public cloud fields and
-keeps local `data` null. Its base fingerprint additionally binds the released
-base `remote_compute/instance.json` and `cloud-inventory.v1.json`. The inventory
-is copied byte-for-byte into the campaign before materialization and is the
-required baseline for the initial instance and any one resume replacement.
+A cloud-backed Auto Research manifest inherits the same local and cloud dataset
+lists. Its base fingerprint additionally binds the released base
+`remote_compute/instance.json` and every provider-recorded cloud inventory.
+Each inventory is copied byte-for-byte into the campaign before materialization
+and is the required baseline for the initial instance and any one resume replacement.
 
 `remote_compute/instance.json` has a provider-owned `provider_state` whose
 schema is defined by the selected adapter. Its common envelope records the
 provider, current-run ownership, and release state. Cloud runs additionally
-store `provider_state.cloud_drive` with the public fields `drive`, `dataset`,
-`completed`, and `target_path`; adapters may store additional non-secret detail.
+store `provider_state.cloud_drives`, keyed by dataset name, whose records expose
+`drive`, `dataset`, `completed`, `target_path`, and `inventory_path`.
+`provider_state.cloud_drive` aliases the most recently operated record for old
+single-dataset consumers; adapters may store additional non-secret detail.
 Provider-specific retry, failure, and history fields are defined only by the
 selected adapter and its metadata-selected reference.
 Power-off leaves top-level `released` false; only successful irreversible release

@@ -41,6 +41,10 @@ def test_version_one_state_resumes_and_rejects_changed_inputs(tmp_path: Path):
     assert resumed["resume_count"] == 1
     assert resumed["current_stage"] is None
     assert resumed["inputs"]["paper_sha256"] == "abc"
+    assert resumed["inputs"]["datasets"] == []
+    assert resumed["inputs"]["data_sources"] == []
+    assert resumed["inputs"]["cloud_datasets"] == []
+    assert resumed["inputs"]["cloud_sources"] == []
     assert state.is_stage_completed("preflight")
 
     before_mismatch = manifest_path.read_text(encoding="utf-8")

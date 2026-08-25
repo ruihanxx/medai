@@ -5,13 +5,14 @@ You are generating a step-by-step replication plan for testing whether a paper's
 ## Inputs:
 - Paper Markdown: `{{ paper_markdown }}`
 {% if cloud_drive_enabled %}
-- Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
-  already materialized at the read-only path in remote provider state.
+- Cloud datasets (drive provider: `{{ drive_provider }}`): {% for dataset in cloud_datasets|default([cloud_dataset]) %}`{{ dataset }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+  Each is already materialized at its read-only path in remote provider state.
 - Selected provider reference: `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
 - Selected drive reference: `{{ drive_reference|default("<selected-drive-reference>") }}`
 {% else %}
-- Data: `{{ data_dir or "not supplied" }}` (read-only)
+- Data root: `{{ data_dir or "not supplied" }}` (read-only)
 {% endif %}
+{% if data_dir %}- Selected local dataset directories: {% for path in data_paths|default([data_dir]) %}`{{ path }}`{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
@@ -32,10 +33,11 @@ reference at `{{ computation_provider_reference|default("<selected-provider-refe
 {% if cloud_drive_enabled %}Also read the selected drive reference at
 `{{ drive_reference|default("<selected-drive-reference>") }}` before planning cloud operations.{% endif %}
 {% if cloud_drive_enabled %}
-This cloud-backed run must keep using the existing remote instance and the
-completed materialized dataset. Read its target path from provider state and
-copy it exactly into every `remote_dataset_dir`; do not upload, download,
-remount, or rematerialize the raw dataset.
+This cloud-backed run must keep using the existing remote instance and every
+completed materialized dataset. Verify each named entry in
+`provider_state.cloud_drives`, use their common read-only parent exactly as
+every `remote_dataset_dir`, and address each dataset through its named child
+directory. Do not upload, download, remount, or rematerialize raw data.
 {% endif %}
 
 

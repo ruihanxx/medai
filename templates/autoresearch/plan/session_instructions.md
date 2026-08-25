@@ -15,7 +15,7 @@ refinement variant.
 - Audited idea codebase: `{{ codebase_dir }}` (read-only while planning and
   executing the experiment)
 {% if cloud_drive_enabled %}
-- Cloud dataset: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`),
+- Cloud datasets: {% for dataset in cloud_datasets %}`{{ dataset }}`{% if not loop.last %}, {% endif %}{% endfor %} (drive provider: `{{ drive_provider }}`),
   available only through the completed read-only target in provider state.
 - Selected provider reference: `{{ computation_provider_reference }}`
 - Selected drive reference: `{{ drive_reference }}`

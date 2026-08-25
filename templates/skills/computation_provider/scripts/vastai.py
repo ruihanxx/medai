@@ -43,6 +43,7 @@ POOL_INSTANCE_FIELDS = (
     "creation_failure",
     "created_for_resume_count",
     "cloud_drive",
+    "cloud_drives",
     "unavailable_reason",
     "released_at_unix",
     "last_capacity_failure",
@@ -805,6 +806,7 @@ def _history_from_released_state(
             "creation_uncertain",
             "unavailable_reason",
             "cloud_drive",
+            "cloud_drives",
             "created_for_resume_count",
             "failed_create_retries",
             "creation_failed",
@@ -960,13 +962,14 @@ def create_instance(args: argparse.Namespace) -> str:
     if resume_count is not None:
         provider_state["created_for_resume_count"] = resume_count
     if previous is not None:
-        prior_cloud = previous["provider_state"].get("cloud_drive")
-        if isinstance(prior_cloud, dict):
-            cloud = dict(prior_cloud)
-            cloud["completed"] = False
-            cloud["status"] = "replacement_pending"
-            cloud.pop("materialized", None)
-            provider_state["cloud_drive"] = cloud
+        prior_clouds = _cloud_drives(previous["provider_state"])
+        if prior_clouds:
+            replacement_clouds = {
+                dataset: _replacement_cloud_state(cloud)
+                for dataset, cloud in prior_clouds.items()
+            }
+            provider_state["cloud_drives"] = replacement_clouds
+            provider_state["cloud_drive"] = next(reversed(replacement_clouds.values()))
     state = {
         "provider": "vastai",
         "created_by_run": True,
@@ -1456,18 +1459,7 @@ def _new_pool_cloud_state(state: dict[str, Any]) -> dict[str, Any] | None:
     cloud = state["provider_state"].get("cloud_drive")
     if not isinstance(cloud, dict):
         return None
-    replacement = copy.deepcopy(cloud)
-    replacement["completed"] = False
-    replacement["status"] = "replacement_pending"
-    for name in (
-        "materialized",
-        "completed_at_unix",
-        "copy_requested",
-        "copy_started_at_unix",
-        "cancel_confirmed",
-    ):
-        replacement.pop(name, None)
-    return replacement
+    return _replacement_cloud_state(cloud)
 
 
 def _create_pool_member(args: argparse.Namespace, state: dict[str, Any]) -> str:
@@ -1483,6 +1475,10 @@ def _create_pool_member(args: argparse.Namespace, state: dict[str, Any]) -> str:
     if ssh_public_key is not None:
         _validate_account_ssh_key(ssh_public_key)
     cloud = _new_pool_cloud_state(state)
+    clouds = {
+        dataset: _replacement_cloud_state(value)
+        for dataset, value in _cloud_drives(provider_state).items()
+    }
     for name in POOL_INSTANCE_FIELDS:
         provider_state.pop(name, None)
     provider_state.update(
@@ -1501,6 +1497,8 @@ def _create_pool_member(args: argparse.Namespace, state: dict[str, Any]) -> str:
         provider_state["fallback_offer"] = fallback
     if cloud is not None:
         provider_state["cloud_drive"] = cloud
+    if clouds:
+        provider_state["cloud_drives"] = clouds
     pool.append(_pool_entry_from_active(state))
     state["released"] = False
     save_state(args.state, state)
@@ -1581,8 +1579,8 @@ def _cancel_queued_start(state: dict[str, Any]) -> None:
 
 
 def _pool_member_ready(state: dict[str, Any]) -> bool:
-    cloud = state["provider_state"].get("cloud_drive")
-    return not isinstance(cloud, dict) or cloud.get("completed") is True
+    clouds = _cloud_drives(state["provider_state"])
+    return not clouds or all(cloud.get("completed") is True for cloud in clouds.values())
 
 
 def _acquire_campaign_instance(
@@ -1648,13 +1646,13 @@ def _acquire_campaign_instance(
     if capacity_failures == 0:
         raise RuntimeError("No retained Vast campaign instance is usable")
     pool_cloud_states = [
-        entry.get("cloud_drive")
+        clouds
         for entry in state["provider_state"]["instance_pool"]
-        if isinstance(entry, dict)
+        if isinstance(entry, dict) and (clouds := _cloud_drives(entry))
     ]
     if pool_cloud_states and not any(
-        isinstance(cloud, dict) and cloud.get("completed") is True
-        for cloud in pool_cloud_states
+        clouds and all(cloud.get("completed") is True for cloud in clouds.values())
+        for clouds in pool_cloud_states
     ):
         raise RuntimeError(
             "Cannot extend a Vast campaign pool before its initial cloud data is complete"
@@ -1737,14 +1735,45 @@ def _safe_dataset(value: str) -> str:
     return dataset
 
 
+def _cloud_drives(provider_state: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    plural = provider_state.get("cloud_drives")
+    if isinstance(plural, dict):
+        return {
+            dataset: cloud
+            for dataset, cloud in plural.items()
+            if isinstance(dataset, str) and isinstance(cloud, dict)
+        }
+    legacy = provider_state.get("cloud_drive")
+    if isinstance(legacy, dict) and isinstance(legacy.get("dataset"), str):
+        return {legacy["dataset"]: legacy}
+    return {}
+
+
+def _replacement_cloud_state(cloud: dict[str, Any]) -> dict[str, Any]:
+    replacement = copy.deepcopy(cloud)
+    replacement["completed"] = False
+    replacement["status"] = "replacement_pending"
+    for name in (
+        "materialized",
+        "completed_at_unix",
+        "copy_requested",
+        "copy_started_at_unix",
+        "cancel_confirmed",
+    ):
+        replacement.pop(name, None)
+    return replacement
+
+
 def _cloud_paths(state: dict[str, Any], dataset: str) -> tuple[str, str]:
     run_token = _required_string(state["provider_state"], "run_token", "provider_state")
     root = f"/workspace/medai/{run_token}"
     return f"{root}/.staging/{dataset}", f"{root}/data/{dataset}"
 
 
-def _inventory_path(state_path: Path) -> Path:
-    return state_path.with_name(INVENTORY_FILENAME)
+def _inventory_path(state_path: Path, cloud: dict[str, Any]) -> Path:
+    return state_path.with_name(
+        _required_string(cloud, "inventory_path", "cloud-drive state")
+    )
 
 
 def _inventory_digest(inventory: dict[str, Any]) -> str:
@@ -1844,6 +1873,10 @@ def _update_cloud(state_path: Path, state: dict[str, Any], cloud: dict[str, Any]
     cloud["status"] = status
     cloud["completed"] = status == "completed"
     cloud["updated_at_unix"] = int(time.time())
+    dataset = _required_string(cloud, "dataset", "cloud-drive state")
+    clouds = _cloud_drives(state["provider_state"])
+    clouds[dataset] = cloud
+    state["provider_state"]["cloud_drives"] = clouds
     state["provider_state"]["cloud_drive"] = cloud
     save_state(state_path, state)
 
@@ -1853,8 +1886,14 @@ def _cloud_state(
 ) -> dict[str, Any]:
     source_path = f"medai/{dataset}"
     staging_path, target_path = _cloud_paths(state, dataset)
-    prior = state["provider_state"].get("cloud_drive")
+    clouds = _cloud_drives(state["provider_state"])
+    prior = clouds.get(dataset)
     if prior is None:
+        inventory_filename = (
+            INVENTORY_FILENAME
+            if not clouds
+            else f"cloud-inventory.{dataset}.v1.json"
+        )
         cloud = {
             "drive": "google-drive",
             "dataset": dataset,
@@ -1863,7 +1902,7 @@ def _cloud_state(
             "staging_path": staging_path,
             "target_path": target_path,
             "owned_paths": True,
-            "inventory_path": INVENTORY_FILENAME,
+            "inventory_path": inventory_filename,
             "started_at_unix": int(time.time()),
         }
         _update_cloud(state_path, state, cloud, "new")
@@ -1878,7 +1917,7 @@ def _cloud_state(
         "staging_path": staging_path,
         "target_path": target_path,
         "owned_paths": True,
-        "inventory_path": INVENTORY_FILENAME,
+        "inventory_path": prior.get("inventory_path"),
     }
     if any(prior.get(name) != value for name, value in expected.items()):
         raise RuntimeError("Vast cloud-drive state is inconsistent with this run configuration")
@@ -1982,7 +2021,7 @@ def _start_cloud_copy(state_path: Path, state: dict[str, Any], cloud: dict[str, 
 def _complete_cloud_pull(
     state_path: Path, state: dict[str, Any], cloud: dict[str, Any], dataset: str
 ) -> str:
-    inventory_path = _inventory_path(state_path)
+    inventory_path = _inventory_path(state_path, cloud)
     expected_inventory = _load_inventory(inventory_path, dataset) if inventory_path.is_file() else None
     staging_path = cloud["staging_path"]
     target_path = cloud["target_path"]
@@ -2127,7 +2166,7 @@ def _verify_completed_cloud_pull(
 ) -> None:
     if instance_status(state) != "running":
         raise RuntimeError("Vast completed cloud-drive verification requires a running instance")
-    expected_inventory = _load_inventory(_inventory_path(args.state), dataset)
+    expected_inventory = _load_inventory(_inventory_path(args.state, cloud), dataset)
     if cloud.get("inventory_sha256") != _inventory_digest(expected_inventory):
         raise RuntimeError("Vast cloud-drive state does not match its local inventory")
     observed_inventory = _remote_inventory(state, cloud["target_path"], dataset)

@@ -35,6 +35,10 @@ python <skill-dir>/scripts/vastai.py cloud-pull \
   --dataset <safe-dataset-name>
 ```
 
+Repeat the command once for every selected dataset. The provider records each
+materialization independently under `provider_state.cloud_drives[<dataset>]`;
+one failed or incomplete entry keeps the overall run incomplete.
+
 For an opted-in Codex command handoff, the active agent must first run:
 
 ```bash
@@ -70,7 +74,10 @@ the cancellation request is confirmed. Vast documents these endpoints at
 
 The first successful download does not prove a pre-existing Drive inventory or
 preflight the source size. Instead, the adapter creates a deterministic local
-artifact `remote_compute/cloud-inventory.v1.json` from the remote staging tree.
+inventory from the remote staging tree. The first dataset retains
+`remote_compute/cloud-inventory.v1.json`; additional datasets use
+`remote_compute/cloud-inventory.<dataset>.v1.json`, and each filename is stored
+in its provider-state record.
 It rejects an empty tree, symlinks, special files, invalid relative paths, and
 duplicate paths. The version-1 JSON contains the dataset name, `sha256`
 algorithm, sorted `{path, size, sha256}` entries, file count, and total bytes.
@@ -88,10 +95,11 @@ container, it stops and restarts that same instance once, then requires the
 staging path to become visible before generating the inventory. It never rents
 a replacement or starts a second Cloud Copy for this mount refresh.
 
-It then makes that target read-only, records its path and inventory digest in
-provider state, and prints the path. Use that exact completed `target_path` as
-every remote plan's `remote_dataset_dir`; never rematerialize or copy raw cloud
-data locally.
+It then makes every target read-only, records its path and inventory digest in
+provider state, and prints the path. For one dataset use its exact completed
+`target_path` as `remote_dataset_dir`; for multiple datasets use their common
+`/workspace/medai/<run_token>/data` parent and address each named child. Never
+rematerialize or copy raw cloud data locally.
 
 The inventory becomes the run's baseline. Repeated pulls and replacement
 instances must regenerate exactly the same inventory before the adapter sets

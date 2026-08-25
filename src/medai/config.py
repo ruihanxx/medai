@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ class RunConfig:
     provider: str
     repo: Path | None = None
     data: Path | None = None
+    datasets: tuple[str, ...] = ()
+    local_data_paths: tuple[Path, ...] = ()
     clouddrive: bool = False
     computation_provider: str | None = None
     computation_provider_config: dict[str, Any] | None = None
@@ -36,10 +39,38 @@ class RunConfig:
     drive_reference: Path | None = None
     cloud_dataset: str | None = None
     cloud_source: str | None = None
+    cloud_datasets: tuple[str, ...] = ()
+    cloud_sources: tuple[str, ...] = ()
     siliconflow_config: Path | None = None
     codex_model: str | None = None
     codex_reasoning_effort: str | None = None
     smart_replicate: bool = False
+
+    @property
+    def dataset_names(self) -> tuple[str, ...]:
+        return self.datasets or ((self.data.name,) if self.data is not None else ())
+
+    @property
+    def dataset_paths(self) -> tuple[Path, ...]:
+        if self.local_data_paths:
+            return self.local_data_paths
+        if self.data is None:
+            return ()
+        if len(self.dataset_names) <= 1:
+            return (self.data,)
+        return tuple(self.data / dataset for dataset in self.dataset_names)
+
+    @property
+    def selected_cloud_datasets(self) -> tuple[str, ...]:
+        return self.cloud_datasets or (
+            (self.cloud_dataset,) if self.cloud_dataset is not None else ()
+        )
+
+    @property
+    def selected_cloud_sources(self) -> tuple[str, ...]:
+        return self.cloud_sources or (
+            (self.cloud_source,) if self.cloud_source is not None else ()
+        )
 
     def validate(self) -> None:
         if not self.paper.is_file():
@@ -48,34 +79,44 @@ class RunConfig:
             raise ValueError(f"Paper must be a PDF: {self.paper}")
         if self.repo is not None and not self.repo.is_dir():
             raise ValueError(f"Repository does not exist: {self.repo}")
-        if self.data is not None and not self.data.is_dir():
-            raise ValueError(f"Data directory does not exist: {self.data}")
+        for data_path in self.dataset_paths:
+            if not data_path.is_dir():
+                raise ValueError(f"Data directory does not exist: {data_path}")
+        cloud_datasets = self.selected_cloud_datasets
+        cloud_sources = self.selected_cloud_sources
         if self.clouddrive:
-            if not self.cloud_dataset or not CLOUD_DATASET_PATTERN.fullmatch(
-                self.cloud_dataset
+            if not cloud_datasets:
+                raise ValueError("--clouddrive requires at least one --data dataset name")
+            if len(set(cloud_datasets)) != len(cloud_datasets):
+                raise ValueError("Cloud dataset names must be unique")
+            if any(
+                dataset in {".", ".."}
+                or not CLOUD_DATASET_PATTERN.fullmatch(dataset)
+                for dataset in cloud_datasets
             ):
-                raise ValueError(
-                    "--clouddrive requires --data as one safe directory name"
-                )
-            if self.cloud_dataset in {".", ".."}:
-                raise ValueError("Cloud dataset name cannot be '.' or '..'")
+                raise ValueError("--clouddrive requires each --data as a safe directory name")
             if (
                 self.computation_provider is None
                 or self.computation_provider_config is None
                 or self.computation_provider_reference is None
                 or self.drive_provider is None
                 or self.drive_reference is None
-                or self.cloud_source is None
+                or len(cloud_sources) != len(cloud_datasets)
             ):
                 raise ValueError("--clouddrive requires a configured computation provider and drive")
         elif (
             self.cloud_dataset is not None
+            or self.cloud_datasets
             or self.drive_provider is not None
             or self.drive_reference is not None
             or self.cloud_source is not None
+            or self.cloud_sources
         ):
             raise ValueError("Cloud-drive configuration requires --clouddrive")
-        for name, input_dir in (("repository", self.repo), ("data", self.data)):
+        input_dirs = (("repository", self.repo),) + tuple(
+            ("data", path) for path in self.dataset_paths
+        )
+        for name, input_dir in input_dirs:
             if input_dir is not None and self.output.is_relative_to(input_dir):
                 raise ValueError(
                     f"Output directory cannot be inside the {name} input: {self.output}"
@@ -106,13 +147,14 @@ class RunConfig:
         output: Path,
         provider: str,
         repo: Path | None,
-        data: Path | str | None,
+        data: Path | str | Sequence[Path | str] | None,
         siliconflow_config: Path | None,
+        datasets: Sequence[str] | None = None,
         codex_model: str | None = None,
         codex_reasoning_effort: str | None = None,
         smart_replicate: bool = False,
         clouddrive: bool = False,
-        cloud_dataset: str | None = None,
+        cloud_dataset: str | Sequence[str] | None = None,
     ) -> "RunConfig":
         normalized_provider = provider.strip().casefold()
         if normalized_provider == "codex":
@@ -122,10 +164,11 @@ class RunConfig:
             )
         if cloud_dataset is not None and not clouddrive:
             raise ValueError("--cloud-dataset requires --clouddrive")
-        resolved_cloud_dataset = (
-            cloud_dataset.strip()
-            if cloud_dataset is not None
-            else str(data).strip() if clouddrive and data is not None else None
+        data_values = _as_sequence(data)
+        cloud_values = _as_sequence(cloud_dataset)
+        resolved_cloud_datasets = tuple(
+            str(value).strip()
+            for value in (cloud_values or (data_values if clouddrive else ()))
         )
         (
             computation_provider,
@@ -133,31 +176,52 @@ class RunConfig:
             computation_provider_reference,
             drive_provider,
             drive_reference,
-            cloud_source,
+            cloud_sources,
         ) = _resolve_computation_selection(
             output=output,
             clouddrive=clouddrive,
-            cloud_dataset=resolved_cloud_dataset,
+            cloud_datasets=resolved_cloud_datasets,
         )
-        local_data = (
-            Path(data).expanduser().resolve()
-            if data is not None and (not clouddrive or cloud_dataset is not None)
-            else None
+        local_data_paths = tuple(
+            Path(value).expanduser().resolve()
+            for value in (
+                data_values if not clouddrive or cloud_values else ()
+            )
         )
+        local_data = _common_data_root(local_data_paths)
+        dataset_names = (
+            tuple(str(value).strip() for value in datasets)
+            if datasets is not None
+            else tuple(path.name for path in local_data_paths)
+        )
+        if len(dataset_names) != len(local_data_paths):
+            raise ValueError("--dataset-name must match every local --data directory")
+        if len(set(dataset_names)) != len(dataset_names) or any(
+            dataset in {".", ".."}
+            or not CLOUD_DATASET_PATTERN.fullmatch(dataset)
+            for dataset in dataset_names
+        ):
+            raise ValueError("Local dataset names must be unique safe directory names")
         config = cls(
             paper=paper.expanduser().resolve(),
             output=output.expanduser().resolve(),
             provider=normalized_provider,
             repo=repo.expanduser().resolve() if repo else None,
             data=local_data,
+            datasets=dataset_names,
+            local_data_paths=local_data_paths,
             clouddrive=clouddrive,
             computation_provider=computation_provider,
             computation_provider_config=computation_provider_config,
             computation_provider_reference=computation_provider_reference,
             drive_provider=drive_provider,
             drive_reference=drive_reference,
-            cloud_dataset=resolved_cloud_dataset,
-            cloud_source=cloud_source,
+            cloud_dataset=(
+                resolved_cloud_datasets[0] if len(resolved_cloud_datasets) == 1 else None
+            ),
+            cloud_source=cloud_sources[0] if len(cloud_sources) == 1 else None,
+            cloud_datasets=resolved_cloud_datasets,
+            cloud_sources=cloud_sources,
             siliconflow_config=(
                 siliconflow_config.expanduser().resolve() if siliconflow_config else None
             ),
@@ -181,6 +245,8 @@ class AutoResearchConfig:
     max_iter: int = 1
     assessment_threshold: float = 0.0
     data: Path | None = None
+    datasets: tuple[str, ...] = ()
+    local_data_paths: tuple[Path, ...] = ()
     clouddrive: bool = False
     computation_provider: str | None = None
     computation_provider_config: dict[str, Any] | None = None
@@ -189,9 +255,37 @@ class AutoResearchConfig:
     drive_reference: Path | None = None
     cloud_dataset: str | None = None
     cloud_source: str | None = None
+    cloud_datasets: tuple[str, ...] = ()
+    cloud_sources: tuple[str, ...] = ()
     siliconflow_config: Path | None = None
     codex_model: str | None = None
     codex_reasoning_effort: str | None = None
+
+    @property
+    def dataset_names(self) -> tuple[str, ...]:
+        return self.datasets or ((self.data.name,) if self.data is not None else ())
+
+    @property
+    def dataset_paths(self) -> tuple[Path, ...]:
+        if self.local_data_paths:
+            return self.local_data_paths
+        if self.data is None:
+            return ()
+        if len(self.dataset_names) <= 1:
+            return (self.data,)
+        return tuple(self.data / dataset for dataset in self.dataset_names)
+
+    @property
+    def selected_cloud_datasets(self) -> tuple[str, ...]:
+        return self.cloud_datasets or (
+            (self.cloud_dataset,) if self.cloud_dataset is not None else ()
+        )
+
+    @property
+    def selected_cloud_sources(self) -> tuple[str, ...]:
+        return self.cloud_sources or (
+            (self.cloud_source,) if self.cloud_source is not None else ()
+        )
 
     def validate(self) -> None:
         if not (self.base_run / "manifest.json").is_file():
@@ -202,8 +296,11 @@ class AutoResearchConfig:
             raise ValueError("--max-iter must be between 1 and 10")
         if not math.isfinite(self.assessment_threshold) or self.assessment_threshold < 0:
             raise ValueError("--assessment-threshold must be a finite non-negative number")
-        if self.data is not None and not self.data.is_dir():
-            raise ValueError(f"Base run data directory does not exist: {self.data}")
+        for data_path in self.dataset_paths:
+            if not data_path.is_dir():
+                raise ValueError(f"Base run data directory does not exist: {data_path}")
+        cloud_datasets = self.selected_cloud_datasets
+        cloud_sources = self.selected_cloud_sources
         if self.clouddrive:
             if (
                 self.computation_provider is None
@@ -211,9 +308,14 @@ class AutoResearchConfig:
                 or self.computation_provider_config is None
                 or self.computation_provider_reference is None
                 or self.drive_reference is None
-                or self.cloud_source is None
-                or not self.cloud_dataset
-                or not CLOUD_DATASET_PATTERN.fullmatch(self.cloud_dataset)
+                or len(cloud_sources) != len(cloud_datasets)
+                or not cloud_datasets
+                or len(set(cloud_datasets)) != len(cloud_datasets)
+                or any(
+                    dataset in {".", ".."}
+                    or not CLOUD_DATASET_PATTERN.fullmatch(dataset)
+                    for dataset in cloud_datasets
+                )
             ):
                 raise ValueError(
                     "Cloud-backed Auto Research requires inherited computation-provider "
@@ -227,7 +329,7 @@ class AutoResearchConfig:
                 self.cloud_dataset,
                 self.cloud_source,
             )
-        ):
+        ) or self.cloud_datasets or self.cloud_sources:
             raise ValueError("Auto Research cloud configuration requires a cloud-backed base run")
         if self.provider not in VALID_PROVIDERS:
             raise ValueError(f"Unsupported provider: {self.provider}")
@@ -286,31 +388,40 @@ class AutoResearchConfig:
 
         data_value = base_inputs.get("data")
         data = Path(str(data_value)).expanduser().resolve() if data_value else None
+        datasets = _string_tuple(base_inputs.get("datasets"))
+        if not datasets and data is not None:
+            source_value = base_inputs.get("data_source")
+            datasets = (
+                Path(str(source_value)).name if source_value else data.name,
+            )
+        cloud_datasets = _string_tuple(base_inputs.get("cloud_datasets")) or (
+            (str(base_inputs.get("cloud_dataset", "")).strip(),)
+            if clouddrive and base_inputs.get("cloud_dataset")
+            else ()
+        )
         (
             computation_provider,
             computation_provider_config,
             computation_provider_reference,
             drive_provider,
             drive_reference,
-            cloud_source,
+            cloud_sources,
         ) = _resolve_computation_selection(
             output=output,
             clouddrive=clouddrive,
-            cloud_dataset=(
-                str(base_inputs.get("cloud_dataset", "")).strip()
-                if clouddrive
-                else None
-            ),
+            cloud_datasets=cloud_datasets,
             inherited_inputs=base_inputs,
-        )
-        cloud_dataset = (
-            str(base_inputs.get("cloud_dataset", "")).strip() if clouddrive else None
         )
         if clouddrive and (
             base_inputs.get("computation_provider") != computation_provider
             or base_inputs.get("drive_provider") != drive_provider
-            or not cloud_dataset
-            or base_inputs.get("cloud_source") != cloud_source
+            or not cloud_datasets
+            or _string_tuple(base_inputs.get("cloud_sources"))
+            not in {(), cloud_sources}
+            or (
+                not base_inputs.get("cloud_sources")
+                and base_inputs.get("cloud_source") != cloud_sources[0]
+            )
         ):
             raise ValueError(
                 "Cloud-backed Auto Research requires the base run and current configuration "
@@ -323,14 +434,17 @@ class AutoResearchConfig:
             max_iter=max_iter,
             assessment_threshold=assessment_threshold,
             data=data,
+            datasets=datasets,
             clouddrive=clouddrive,
             computation_provider=computation_provider,
             computation_provider_config=computation_provider_config,
             computation_provider_reference=computation_provider_reference,
             drive_provider=drive_provider,
             drive_reference=drive_reference,
-            cloud_dataset=cloud_dataset,
-            cloud_source=cloud_source,
+            cloud_dataset=cloud_datasets[0] if len(cloud_datasets) == 1 else None,
+            cloud_source=cloud_sources[0] if len(cloud_sources) == 1 else None,
+            cloud_datasets=cloud_datasets,
+            cloud_sources=cloud_sources,
             siliconflow_config=(
                 siliconflow_config.expanduser().resolve() if siliconflow_config else None
             ),
@@ -363,10 +477,10 @@ def _resolve_computation_selection(
     *,
     output: Path,
     clouddrive: bool,
-    cloud_dataset: str | None,
+    cloud_datasets: tuple[str, ...],
     inherited_inputs: dict[str, Any] | None = None,
 ) -> tuple[
-    str | None,
+    tuple[str, ...],
     dict[str, Any] | None,
     Path | None,
     str | None,
@@ -398,7 +512,7 @@ def _resolve_computation_selection(
                 "--clouddrive requires a configured computation provider; set "
                 "MEDAI_COMPUTATION_PROVIDER"
             )
-        return None, None, None, None, None, None
+        return None, None, None, None, None, ()
     adapter = _adapter_for_selection(provider_name)
     recorded_drive = recorded.get("drive_provider")
     drive_name = configured_drive or (
@@ -427,8 +541,37 @@ def _resolve_computation_selection(
         adapter.reference,
         drive.name if drive else None,
         drive.reference if drive else None,
-        adapter.cloud_source(drive.name, cloud_dataset or "") if drive else None,
+        tuple(adapter.cloud_source(drive.name, dataset) for dataset in cloud_datasets)
+        if drive
+        else (),
     )
+
+
+def _as_sequence(value: Any) -> tuple[Any, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, (str, Path)):
+        return (value,)
+    return tuple(value)
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item)
+
+
+def _common_data_root(paths: tuple[Path, ...]) -> Path | None:
+    if not paths:
+        return None
+    if len(paths) == 1:
+        return paths[0]
+    parents = {path.parent for path in paths}
+    if len(parents) != 1:
+        raise ValueError("Repeated --data directories must share one parent directory")
+    if len({path.name for path in paths}) != len(paths):
+        raise ValueError("Repeated --data directories must be unique")
+    return paths[0].parent
 
 
 def _adapter_for_selection(name: str) -> ProviderAdapter:

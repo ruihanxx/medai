@@ -30,16 +30,19 @@ the launcher invokes the host `mineru` command and mounts its temporary output
 read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
 sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
 `MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper`,
-`--provider`, and `--data`; `--repo` is optional. `--data` is always one safe
-dataset directory name (for example `mimic-iv`) and rejects slashes, absolute
-paths, `.` and `..`. At least one data source is required. With
-`--dataset-path`, the launcher requires `<dataset-path>/<data>` to be an
-existing directory and mounts only that directory read-only. With
+`--provider`, and `--data`; `--repo` is optional. Repeat `--data` once for every
+dataset used by the paper (for example `--data mimic-iv --data eicu`). Each
+value is a unique safe directory name and rejects slashes, absolute paths, `.`
+and `..`. At least one data source is required. With `--dataset-path`, the
+launcher requires every `<dataset-path>/<data>` directory to exist and mounts
+only the selected directories read-only. A single selection retains the
+legacy `/workspace/data` mount; multiple selections use
+`/workspace/data/<data>` children. With
 `--clouddrive` alone, no host data directory is mounted and the provider
-materializes the `medai/<data>` cloud source onto its remote target before
-inspection. Both selectors may be supplied: local execution uses the mounted
-dataset, while resource-insufficient remote execution uses the cloud dataset
-instead of uploading the local copy. A
+materializes every `medai/<data>` cloud source onto its distinct remote target
+before inspection. Both selectors may be supplied: local execution uses all
+selected mounted datasets, while resource-insufficient remote execution uses
+all selected cloud datasets instead of uploading local copies. A
 missing explicitly selected local dataset is an error and never falls back to
 a billable cloud source.
 When a cloud-only selected drive opts into cloud-pull handoff and the provider

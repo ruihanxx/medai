@@ -1475,6 +1475,44 @@ def test_vastai_cloud_pull_materializes_readonly_inventory_without_credentials(t
     assert "result-secret" not in state_text
     assert "mv --" in command_log.read_text(encoding="utf-8")
 
+    second_tmp = tmp_path / "second-dataset"
+    second_tmp.mkdir()
+    second_environment, _ = fake_cloud_ssh_environment(
+        second_tmp, cloud_inventory("dataset-b", digest="b" * 64)
+    )
+    with vast_api(
+        {
+            ("GET", "/api/v0/users/cloud_integrations"): [
+                {"id": "drive-7", "cloud_type": "drive", "name": "dedicated"}
+            ],
+            ("POST", "/api/v0/commands/rclone/"): {"success": True},
+            ("GET", "/api/v0/instances/instance-1/"): {
+                "instances": {
+                    "actual_status": "running",
+                    "status_msg": "Cloud Copy Operation Complete",
+                    "ssh_host": "host",
+                    "ssh_port": 22,
+                }
+            },
+        }
+    ) as (base_url, _):
+        second = run_adapter(
+            ["cloud-pull", "--state", str(state_path), "--dataset", "dataset-b"],
+            {
+                **adapter_environment(base_url),
+                **second_environment,
+                "VASTAI_GOOGLE_DRIVE_CONNECTION_ID": "drive-7",
+                "MEDAI_DRIVE_PROVIDER": "google-drive",
+            },
+        )
+
+    assert second.returncode == 0, second.stderr
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert set(state["provider_state"]["cloud_drives"]) == {"dataset-a", "dataset-b"}
+    assert state["provider_state"]["cloud_drives"]["dataset-a"]["completed"] is True
+    assert state["provider_state"]["cloud_drives"]["dataset-b"]["completed"] is True
+    assert (state_path.parent / "cloud-inventory.dataset-b.v1.json").is_file()
+
 
 def test_vastai_cloud_pull_restarts_same_instance_when_staging_is_not_visible(
     tmp_path: Path,

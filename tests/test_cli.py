@@ -142,6 +142,38 @@ def test_local_and_cloud_data_are_recorded_together(tmp_path: Path, monkeypatch)
     assert inputs["cloud_source"] == "medai/mimic-iv"
 
 
+def test_multiple_local_and_cloud_datasets_are_preserved(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    dataset_root = tmp_path / "datasets"
+    datasets = [dataset_root / "mimic-iv", dataset_root / "eicu"]
+    for dataset in datasets:
+        dataset.mkdir(parents=True)
+    monkeypatch.setenv("VAST_API_KEY", "api-secret")
+    monkeypatch.setenv("VASTAI_IMAGE", "image-id")
+    monkeypatch.setenv("VASTAI_GOOGLE_DRIVE_CONNECTION_ID", "connection-id")
+    config = RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data=datasets,
+        siliconflow_config=None,
+        clouddrive=True,
+        cloud_dataset=["mimic-iv", "eicu"],
+    )
+    inputs = build_run_inputs(config)
+
+    assert config.data == dataset_root.resolve()
+    assert config.dataset_names == ("mimic-iv", "eicu")
+    assert config.selected_cloud_datasets == ("mimic-iv", "eicu")
+    assert inputs["datasets"] == ["mimic-iv", "eicu"]
+    assert inputs["data_sources"] == [str(dataset) for dataset in datasets]
+    assert inputs["data_source"] is None
+    assert inputs["cloud_datasets"] == ["mimic-iv", "eicu"]
+    assert inputs["cloud_sources"] == ["medai/mimic-iv", "medai/eicu"]
+
+
 @pytest.mark.parametrize("dataset", ["../mimic", "a/b", ".", "/absolute"])
 def test_cloud_drive_rejects_unsafe_dataset_names(
     tmp_path: Path, monkeypatch, dataset: str
