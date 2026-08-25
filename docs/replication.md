@@ -13,11 +13,17 @@ The LangGraph stages are:
    non-executing reads, identify every paper-underspecified implementation
    decision before coding, resolve each using applicable medical knowledge and
    standard medical-research methods, record the executable resolution as a
-   code-generation ambiguity, compare local GPU capacity with the paper's
-   full-scale requirements, use the `computation-provider` skill when remote
-   compute is required, plan files, and write code. Paper-stated GPU count and
-   per-GPU VRAM are hard capacity floors; a smaller inferred workload or CPU
-   feasibility cannot substitute when local capacity is below them. A
+   code-generation ambiguity, inventory the selected local dataset, make the
+   local-first capacity decision, use the `computation-provider` skill only when
+   remote compute is justified, plan files, and write code. Paper-stated GPU
+   count and per-GPU VRAM are hard capacity floors; a smaller inferred workload
+   or CPU feasibility cannot substitute when local capacity is below them.
+   Unstated CPU-only hardware defaults to eight sufficient physical cores;
+   larger inferred core counts require explicit parallel-method evidence or a
+   representative benchmark beyond the local time limit. Memory follows the
+   planned streaming/chunked/out-of-core peak with 20% headroom, disk follows
+   actual dataset/work landing points, and uncertainty requires a bounded local
+   probe rather than automatic remote selection. A
    paper-required file absent from the supplied dataset terminates codegen
    without invention or substitution, and preprocessing audit does not start.
    Cloud-only mode always selects the configured provider and materializes the

@@ -26,6 +26,11 @@ resume, repeated cloud pull, report-completed no-op, power-off-before-report,
 and persistent cleanup warnings. Tests assert that no safety failure creates a
 second instance.
 
+Codegen prompt tests pin local dataset inventory before capacity selection, the
+eight-physical-core CPU-only default, probe-only uncertainty handling, planned
+peak-memory headroom, and the distinct remote versus read-only-local disk
+formulas.
+
 Codex replication mocks cover thread-ID extraction, direct agent execution
 without a command output schema, final-only artifact validation, same-session
 artifact repair with an appended transcript, final cleanup after success or

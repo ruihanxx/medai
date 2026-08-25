@@ -1377,6 +1377,8 @@ def test_graph_routes_failed_audit_through_cohort_refine_once(monkeypatch):
 
 
 def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path):
+    local_data = tmp_path / "data"
+    local_data.mkdir()
     local_resources = {
         "cpu": {"logical_cores": 12, "physical_cores": 6},
         "memory": {"total_gb": 32.0, "available_gb": 24.0},
@@ -1390,7 +1392,7 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
         paper_markdown=tmp_path / "paper.md",
         claims_path=tmp_path / "claims.json",
         experiments_path=tmp_path / "experiments.json",
-        data_dir=None,
+        data_dir=local_data,
         skills_dir=Path("/skills"),
         resources_path=tmp_path / "resources.json",
         codegen_plan_path=tmp_path / "codegen_plan.json",
@@ -1408,10 +1410,18 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert str(tmp_path / "instance.json") in prompt
     assert "autodl" not in prompt.lower()
     assert json.dumps(local_resources, sort_keys=True) in prompt
-    assert "physical cores" in prompt
-    assert "1.2 times" in prompt
+    assert "dataset release/version" in prompt
+    assert "file and partition counts" in prompt
+    assert "eight physical cores as sufficient by default" in prompt
+    assert "Never infer a requirement above eight cores\n   from dataset size alone" in prompt
+    assert "streaming, chunked, or out-of-core implementation" in prompt
+    assert "1.2 times its estimated\n   or measured peak memory" in prompt
     assert "20% headroom" in prompt
-    assert "12 hours or more is insufficient" in prompt
+    assert "exceed the\n   12-hour local time limit" in prompt
+    assert "D + max(D, 10 GiB)" in prompt
+    assert "additional free space of `max(D, 10 GiB)`" in prompt
+    assert "run a\n   bounded local capacity probe" in prompt
+    assert "Uncertainty alone never authorizes remote\n   execution" in prompt
     assert "a configured provider is capacity fallback only" in prompt
     assert "run locally\nand do not search offers" in prompt
     assert "stop explicitly during Codegen" not in prompt

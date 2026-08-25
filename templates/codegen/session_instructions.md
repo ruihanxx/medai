@@ -83,30 +83,62 @@ First choose the computational stack, then outline the file structure.
 
 **Local resource snapshot**: {{ local_resources | tojson }}
 
-Decide the execution location from the paper, every experiment's
-`computational_demand`, the full-scale data volume and algorithm, and this
-snapshot before using any computation provider:
+{% if data_dir %}
+Before deciding capacity for local or dual-source data, inspect `{{ data_dir }}`
+with bounded, read-only metadata operations. Record the dataset release/version,
+actual on-disk size, file and partition counts, formats and compression, and any
+available per-partition or row-count metadata. Use the actual source and planned
+work/output landing filesystems rather than an unrelated filesystem. Let `D` be
+the selected complete dataset's actual size in GiB. Keep paper-stated hardware
+requirements separate from conservative or measured estimates; an inferred
+value is never a paper hard floor.
+{% else %}
+No local dataset exists to inventory before the data-locality decision. Do not
+invent local capacity evidence. Obtain `D` from reviewed cloud-source metadata
+or the selected drive/provider's bounded inventory procedure before finalizing
+the remote disk requirement.
+{% endif %}
+
+Decide the execution location from that inventory, the paper, every experiment's
+`computational_demand`, the full-scale algorithm, and the preflight snapshot
+before using any computation provider:
 
 1. Decide whether faithful full-scale execution requires a GPU. Preserve every
    explicit paper GPU count and per-GPU VRAM value as a hard floor.
 2. For a GPU workload, compare local GPU count and free VRAM plus the required
    CPU, available RAM, and free disk against all inferred or explicit floors.
-3. For a CPU-only workload, compare the required CPU capacity with local
-   physical cores (use logical cores only when physical cores are unavailable).
-   Available RAM and free disk must each be at least 1.2 times the estimated
-   peak requirement, providing 20% headroom.
-4. Estimate the complete faithful runtime from the paper, data scale, algorithm
-   complexity, and, only when practical, a bounded representative timing. A
-   local estimate of 12 hours or more is insufficient. If the available
-   evidence cannot establish that local resources are sufficient, treat them
-   as insufficient.
+3. For a CPU-only workload with no paper-stated hardware requirement, treat
+   eight physical cores as sufficient by default (use logical cores only when
+   physical cores are unavailable). Never infer a requirement above eight cores
+   from dataset size alone. A higher CPU floor is permitted only when the method
+   has an explicit parallelism requirement or a representative benchmark of the
+   planned implementation demonstrates that the complete run would exceed the
+   12-hour local time limit.
+4. Choose the intended streaming, chunked, or out-of-core implementation before
+   judging memory. Local available RAM must be at least 1.2 times its estimated
+   or measured peak memory, providing 20% headroom. Do not assume the complete
+   dataset must reside in memory unless the method requires it.
+5. Compute disk at the actual data and work-file landing points. Let `W` be the
+   estimated or measured peak writable work files. When `W` is not yet known,
+   use `max(D, 10 GiB)`. A remote filesystem that must hold the dataset and work
+   files therefore defaults to `D + max(D, 10 GiB)`; a local run whose source
+   dataset is read-only defaults to additional free space of `max(D, 10 GiB)`.
+   Use a larger measured or estimated `W` when required.
+6. If CPU runtime, peak memory, or peak work space remains uncertain, run a
+   bounded local capacity probe against representative data with the planned
+   implementation. Record the command, sample/partition basis, measurements,
+   and full-run extrapolation. Uncertainty alone never authorizes remote
+   execution. If the probe cannot establish sufficiency or insufficiency, stop
+   explicitly instead of searching for or renting a remote instance.
 
-Use `computational_demand` and the persisted preflight snapshot as the evidence
-for this judgment. For a remote conclusion, record required floors, headroom,
-runtime estimate, and rationale as optional details inside the existing
-`remote_compute` object. For a local conclusion, keep `remote_compute` null and
-do not add a top-level plan field. Do not shrink the experiment to make local
-execution appear sufficient.
+Use `computational_demand`, the dataset inventory, any capacity-probe evidence,
+and the persisted preflight snapshot as the evidence for this judgment. For a
+remote conclusion, record the paper hard floors separately from inferred floors,
+`D`, peak-memory basis, `W`, disk calculation, benchmark evidence, time limit,
+and rationale as optional details inside the existing `remote_compute` object.
+For a local conclusion, keep `remote_compute` null and do not add a top-level
+plan field. Do not shrink the experiment to make local execution appear
+sufficient.
 {% if gpu_info %}
 
 **This environment has local GPU resources**: {{ gpu_info | tojson }}. Compare their

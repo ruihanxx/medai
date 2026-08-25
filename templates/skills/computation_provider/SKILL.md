@@ -89,6 +89,13 @@ Record the experiment's required accelerator type, count, memory, CPU, RAM,
 storage, architecture, and runtime constraints. Query the provider using the
 read-only method documented in its reference. Do not silently choose weaker
 hardware, reduce experiment scale, or substitute a different execution mode.
+For a Codegen request, accept only resource floors justified by its paper-hard-
+requirement, dataset-inventory, planned streaming/chunked/out-of-core memory,
+and capacity-probe evidence. Do not raise an unstated CPU-only requirement above
+eight physical cores from dataset size alone. Let `D` be the complete dataset
+size and `W` the peak writable work-file size; when `W` is unknown, request
+remote disk of at least `D + max(D, 10 GiB)`. Require RAM with 20% headroom over
+the planned implementation's estimated or measured peak.
 For a CPU-only workload, proceed only when the selected provider reference
 explicitly documents a CPU-only procedure and representation. Do not infer that
 zero GPUs is valid or apply another provider's minimum-GPU workaround. If the

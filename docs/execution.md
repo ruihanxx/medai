@@ -54,17 +54,26 @@ reference. Host orchestration never infers an undocumented alternative.
 
 Codegen receives the complete preflight CPU, available-memory, free-disk, and
 GPU snapshot. It first determines whether faithful full-scale execution needs a
-GPU, then judges local capacity. CPU-only work uses physical cores (logical only
-when physical is unavailable), requires 20% headroom over peak RAM and disk,
-and treats an evidenced estimate of 12 hours or more as locally insufficient.
-An inconclusive local-sufficiency judgment is also insufficient. A configured
-provider is only a fallback: sufficient local resources prohibit offer search,
-instance creation, and remote state. Insufficient resources use the selected
-provider's documented GPU or CPU-only procedure; absence of a provider or of a
-provider-specific CPU-only procedure fails Codegen without reducing experiment
-scale. `--clouddrive` alone remains remote regardless of local capacity because
-raw data has no local path; when local data is also supplied, the normal
-local-first capacity decision applies.
+GPU, then inventories the selected local dataset's release/version, actual size,
+files, partitions, formats, and available row-count metadata before judging
+capacity. Paper-stated hardware remains distinct from inferred capacity. For
+CPU-only work with no stated hardware, eight physical cores are sufficient by
+default and data size alone cannot justify a higher floor; only an explicit
+parallel-method requirement or a representative benchmark showing the complete
+run exceeds the 12-hour limit can do so. Memory is judged from the planned
+streaming, chunked, or out-of-core implementation and requires 20% headroom over
+estimated or measured peak use. With dataset size `D` and unknown peak writable
+work files, remote disk defaults to `D + max(D, 10 GiB)`, while a local run over
+read-only source data requires additional free space of `max(D, 10 GiB)` at the
+actual work/output landing point. Uncertainty requires a bounded capacity probe
+and never itself authorizes remote execution; an unresolved probe stops Codegen.
+A configured provider is only a fallback: sufficient local resources prohibit
+offer search, instance creation, and remote state. Demonstrated insufficiency
+uses the selected provider's documented GPU or CPU-only procedure; absence of a
+provider or of a provider-specific CPU-only procedure fails Codegen without
+reducing experiment scale. `--clouddrive` alone remains remote regardless of
+local capacity because raw data has no local path; when local data is also
+supplied, the normal local-first capacity decision applies.
 
 Auto Research requires `--replicate-run runs/<run_id>` and accepts an optional
 campaign `--output`. Without `--output`, the launcher atomically creates the

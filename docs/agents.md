@@ -80,11 +80,15 @@ foreground operation rather than run inside the agent turn.
   maintenance artifacts. It inspects data through bounded, read-only reads and
   must stop on a missing required source artifact. It receives the complete
   preflight resource snapshot and makes one evidence-bound local-first resource
-  decision from paper requirements, `computational_demand`, full data scale,
-  algorithm complexity, and bounded timing when feasible. Provider
-  configuration alone never authorizes remote execution. Cloud-only data is
-  the explicit data-locality exception; with both sources, local execution uses
-  local data and remote execution uses the provider's cloud data.
+  decision after inventorying local dataset version, size, files, and partitions.
+  Unstated CPU-only hardware defaults to eight sufficient physical cores and is
+  not increased from data scale alone. Memory follows the planned streaming,
+  chunked, or out-of-core peak with 20% headroom; disk follows the dataset and
+  peak work-file landing points. Uncertainty triggers a bounded capacity probe,
+  not remote execution. Provider configuration alone never authorizes remote
+  execution. Cloud-only data is the explicit data-locality exception; with both
+  sources, local execution uses local data and remote execution uses the
+  provider's cloud data.
 - Preprocessing audit treats `codegen/codebase/` and source data as read-only
   and writes only inside its attempt directory. Local-data audit never uses
   remote compute and may add an equivalent CPU, streaming, or small-batch

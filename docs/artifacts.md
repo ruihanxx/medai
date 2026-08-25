@@ -134,7 +134,11 @@ record a `final` or `validation` role plus a verbatim provenance quote.
 Experiments have unique `experiment_id` values and list their claim IDs, paper
 artifact labels, and an evidence-bound, one-sentence `computational_demand`.
 That sentence records paper-stated full-scale resources and clearly labels any
-method- or scale-based inference for omitted resources. The replication plan
+inference for omitted resources. An unstated CPU-only requirement records the
+eight-physical-core sufficient default rather than inferring a higher count from
+data scale; implementation-dependent peak memory, work disk, and runtime remain
+labelled estimates until Codegen selects its data-access path and, when needed,
+runs a capacity probe. The replication plan
 uses ordered steps whose
 `verifies` lists collectively cover those claim IDs and artifact labels. The
 replication log covers the plan steps in order, and every result-producing step
