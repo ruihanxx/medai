@@ -145,12 +145,18 @@ def test_init_builds_image_and_runs_cpu_mineru(tmp_path: Path):
     command_log.write_text("", encoding="utf-8")
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
+    dataset_root = tmp_path / "datasets"
+    (dataset_root / "test-data").mkdir(parents=True)
     run = subprocess.run(
         [
             str(launcher),
             "--replicate",
             "--paper",
             str(paper),
+            "--data",
+            "test-data",
+            "--dataset-path",
+            str(dataset_root),
             "--provider",
             "codex",
         ],
@@ -168,6 +174,8 @@ def test_init_builds_image_and_runs_cpu_mineru(tmp_path: Path):
     assert "-b pipeline" in run_calls
     assert "MEDAI_MINERU_OUTPUT=/workspace/mineru-output" in run_calls
     assert "dst=/workspace/mineru-output,readonly" in run_calls
+    assert f"src={dataset_root / 'test-data'},dst=/workspace/data,readonly" in run_calls
+    assert "--data /workspace/data" in run_calls
 
 
 def test_python_and_virtualenv_platform_policy():
@@ -245,6 +253,8 @@ def test_run_requires_successful_init(tmp_path: Path):
     launcher, env, command_log, _ = prepare_launcher(tmp_path)
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
+    dataset_root = tmp_path / "datasets"
+    (dataset_root / "test-data").mkdir(parents=True)
 
     run = subprocess.run(
         [
@@ -252,6 +262,10 @@ def test_run_requires_successful_init(tmp_path: Path):
             "--replicate",
             "--paper",
             str(paper),
+            "--data",
+            "test-data",
+            "--dataset-path",
+            str(dataset_root),
             "--provider",
             "codex",
         ],
@@ -265,6 +279,51 @@ def test_run_requires_successful_init(tmp_path: Path):
     assert run.returncode == 2
     assert "run medai init first" in run.stderr
     assert command_log.read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")
+def test_replicate_requires_one_explicit_dataset_source(tmp_path: Path):
+    launcher, env, _, _ = prepare_launcher(tmp_path)
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    dataset_root = tmp_path / "datasets"
+    dataset_root.mkdir()
+
+    cases = [
+        (
+            ["--data", "dataset-a"],
+            "exactly one of --dataset-path and --clouddrive",
+        ),
+        (
+            [
+                "--data",
+                "dataset-a",
+                "--dataset-path",
+                str(dataset_root),
+                "--clouddrive",
+            ],
+            "exactly one of --dataset-path and --clouddrive",
+        ),
+        (
+            ["--data", "dataset-a", "--dataset-path", str(dataset_root)],
+            "Local dataset directory does not exist",
+        ),
+        (
+            ["--data", str(dataset_root), "--dataset-path", str(dataset_root)],
+            "--data as one safe dataset name",
+        ),
+    ]
+    for arguments, error in cases:
+        completed = subprocess.run(
+            [str(launcher), "--replicate", "--paper", str(paper), *arguments],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 2
+        assert error in completed.stderr
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")

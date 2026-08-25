@@ -378,6 +378,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--paper", type=Path)
     parser.add_argument("--repo", type=Path)
     parser.add_argument("--data")
+    parser.add_argument("--dataset-path", type=Path)
     parser.add_argument("--clouddrive", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--replicate-run", type=Path)
@@ -535,17 +536,24 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
         if paper.suffix.casefold() != ".pdf":
             raise LauncherError(f"--paper must be a PDF: {paper}")
         repo = _optional_directory(args.repo, "--repo")
+        dataset = (args.data or "").strip()
+        if (
+            not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", dataset)
+            or dataset in {".", ".."}
+        ):
+            raise LauncherError("--replicate requires --data as one safe dataset name")
+        if (args.dataset_path is None) == (not args.clouddrive):
+            raise LauncherError(
+                "--replicate requires exactly one of --dataset-path and --clouddrive"
+            )
         if args.clouddrive:
-            cloud_dataset = (args.data or "").strip()
-            if (
-                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", cloud_dataset)
-                or cloud_dataset in {".", ".."}
-            ):
-                raise LauncherError(
-                    "--clouddrive requires --data as one safe directory name"
-                )
+            cloud_dataset = dataset
         else:
-            data = _optional_directory(Path(args.data), "--data") if args.data else None
+            dataset_root = _optional_directory(args.dataset_path, "--dataset-path")
+            assert dataset_root is not None
+            data = (dataset_root / dataset).resolve()
+            if not data.is_dir():
+                raise LauncherError(f"Local dataset directory does not exist: {data}")
         provider = (args.provider or "codex").strip().casefold()
         codex_model = args.codex_model
         codex_reasoning_effort = args.codex_reasoning_effort
@@ -556,10 +564,12 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             args.paper is not None
             or args.repo is not None
             or args.data is not None
+            or args.dataset_path is not None
             or args.clouddrive
         ):
             raise LauncherError(
-                "--autoresearch does not accept --paper, --repo, --data, or --clouddrive"
+                "--autoresearch does not accept --paper, --repo, --data, "
+                "--dataset-path, or --clouddrive"
             )
         if args.smart_replicate:
             raise LauncherError("--smart-replicate requires --replicate")

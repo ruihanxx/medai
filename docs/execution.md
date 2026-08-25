@@ -29,15 +29,16 @@ is missing or stale. Every run selects exactly one of `--replicate` and
 the launcher invokes the host `mineru` command and mounts its temporary output
 read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
 sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
-`MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper` and
-`--provider`, and `--data`; `--repo` is optional. Normally `--data` is an
-existing local directory mounted read-only. With `--clouddrive`, `--data` is
-instead one safe dataset directory name (for example `mimic-iv`), no host data
-directory is mounted, and the dataset is fully materialized onto the selected
-remote provider target before any remote inspection. Cloud-drive names reject slashes, absolute
-paths, `.` and `..`. The CLI accepts a missing
-`--data` long enough to create the run manifest, then fails the started
-`preflight` stage explicitly so the failed run remains inspectable.
+`MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper`,
+`--provider`, and `--data`; `--repo` is optional. `--data` is always one safe
+dataset directory name (for example `mimic-iv`) and rejects slashes, absolute
+paths, `.` and `..`. Exactly one data source is required. With
+`--dataset-path`, the launcher requires `<dataset-path>/<data>` to be an
+existing directory and mounts only that directory read-only. With
+`--clouddrive`, no host data directory is mounted and the provider materializes
+the `medai/<data>` cloud source onto its remote target before inspection. A
+missing explicitly selected local dataset is an error and never falls back to
+a billable cloud source.
 When selected drive metadata opts into cloud-pull handoff and the provider is
 direct Codex, codegen prepares and powers off an initialized SSH-ready instance,
 then returns one foreground local monitor command. Orchestration runs that
