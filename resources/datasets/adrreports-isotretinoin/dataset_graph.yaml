@@ -1,0 +1,180 @@
+dataset_id: adrreports-isotretinoin
+generated_at: "2026-08-26"
+
+snapshot_contract:
+  substance: ISOTRETINOIN
+  substance_high_level_code: 19838
+  retrieved_on: "2026-08-25"
+  source_data_current_through: "2026-08-23"
+  canonical_resource_id: isotretinoin_line_listing
+  canonical_row_count: 36039
+  semantics: >-
+    This is a fixed public ADRReports line-listing snapshot of spontaneous
+    suspected adverse-reaction cases associated with the selected substance.
+    EudraVigilance is a living database, so later snapshots may update, merge,
+    or remove cases and must not be treated as append-only continuations.
+
+partition_contract:
+  partition_key: source_year_bucket
+  derivation: Calendar year of EV Gateway Receipt Date.
+  populated_selector: 2003..2026
+  populated_partition_count: 24
+  zero_row_requested_buckets:
+    - 1900
+    - 1994
+    - 1995
+    - 1996
+    - 1997
+    - 1998
+    - 1999
+    - 2000
+    - 2001
+    - 2002
+  applies_to_resource_ids:
+    - isotretinoin_line_listing
+  reuse_rule: >-
+    Resolve annual physical exports through adapter.py. Annual files and the
+    unpartitioned official export reproduce the canonical result set and are
+    not separate logical resources.
+  temporal_rule: >-
+    source_year_bucket records EudraVigilance receipt provenance. It is not the
+    reaction onset year, treatment year, publication year, or case version.
+
+field_groups:
+  case_identity:
+    - EU Local Number
+    - Report Type
+    - EV Gateway Receipt Date
+  reporter_and_origin:
+    - Primary Source Qualification
+    - Primary Source Country for Regulatory Purposes
+    - Literature Reference
+  patient_summary:
+    - Patient Age Group
+    - Patient Age Group (as per reporter)
+    - Parent Child Report
+    - Patient Sex
+  embedded_reactions:
+    - Reaction List PT (Duration – Outcome - Seriousness Criteria)
+  embedded_drugs:
+    - Suspect/interacting Drug List (Drug Char - Indication PT - Action taken - [Duration - Dose - Route])
+    - Concomitant/Not Administered Drug List (Drug Char - Indication PT - Action taken - [Duration - Dose - Route])
+  linked_case_document:
+    - ICSR Form
+  derived_provenance:
+    - source_year_bucket
+
+entities:
+  - entity_id: individual_case_snapshot
+    description: >-
+      One public line-listing row for an individual EudraVigilance case in this
+      snapshot. A case generally concerns one patient and can contain multiple
+      suspected reactions, medicines, reporters, and follow-up information.
+    resource_ids:
+      - isotretinoin_line_listing
+    key_fields:
+      - EU Local Number
+    temporal_fields:
+      - EV Gateway Receipt Date
+      - source_year_bucket
+
+  - entity_id: reported_reaction
+    description: >-
+      A reaction item embedded in the case-level Reaction List PT cell, with a
+      MedDRA preferred term and reported duration, outcome, and seriousness
+      criteria where available.
+    resource_ids:
+      - isotretinoin_line_listing
+    parent_key_fields:
+      - EU Local Number
+    local_key_rule: Preserve item order within the source cell after structure-aware parsing.
+
+  - entity_id: reported_drug
+    description: >-
+      A drug item embedded in either the suspect/interacting or the
+      concomitant/not-administered cell, with role, indication, action,
+      duration, dose, and route fields where available.
+    resource_ids:
+      - isotretinoin_line_listing
+    parent_key_fields:
+      - EU Local Number
+    local_key_rule: Preserve source column and item order after structure-aware parsing.
+
+  - entity_id: icsr_form_reference
+    description: An HTML anchor in the line listing that links to the public ICSR PDF endpoint.
+    resource_ids:
+      - isotretinoin_line_listing
+    parent_key_fields:
+      - EU Local Number
+    reference_field: ICSR Form
+
+relationships:
+  - relationship_id: case_contains_reactions
+    from_entity: individual_case_snapshot
+    to_entity: reported_reaction
+    join_fields:
+      - EU Local Number
+    cardinality: one_to_many_embedded
+    evidence: >-
+      ADRReports documents that one individual case can contain more than one
+      suspected adverse reaction; the local export packs those items into the
+      Reaction List PT cell.
+    confidence: high
+
+  - relationship_id: case_contains_drugs
+    from_entity: individual_case_snapshot
+    to_entity: reported_drug
+    join_fields:
+      - EU Local Number
+    cardinality: one_to_many_embedded
+    evidence: >-
+      The line-listing schema groups reported medicinal products into
+      suspect/interacting and concomitant/not-administered drug cells.
+    confidence: high
+
+  - relationship_id: case_links_icsr_form
+    from_entity: individual_case_snapshot
+    to_entity: icsr_form_reference
+    join_fields:
+      - EU Local Number
+    cardinality: one_to_one_in_snapshot
+    evidence: Every locally profiled row contains an ICSR Form anchor.
+    confidence: high
+
+temporal_structure:
+  snapshot: Data were retrieved on 2026-08-25 and reported current through 2026-08-23.
+  gateway_receipt_date: Date the ICSR was received in EudraVigilance, not reaction onset.
+  source_year_bucket: Derived receipt-year partition provenance added during acquisition.
+  follow_up: >-
+    A case can have an initial report and follow-up reports, but this public
+    line listing does not expose a normalized longitudinal version table.
+
+alignment_notes:
+  - The canonical combined CSV contains the same 36,039 cases as the union of annual exports.
+  - The official unpartitioned export contains the same case content without source_year_bucket.
+  - EU Local Number is nonblank and unique across the canonical snapshot according to manifest validation.
+  - >-
+    Embedded drug text can contain commas inside bracketed product/substance
+    names; never split drug items on commas alone. Preserve raw cells unless a
+    structure-aware parser is used and audited.
+  - >-
+    Counting line-listing rows estimates cases in this snapshot. Counting
+    embedded reaction items estimates reported reactions and is a different
+    denominator.
+
+analysis_constraints:
+  - Reports are suspected associations and do not establish drug-event causality.
+  - Case counts cannot estimate incidence or reaction probability without an exposed denominator.
+  - The public line listing contains restricted data elements and is not a complete normalized ICSR.
+  - >-
+    "Not Specified", "Not reported", "n/a", and blank values must remain
+    distinct unless an analysis explicitly justifies harmonization.
+
+unresolved_relationships:
+  - >-
+    The packed reaction and drug cells do not expose stable item identifiers;
+    any normalized child keys must be derived from case key, source column, and
+    source order and documented as snapshot-local.
+  - >-
+    Cross-snapshot case-version lineage is not recoverable from this single
+    snapshot alone, even when the same EU Local Number appears later.

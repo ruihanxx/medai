@@ -1,0 +1,124 @@
+dataset_id: adrreports-isotretinoin
+dataset_name: EudraVigilance ADRReports line listing for ISOTRETINOIN
+version: snapshot-2026-08-23
+generated_at: "2026-08-26"
+raw_root: raw
+local_raw_root_note: >-
+  raw contains the original annual and unpartitioned CSV exports. The canonical
+  root-level CSV adds source_year_bucket and does not otherwise change the
+  official 36,039 case rows.
+
+official_sources:
+  - title: ADRReports active-substance search
+    url: https://www.adrreports.eu/en/search_subst.html
+    accessed: "2026-08-25"
+    notes: The acquisition selected ISOTRETINOIN, substance high-level code 19838.
+  - title: ADRReports data source
+    url: https://www.adrreports.eu/en/data_source.html
+    accessed: "2026-08-26"
+    notes: Defines the EudraVigilance source and public line-listing scope.
+  - title: ADRReports web report user guide
+    url: https://www.adrreports.eu/docs/Web%20report%20user%20guide%20EN.pdf
+    accessed: "2026-08-26"
+    notes: Defines the line-listing data elements, interpretation, filters, and export behavior.
+  - title: ADRReports disclaimer
+    url: https://www.adrreports.eu/en/disclaimer.html
+    accessed: "2026-08-26"
+    notes: Defines the suspected-association, denominator, and treatment-use limitations.
+
+deduplication_contract:
+  canonical_result_resource_id: isotretinoin_line_listing
+  canonical_result_set_id: isotretinoin_cases_snapshot_2026_08_23
+  rule: >-
+    Register the 36,039-case result set exactly once. Annual exports and the
+    unpartitioned official export are equivalent physical representations used
+    for partitioned reads and validation; they must not be repeated as resource
+    entries or counted as additional cases.
+  equivalent_export_evidence:
+    annual_union_records: 36039
+    unpartitioned_export_records: 36039
+    missing_from_annual_union: 0
+    extra_in_annual_union: 0
+    content_differences: 0
+
+resources:
+  - resource_id: isotretinoin_line_listing
+    result_set_id: isotretinoin_cases_snapshot_2026_08_23
+    columns:
+      - EU Local Number
+      - Report Type
+      - EV Gateway Receipt Date
+      - Primary Source Qualification
+      - Primary Source Country for Regulatory Purposes
+      - Literature Reference
+      - Patient Age Group
+      - Patient Age Group (as per reporter)
+      - Parent Child Report
+      - Patient Sex
+      - Reaction List PT (Duration – Outcome - Seriousness Criteria)
+      - Suspect/interacting Drug List (Drug Char - Indication PT - Action taken - [Duration - Dose - Route])
+      - Concomitant/Not Administered Drug List (Drug Char - Indication PT - Action taken - [Duration - Dose - Route])
+      - ICSR Form
+      - source_year_bucket
+    paths:
+      - isotretinoin_line_listing_all_through_2026.csv
+    equivalent_source_resolution:
+      annual_exports: manifest.json annual[*].raw_file
+      unpartitioned_export: manifest.json unpartitioned_official_export.raw_file
+      registration: Excluded from resources; adapter.py resolves them only for partitioned reads and validation.
+    modality: pharmacovigilance_tabular
+    file_format: csv
+    compression: none
+    encoding: utf-8-sig
+    role: canonical_case_line_listing
+    size_summary:
+      total_bytes: 27393256
+      human_readable: 26.1 MB
+    count_summary:
+      file_count: 1
+      row_count: 36039
+      column_count: 15
+      official_column_count: 14
+      derived_provenance_column_count: 1
+      unique_eu_local_number_count: 36039
+      populated_year_partition_count: 24
+    readable: true
+    sha256: a5311724490c6d6f5e06929617dd089bbd744811c7fcdadca7817fc9877117bb
+    reader_hint: >-
+      adapter.py supports canonical, annual, row, and bounded-batch reads;
+      direct readers should use UTF-8 with BOM handling and preserve packed
+      reaction/drug cells as text unless applying an audited parser.
+    source_evidence:
+      - manifest.json acquisition and equivalence validation
+      - local canonical CSV header, row-count, uniqueness, date-year, and checksum profiling
+      - ADRReports web report user guide sections 5.7 and 7.6
+    notes: >-
+      One row per public line-listing case in this snapshot. source_year_bucket
+      is derived from EV Gateway Receipt Date. A row can contain multiple
+      reactions and drugs, so row count and reaction count are not interchangeable.
+
+  - resource_id: acquisition_manifest
+    result_set_id: isotretinoin_acquisition_metadata_2026_08_25
+    paths:
+      - manifest.json
+    modality: metadata
+    file_format: json
+    compression: none
+    role: acquisition_provenance_and_validation
+    size_summary:
+      total_bytes: 19913
+      human_readable: 19.4 KB
+    count_summary:
+      file_count: 1
+      annual_bucket_count: 34
+      populated_annual_bucket_count: 24
+      zero_row_bucket_count: 10
+    readable: true
+    reader_hint: json.load
+    source_evidence:
+      - local acquisition output
+    notes: >-
+      Records source URLs, snapshot dates, annual file checksums and counts,
+      the canonical checksum, and equality validation across annual,
+      unpartitioned, and canonical representations. It contains metadata, not a
+      second copy of the case result set.
