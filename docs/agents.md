@@ -78,8 +78,9 @@ foreground operation rather than run inside the agent turn.
   preflight resource snapshot and makes one evidence-bound local-first resource
   decision from paper requirements, `computational_demand`, full data scale,
   algorithm complexity, and bounded timing when feasible. Provider
-  configuration alone never authorizes remote execution; cloud-backed data is
-  the explicit data-locality exception.
+  configuration alone never authorizes remote execution. Cloud-only data is
+  the explicit data-locality exception; with both sources, local execution uses
+  local data and remote execution uses the provider's cloud data.
 - Preprocessing audit treats `codegen/codebase/` and source data as read-only
   and writes only inside its attempt directory. Local-data audit never uses
   remote compute and may add an equivalent CPU, streaming, or small-batch

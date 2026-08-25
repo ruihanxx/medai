@@ -114,6 +114,34 @@ def test_cloud_drive_config_and_manifest_are_remote_only(
     assert "panel-secret" not in json.dumps(inputs)
 
 
+def test_local_and_cloud_data_are_recorded_together(tmp_path: Path, monkeypatch):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    data = tmp_path / "mimic-iv"
+    data.mkdir()
+    monkeypatch.setenv("AUTODL_TOKEN", "api-secret")
+    monkeypatch.setenv("AUTODL_IMAGE_UUID", "image-id")
+    monkeypatch.setenv("AUTODL_AUTOPANEL_PASSWORD", "panel-secret")
+
+    config = RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data=data,
+        siliconflow_config=None,
+        clouddrive=True,
+        cloud_dataset="mimic-iv",
+    )
+    inputs = build_run_inputs(config)
+
+    assert config.data == data.resolve()
+    assert config.cloud_dataset == "mimic-iv"
+    assert inputs["data"] == str(data.resolve())
+    assert inputs["clouddrive"] is True
+    assert inputs["cloud_source"] == "medai/mimic-iv"
+
+
 @pytest.mark.parametrize("dataset", ["../mimic", "a/b", ".", "/absolute"])
 def test_cloud_drive_rejects_unsafe_dataset_names(
     tmp_path: Path, monkeypatch, dataset: str

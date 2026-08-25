@@ -51,8 +51,6 @@ class RunConfig:
         if self.data is not None and not self.data.is_dir():
             raise ValueError(f"Data directory does not exist: {self.data}")
         if self.clouddrive:
-            if self.data is not None:
-                raise ValueError("--clouddrive cannot use a local data directory")
             if not self.cloud_dataset or not CLOUD_DATASET_PATTERN.fullmatch(
                 self.cloud_dataset
             ):
@@ -114,6 +112,7 @@ class RunConfig:
         codex_reasoning_effort: str | None = None,
         smart_replicate: bool = False,
         clouddrive: bool = False,
+        cloud_dataset: str | None = None,
     ) -> "RunConfig":
         normalized_provider = provider.strip().casefold()
         if normalized_provider == "codex":
@@ -121,7 +120,13 @@ class RunConfig:
             codex_reasoning_effort = codex_reasoning_effort or os.environ.get(
                 "MEDAI_CODEX_REASONING_EFFORT"
             )
-        cloud_dataset = str(data).strip() if clouddrive and data is not None else None
+        if cloud_dataset is not None and not clouddrive:
+            raise ValueError("--cloud-dataset requires --clouddrive")
+        resolved_cloud_dataset = (
+            cloud_dataset.strip()
+            if cloud_dataset is not None
+            else str(data).strip() if clouddrive and data is not None else None
+        )
         (
             computation_provider,
             computation_provider_config,
@@ -132,9 +137,13 @@ class RunConfig:
         ) = _resolve_computation_selection(
             output=output,
             clouddrive=clouddrive,
-            cloud_dataset=cloud_dataset,
+            cloud_dataset=resolved_cloud_dataset,
         )
-        local_data = None if clouddrive or data is None else Path(data).expanduser().resolve()
+        local_data = (
+            Path(data).expanduser().resolve()
+            if data is not None and (not clouddrive or cloud_dataset is not None)
+            else None
+        )
         config = cls(
             paper=paper.expanduser().resolve(),
             output=output.expanduser().resolve(),
@@ -147,7 +156,7 @@ class RunConfig:
             computation_provider_reference=computation_provider_reference,
             drive_provider=drive_provider,
             drive_reference=drive_reference,
-            cloud_dataset=cloud_dataset,
+            cloud_dataset=resolved_cloud_dataset,
             cloud_source=cloud_source,
             siliconflow_config=(
                 siliconflow_config.expanduser().resolve() if siliconflow_config else None
@@ -196,8 +205,6 @@ class AutoResearchConfig:
         if self.data is not None and not self.data.is_dir():
             raise ValueError(f"Base run data directory does not exist: {self.data}")
         if self.clouddrive:
-            if self.data is not None:
-                raise ValueError("Cloud-backed Auto Research cannot use local data")
             if (
                 self.computation_provider is None
                 or self.drive_provider is None
@@ -277,7 +284,7 @@ class AutoResearchConfig:
                 None if codex_reasoning_effort is None else codex_reasoning_effort
             )
 
-        data_value = None if clouddrive else base_inputs.get("data")
+        data_value = base_inputs.get("data")
         data = Path(str(data_value)).expanduser().resolve() if data_value else None
         (
             computation_provider,

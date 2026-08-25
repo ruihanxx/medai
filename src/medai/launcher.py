@@ -542,13 +542,13 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             or dataset in {".", ".."}
         ):
             raise LauncherError("--replicate requires --data as one safe dataset name")
-        if (args.dataset_path is None) == (not args.clouddrive):
+        if args.dataset_path is None and not args.clouddrive:
             raise LauncherError(
-                "--replicate requires exactly one of --dataset-path and --clouddrive"
+                "--replicate requires --dataset-path, --clouddrive, or both"
             )
         if args.clouddrive:
             cloud_dataset = dataset
-        else:
+        if args.dataset_path is not None:
             dataset_root = _optional_directory(args.dataset_path, "--dataset-path")
             assert dataset_root is not None
             data = (dataset_root / dataset).resolve()
@@ -609,14 +609,13 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             codex_model = args.codex_model
             codex_reasoning_effort = args.codex_reasoning_effort
 
-        if not inherited_inputs.get("clouddrive"):
-            data_source = inherited_inputs.get("data_source")
-            if data_source:
-                data = _optional_directory(Path(str(data_source)), "base run data")
-            elif inherited_inputs.get("data"):
-                raise LauncherError(
-                    "Base run uses local data but does not record its host source path"
-                )
+        data_source = inherited_inputs.get("data_source")
+        if data_source:
+            data = _optional_directory(Path(str(data_source)), "base run data")
+        elif inherited_inputs.get("data"):
+            raise LauncherError(
+                "Base run uses local data but does not record its host source path"
+            )
 
     if provider not in {"claude", "codex", "codex-siliconflow"}:
         raise LauncherError(f"Unsupported provider: {provider}")
@@ -780,7 +779,11 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             if args.replicate:
                 cli_args.extend(["--data", "/workspace/data"])
         if cloud_dataset:
-            cli_args.extend(["--clouddrive", "--data", cloud_dataset])
+            cli_args.append("--clouddrive")
+            if data:
+                cli_args.extend(["--cloud-dataset", cloud_dataset])
+            else:
+                cli_args.extend(["--data", cloud_dataset])
         if siliconflow_config:
             docker_args.extend(
                 [

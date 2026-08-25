@@ -27,7 +27,12 @@ implementation of the paper's methodology.
 {% if cloud_drive_enabled|default(false) %}
 - Cloud dataset name: `{{ cloud_dataset }}` (drive provider: `{{ drive_provider }}`)
 - Cloud source descriptor: `{{ cloud_source }}`. Resolve its materialized remote
-  path only through the computation-provider state; no local raw-data path exists.
+  path only through the computation-provider state.
+{% if data_dir %}
+- Local data (read-only and preferred for local execution): `{{ data_dir }}`
+{% else %}
+- No local raw-data path exists.
+{% endif %}
 - Selected provider reference: `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
 - Selected drive reference: `{{ drive_reference|default("<selected-drive-reference>") }}`
 {% else %}
@@ -115,6 +120,19 @@ JAX) rather than implementing the GPU-dependent work on CPU.
 
 {% if computation_provider %}
 {% if cloud_drive_enabled|default(false) %}
+{% if data_dir %}
+Both local and cloud data are available. Complete the local resource judgment
+before any provider operation. If the workload fits locally, use `{{ data_dir }}`
+and do not search, create, materialize cloud data, or write remote instance
+state. If local resources are insufficient, use the configured provider and
+the cloud dataset; do not upload the local dataset as a substitute.
+
+For a remote conclusion, create or safely resume the run-owned instance, read
+the selected drive document, and invoke its reviewed cloud materialization
+command for `{{ cloud_dataset }}` before any remote dataset inspection. Continue
+only after provider state reports cloud drive `completed`, and use that state's
+target as `remote_dataset_dir` for later stages.
+{% else %}
 Cloud-backed data makes remote computation mandatory even when local hardware
 would otherwise be sufficient. Select the configured provider through the
 computation-provider skill because no local raw-data path exists. If the paper
@@ -130,6 +148,7 @@ parent skill, and invoke its reviewed cloud materialization command for
 drive `completed`. Use that state's materialized target path as
 `remote_dataset_dir` for codegen, audit, planning, and replication. Never copy
 raw cloud data into the local run.
+{% endif %}
 {% if cloud_pull_handoff|default(false) %}
 
 ### Cloud materialization handoff
@@ -155,12 +174,17 @@ procedure, then return one next monitor command. If recovery is not possible,
 make the Codex CLI exit nonzero rather than continuing without data.
 {% endif %}
 {% endif %}
-For a non-cloud run, a configured provider is capacity fallback only: if the
+{% if not cloud_drive_enabled|default(false) or data_dir %}
+For a run with local data, a configured provider is capacity fallback only: if the
 evidence above establishes that the complete workload fits locally, run locally
 and do not search offers, create an instance, or write remote instance state.
 Only when local GPU, CPU, available RAM, free disk, or estimated runtime is
 insufficient may you use the configured remote computation provider, and then
 only through the resource- and image-selection procedure in
+{% else %}
+Use the configured remote computation provider only through the resource- and
+image-selection procedure in
+{% endif %}
 `{{ skills_dir }}/computation_provider/SKILL.md`. It first verifies that the
 requested resource is supported and selects the lowest-price offer satisfying
 every CPU, RAM, disk, accelerator, reliability, and runtime hard floor. For a
@@ -246,11 +270,20 @@ Track Python dependencies in `pyproject.toml` or `requirements.txt` (your choice
 **Dataset Processing and Cohort Construction**
 
 {% if cloud_drive_enabled|default(false) %}
+{% if data_dir %}
+For a local conclusion, inspect `{{ data_dir }}` directly and keep it read-only.
+For a remote conclusion, inspect only the completed materialized remote target
+recorded in provider state. Do not mix the two sources, upload local raw data,
+or materialize the cloud source when local execution was selected. In either
+case, use bounded, non-executing reads and inspect documentation or metadata
+before representative content.
+{% else %}
 Inspect only the completed materialized remote dataset directory recorded in
 the current provider state. Keep it read-only. Use bounded, non-executing reads
 and inspect documentation or metadata before representative content. Do not
 download raw files locally, create a local CPU data adapter, or inspect the
 cloud source before materialization completes.
+{% endif %}
 {% elif data_dir %}
 Inspect `{{ data_dir }}` directly as needed to implement the paper.
 Keep the raw root read-only. Bound the number of files, bytes, rows, and field
@@ -347,7 +380,7 @@ your decisions so they are inspectable and machine-readable. Schema:
 }
 ```
 
-If remote compute is required{% if cloud_drive_enabled|default(false) %} (it is
+If remote compute is required{% if cloud_drive_enabled|default(false) and not data_dir %} (it is
 mandatory for this cloud-backed run){% endif %}, `remote_compute` must instead contain these
 required fields:
 

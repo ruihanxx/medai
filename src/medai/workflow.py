@@ -366,6 +366,15 @@ def validate_codegen_remote_compute(
     return cloud_drive
 
 
+def _uses_cloud_data(
+    config: RunConfig | AutoResearchConfig,
+    plan: CodegenPlan | ReplicationPlan,
+) -> bool:
+    return config.clouddrive and (
+        config.data is None or plan.remote_compute is not None
+    )
+
+
 def _load_computation_provider_state(state_path: Path) -> dict[str, Any]:
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -496,8 +505,8 @@ def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> 
     )
 
 
-def _cloud_pull(config: RunConfig) -> None:
-    if not config.clouddrive:
+def _cloud_pull(config: RunConfig, *, use_cloud: bool) -> None:
+    if not use_cloud:
         return
     if config.cloud_dataset is None:
         raise RuntimeError("Cloud-drive mode is missing its dataset name")
@@ -514,6 +523,7 @@ def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
     if (
         config.provider != "codex"
         or not config.clouddrive
+        or config.data is not None
         or config.computation_provider is None
         or config.drive_provider is None
     ):
@@ -840,7 +850,7 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
 
     if replicate_started:
         if config.clouddrive and reconciliation["replaced"]:
-            _cloud_pull(config)
+            _cloud_pull(config, use_cloud=True)
         archive_root = _archive_replicate_attempt(config, resume_count)
         pipeline_state.invalidate_stages(
             ["replicate_agent", "report_agents"],
@@ -1089,10 +1099,11 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
         codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+        cloud_data = _uses_cloud_data(config, codegen_plan)
         validate_codegen_remote_compute(
             codegen_plan,
             computation_provider_state_path,
-            cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+            cloud_dataset=config.cloud_dataset if cloud_data else None,
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
             require_active=require_active,
@@ -1255,16 +1266,17 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     report_path = attempt_dir / "audit_report.json"
     transcript_path = attempt_dir / "audit_transcript.jsonl"
     codegen_plan = load_model(Path(state["codebase_dir"]) / "codegen_plan.json", CodegenPlan)
+    cloud_data = _uses_cloud_data(config, codegen_plan)
     cloud_drive_state = validate_codegen_remote_compute(
         codegen_plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+        cloud_dataset=config.cloud_dataset if cloud_data else None,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
     )
     remote_working_dir = (
         codegen_plan.remote_compute.remote_working_dir
-        if config.clouddrive and codegen_plan.remote_compute is not None
+        if cloud_data and codegen_plan.remote_compute is not None
         else None
     )
     remote_audit_dir = (
@@ -1279,7 +1291,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
         codebase_dir=state["codebase_dir"],
         data_dir=config.data,
-        cloud_drive_enabled=config.clouddrive,
+        cloud_drive_enabled=cloud_data,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
         computation_provider_reference=config.computation_provider_reference,
@@ -1424,16 +1436,17 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
     codebase_dir = Path(state["codebase_dir"])
     codegen_plan_path = codebase_dir / "codegen_plan.json"
     codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+    cloud_data = _uses_cloud_data(config, codegen_plan)
     cloud_drive_state = validate_codegen_remote_compute(
         codegen_plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+        cloud_dataset=config.cloud_dataset if cloud_data else None,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
     )
     remote_working_dir = (
         codegen_plan.remote_compute.remote_working_dir
-        if config.clouddrive and codegen_plan.remote_compute is not None
+        if cloud_data and codegen_plan.remote_compute is not None
         else None
     )
     prompt_path = render_prompt(
@@ -1444,7 +1457,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         codegen_plan_path=codegen_plan_path,
         audit_report_path=audit_report_path,
         data_dir=config.data,
-        cloud_drive_enabled=config.clouddrive,
+        cloud_drive_enabled=cloud_data,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
         computation_provider_reference=config.computation_provider_reference,
@@ -1499,10 +1512,11 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     def validate_outputs() -> None:
         plan = load_model(replicate_plan_path, ReplicationPlan)
         validate_replication_plan(experiments, plan)
+        cloud_data = _uses_cloud_data(config, plan)
         validate_codegen_remote_compute(
             plan,
             config.output / "remote_compute" / "instance.json",
-            cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+            cloud_dataset=config.cloud_dataset if cloud_data else None,
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
             require_active=not pipeline_state.is_stage_completed("report_agents"),
@@ -1518,13 +1532,19 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     print("enter plan stage")
     pipeline_state.start_stage("plan_agent")
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
+    cloud_data = config.clouddrive
+    if config.clouddrive and config.data is not None:
+        codegen_plan = load_model(
+            Path(state["codebase_dir"]) / "codegen_plan.json", CodegenPlan
+        )
+        cloud_data = _uses_cloud_data(config, codegen_plan)
     prompt_path = render_prompt(
         "plan/session_instructions.md",
         config.output / "prompts" / "plan.md",
         codebase_dir=state["codebase_dir"],
         paper_markdown=state["paper_markdown"],
         data_dir=config.data,
-        cloud_drive_enabled=config.clouddrive,
+        cloud_drive_enabled=cloud_data,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
@@ -1569,12 +1589,13 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     pipeline_state = PipelineState(config.output)
     transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     plan = load_model(Path(state["replicate_plan_path"]), ReplicationPlan)
+    cloud_data = _uses_cloud_data(config, plan)
     if not pipeline_state.is_stage_completed("replicate_agent"):
-        _cloud_pull(config)
+        _cloud_pull(config, use_cloud=cloud_data)
     validate_codegen_remote_compute(
         plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_dataset=config.cloud_dataset if config.clouddrive else None,
+        cloud_dataset=config.cloud_dataset if cloud_data else None,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         require_active=not pipeline_state.is_stage_completed("report_agents"),
@@ -1600,7 +1621,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         replication_dir=config.output / "replication",
         skills_dir=skills_dir(),
         computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
-        cloud_drive_enabled=config.clouddrive,
+        cloud_drive_enabled=cloud_data,
         cloud_dataset=config.cloud_dataset,
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,

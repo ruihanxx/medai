@@ -282,7 +282,7 @@ def test_run_requires_successful_init(tmp_path: Path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX wrapper integration test")
-def test_replicate_requires_one_explicit_dataset_source(tmp_path: Path):
+def test_replicate_requires_at_least_one_explicit_dataset_source(tmp_path: Path):
     launcher, env, _, _ = prepare_launcher(tmp_path)
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
@@ -292,17 +292,7 @@ def test_replicate_requires_one_explicit_dataset_source(tmp_path: Path):
     cases = [
         (
             ["--data", "dataset-a"],
-            "exactly one of --dataset-path and --clouddrive",
-        ),
-        (
-            [
-                "--data",
-                "dataset-a",
-                "--dataset-path",
-                str(dataset_root),
-                "--clouddrive",
-            ],
-            "exactly one of --dataset-path and --clouddrive",
+            "requires --dataset-path, --clouddrive, or both",
         ),
         (
             ["--data", "dataset-a", "--dataset-path", str(dataset_root)],
@@ -467,3 +457,31 @@ def test_cloud_drive_dataset_is_not_mounted_from_host(tmp_path: Path):
     calls = command_log.read_text(encoding="utf-8")
     assert "--clouddrive --data mimic-iv" in calls
     assert "dst=/workspace/data" not in calls
+
+    dataset_root = tmp_path / "datasets"
+    local_dataset = dataset_root / "mimic-iv"
+    local_dataset.mkdir(parents=True)
+    command_log.write_text("", encoding="utf-8")
+    dual_source_run = subprocess.run(
+        [
+            str(launcher),
+            "--replicate",
+            "--paper",
+            str(paper),
+            "--data",
+            "mimic-iv",
+            "--dataset-path",
+            str(dataset_root),
+            "--clouddrive",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert dual_source_run.returncode == 0, dual_source_run.stderr
+    calls = command_log.read_text(encoding="utf-8")
+    assert f"src={local_dataset},dst=/workspace/data,readonly" in calls
+    assert "--data /workspace/data --clouddrive --cloud-dataset mimic-iv" in calls

@@ -79,7 +79,12 @@ def run(
     clouddrive: bool = typer.Option(
         False,
         "--clouddrive",
-        help="Materialize --data from the configured provider cloud drive",
+        help="Make the configured provider cloud dataset available for remote execution",
+    ),
+    cloud_dataset: Optional[str] = typer.Option(
+        None,
+        "--cloud-dataset",
+        hidden=True,
     ),
     siliconflow_config: Optional[Path] = typer.Option(
         None,
@@ -141,6 +146,7 @@ def run(
                 codex_reasoning_effort=codex_reasoning_effort,
                 smart_replicate=smart_replicate,
                 clouddrive=clouddrive,
+                cloud_dataset=cloud_dataset,
             )
             inputs = build_run_inputs(config)
             workflow = create_workflow()
@@ -152,10 +158,11 @@ def run(
                 or data is not None
                 or smart_replicate
                 or clouddrive
+                or cloud_dataset is not None
             ):
                 raise ValueError(
                     "--autoresearch does not accept --paper, --repo, --data, "
-                    "--clouddrive, or --smart-replicate"
+                    "--clouddrive, --cloud-dataset, or --smart-replicate"
                 )
             if replicate_run is None:
                 raise ValueError("--autoresearch requires --replicate-run")

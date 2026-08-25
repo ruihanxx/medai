@@ -455,6 +455,44 @@ def test_cloud_remote_compute_requires_completed_matching_active_state(tmp_path:
     )
 
 
+def test_dual_source_downstream_uses_cloud_only_for_remote_plan(tmp_path: Path):
+    import medai.workflow as workflow
+
+    data = tmp_path / "data"
+    data.mkdir()
+    config = RunConfig(
+        paper=tmp_path / "paper.pdf",
+        output=tmp_path / "output",
+        provider="codex",
+        data=data,
+        clouddrive=True,
+        cloud_dataset="mimic-iv",
+    )
+    base_plan = {
+        "files": [{"path": "run.py", "responsibility": "Run"}],
+        "dependency_order": ["run.py"],
+        "entry_points": ["run.py"],
+        "shared_state": "None",
+        "ambiguities": [],
+    }
+    local_plan = CodegenPlan.model_validate(
+        {**base_plan, "remote_compute": None}
+    )
+    remote_plan = CodegenPlan.model_validate(
+        {
+            **base_plan,
+            "remote_compute": {
+                "state_path": str(config.output / "remote_compute" / "instance.json"),
+                "remote_working_dir": "/remote/work",
+                "remote_dataset_dir": "/remote/data",
+            },
+        }
+    )
+
+    assert workflow._uses_cloud_data(config, local_plan) is False
+    assert workflow._uses_cloud_data(config, remote_plan) is True
+
+
 def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
@@ -1234,7 +1272,9 @@ def test_cloud_replicate_pulls_before_agent_and_powers_off_after_validation(
     monkeypatch.setattr(workflow, "load_model", lambda _path, model: models[model])
     monkeypatch.setattr(workflow, "validate_codegen_remote_compute", lambda *_a, **_k: None)
     monkeypatch.setattr(workflow, "render_prompt", fake_render)
-    monkeypatch.setattr(workflow, "_cloud_pull", lambda _config: events.append("cloud-pull"))
+    monkeypatch.setattr(
+        workflow, "_cloud_pull", lambda _config, **_kwargs: events.append("cloud-pull")
+    )
     monkeypatch.setattr(workflow, "run_agent", lambda **_kwargs: events.append("agent"))
     monkeypatch.setattr(
         workflow,
@@ -1420,6 +1460,47 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
     assert "replacement is already running" in prompt
     assert "Do not create or release another" in prompt
     assert "Never copy\nraw cloud data into the local run" in prompt
+
+
+def test_codegen_dual_source_prefers_local_and_uses_cloud_only_for_remote(
+    tmp_path: Path,
+):
+    local_data = tmp_path / "data"
+    prompt_path = render_prompt(
+        "codegen/session_instructions.md",
+        tmp_path / "dual-codegen.md",
+        codebase_dir=tmp_path / "codebase",
+        paper_markdown=tmp_path / "paper.md",
+        claims_path=tmp_path / "claims.json",
+        experiments_path=tmp_path / "experiments.json",
+        data_dir=local_data,
+        cloud_drive_enabled=True,
+        cloud_dataset="mimic-iv",
+        drive_provider="aliyun",
+        cloud_source="medai/mimic-iv",
+        skills_dir=Path("/skills"),
+        codegen_plan_path=tmp_path / "codegen_plan.json",
+        dataset_patch_path=tmp_path / "patch.json",
+        skill_corrections_path=tmp_path / "corrections.json",
+        computation_provider_state_path=tmp_path / "instance.json",
+        local_resources={
+            "cpu": {"logical_cores": 8, "physical_cores": 4},
+            "memory": {"total_gb": 16.0, "available_gb": 12.0},
+            "disk": {"total_gb": 256.0, "free_gb": 128.0},
+            "gpus": [],
+        },
+        gpu_info=[],
+        computation_provider="AutoDL",
+        resuming=False,
+    )
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+    assert f"preferred for local execution): `{local_data}`" in prompt
+    assert "Complete the local resource judgment\nbefore any provider operation" in prompt
+    assert "do not search, create, materialize cloud data" in prompt
+    assert "If local resources are insufficient, use the configured provider" in prompt
+    assert "Cloud-backed data makes remote computation mandatory" not in prompt
+    assert "it is\nmandatory for this cloud-backed run" not in prompt
 
 
 def test_codegen_cloud_handoff_resumes_same_codex_session_after_failed_monitor(
@@ -1849,7 +1930,10 @@ def test_resume_cloud_replacement_materializes_before_archive(
             "status": "running",
         },
     )
-    monkeypatch.setattr("medai.workflow._cloud_pull", lambda _config: calls.append("pull"))
+    monkeypatch.setattr(
+        "medai.workflow._cloud_pull",
+        lambda _config, **_kwargs: calls.append("pull"),
+    )
 
     prepare_replication_resume(config)
 

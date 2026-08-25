@@ -32,15 +32,18 @@ sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend
 `MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper`,
 `--provider`, and `--data`; `--repo` is optional. `--data` is always one safe
 dataset directory name (for example `mimic-iv`) and rejects slashes, absolute
-paths, `.` and `..`. Exactly one data source is required. With
+paths, `.` and `..`. At least one data source is required. With
 `--dataset-path`, the launcher requires `<dataset-path>/<data>` to be an
 existing directory and mounts only that directory read-only. With
-`--clouddrive`, no host data directory is mounted and the provider materializes
-the `medai/<data>` cloud source onto its remote target before inspection. A
+`--clouddrive` alone, no host data directory is mounted and the provider
+materializes the `medai/<data>` cloud source onto its remote target before
+inspection. Both selectors may be supplied: local execution uses the mounted
+dataset, while resource-insufficient remote execution uses the cloud dataset
+instead of uploading the local copy. A
 missing explicitly selected local dataset is an error and never falls back to
 a billable cloud source.
-When selected drive metadata opts into cloud-pull handoff and the provider is
-direct Codex, codegen prepares and powers off an initialized SSH-ready instance,
+When a cloud-only selected drive opts into cloud-pull handoff and the provider
+is direct Codex, codegen prepares and powers off an initialized SSH-ready instance,
 then returns one foreground local monitor command. Orchestration runs that
 command without an active Codex process and resumes the same session after its
 terminal result; codegen may inspect data only after provider state records
@@ -59,8 +62,9 @@ provider is only a fallback: sufficient local resources prohibit offer search,
 instance creation, and remote state. Insufficient resources use the selected
 provider's documented GPU or CPU-only procedure; absence of a provider or of a
 provider-specific CPU-only procedure fails Codegen without reducing experiment
-scale. `--clouddrive` remains remote regardless of local capacity because raw
-data has no local path.
+scale. `--clouddrive` alone remains remote regardless of local capacity because
+raw data has no local path; when local data is also supplied, the normal
+local-first capacity decision applies.
 
 Auto Research requires `--replicate-run runs/<run_id>` and accepts an optional
 campaign `--output`. Without `--output`, the launcher atomically creates the
@@ -93,8 +97,9 @@ manifest, skips MinerU, and requires the base run to be completed with all eight
 canonical replicate stages reloadable. The launcher mounts the base run
 read-only at `/workspace/base-run`, mounts only the selected campaign output
 writable at `/workspace/autoresearch`, and remounts recorded local source data
-read-only. Cloud-backed campaigns mount no host data directory. A missing local
-source data path is an explicit error. The campaign inherits the base agent
+read-only. Cloud-only campaigns mount no host data directory; dual-source
+campaigns retain the local read-only mount. A missing recorded local source data
+path is an explicit error. The campaign inherits the base agent
 provider, model, reasoning effort, and remote provider/drive selection unless an
 allowed CLI value overrides the agent field. `codex-siliconflow` still requires
 a newly supplied secret configuration. Multiple campaigns may share one
