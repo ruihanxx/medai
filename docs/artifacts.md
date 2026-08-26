@@ -118,7 +118,10 @@ It records `runnable_node_ids`, `blocked_nodes`, blocker paths,
 `unknown` evidence. A partial decision is valid for one scope hash only.
 
 The replication plan's `verifies` fields collectively equal all runnable node
-IDs. The final report contains each C exactly once in graph order. Every claim
+IDs. For every verified node, its step description identifies every direct
+predecessor node artifact consumed, the local operation, and the concrete
+artifact/result produced; `expected_outcome` identifies the persistent output
+available to downstream steps. The final report contains each C exactly once in graph order. Every claim
 fragment contains the paper result, reproduced result, upstream results, direct
 comparison, scope blockers, exact lineage issues/paths, and exactly one of
 `close`, `not close`, or `not assessable`.

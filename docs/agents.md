@@ -48,12 +48,18 @@ loading, preprocessing, directly related configuration, and affected P-local
 updates. Model, training, validation semantics, and results remain read-only.
 
 Planning may add setup/smoke-test code but not scientific fallback semantics.
-Its steps collectively verify all runnable nodes. Replication reads paper text
-as a scientific reference, executes at full required scale, records actual
-results and real evidence for every runnable node, and never modifies source
-data. Smart Replicate receives only assigned claim anchors and writes claim-
-specific round logs. Reporting receives one C, its real ancestors, relevant
-updates/blockers, and `collect_lineage_issues(C)`; it writes one claim fragment.
+Its steps collectively verify all runnable nodes. For every verified node, the
+step description names each direct predecessor node artifact it consumes and
+the concrete artifact/result it produces. Before completion the planner starts
+from every runnable C, traverses to D, and checks description, artifact flow,
+execution order, and outcome materialization for every visited node; it corrects
+the plan in place and writes no separate self-audit artifact. Replication reads
+paper text as a scientific reference, executes at full required scale, records
+actual results and real evidence for every runnable node, and never modifies
+source data. Smart Replicate receives only assigned claim anchors and writes
+claim-specific round logs. Reporting receives one C, its real ancestors,
+relevant updates/blockers, and `collect_lineage_issues(C)`; it writes one claim
+fragment.
 
 ## Auto Research boundaries
 

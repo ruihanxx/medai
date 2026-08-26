@@ -15,6 +15,7 @@ from medai.models import (
     validate_replication_plan,
 )
 from medai.pipeline_state import PipelineState
+from medai.prompts import render_prompt
 from medai.study_graph import write_empty_node_state
 from medai.workflow import (
     _compose_reproduction_report,
@@ -100,6 +101,32 @@ def test_replication_plan_covers_all_runnable_nodes() -> None:
 
     with pytest.raises(ValueError, match="does not cover"):
         validate_replication_plan(graph, scope, _plan([["D1"], ["P1"], ["V1"]]))
+
+
+def test_plan_prompt_requires_predecessor_artifacts_and_reverse_audit(
+    tmp_path: Path,
+) -> None:
+    graph = _graph()
+    prompt = render_prompt(
+        "plan/session_instructions.md",
+        tmp_path / "plan.md",
+        codebase_dir=tmp_path / "codebase",
+        paper_markdown=tmp_path / "paper.md",
+        paper_graph_path=tmp_path / "paper_graph.json",
+        execution_scope_path=tmp_path / "execution_scope.json",
+        data_paths=(tmp_path / "data",),
+        gpu_info=[],
+        paper_graph=graph.model_dump(mode="json"),
+        runnable_node_ids=[node.id for node in graph.nodes],
+        cloud_drive_enabled=False,
+        replicate_plan_path=tmp_path / "replicate_plan.json",
+    ).read_text(encoding="utf-8")
+
+    assert "Name every direct input from the graph" in prompt
+    assert "A node ID appearing only in `verifies`" in prompt
+    assert "Mandatory reverse plan self-audit" in prompt
+    assert "start separately from every runnable terminal C" in prompt
+    assert "producer and consumer share a step" in prompt
 
 
 @pytest.mark.parametrize("bad_field", ["result", "evidence"])

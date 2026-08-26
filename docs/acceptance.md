@@ -33,7 +33,9 @@ Base replication coverage includes graph extraction prompts, runnable-only
 codegen/audit/refinement/planning, plan coverage of all active nodes, failure on
 missing actual result or evidence, per-claim report checkpoints/resume,
 claim-keyed Smart Replicate logs, deterministic report composition, and
-path-relevant issues only. Direct-Codex tests also cover structured terminal
+path-relevant issues only. Plan prompt coverage pins per-node predecessor
+artifact descriptions and the mandatory reverse C-to-D artifact-flow audit.
+Direct-Codex tests also cover structured terminal
 results, bounded same-session artifact repair, appended transcripts, and cleanup
 after success or terminal failure.
 
