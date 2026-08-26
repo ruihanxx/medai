@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from medai.preprocessing import convert_pdf_to_markdown
+from medai.prompts import render_prompt
 
 
 def test_mineru_images_are_copied_and_links_rewritten(tmp_path: Path, monkeypatch):
@@ -37,3 +38,26 @@ def test_mineru_failure_is_explicit(tmp_path: Path, monkeypatch):
         assert "without producing Markdown" in str(exc)
     else:
         raise AssertionError("MinerU failure was not raised")
+
+
+def test_paper_graph_prompt_requires_five_pass_self_audit(tmp_path: Path) -> None:
+    prompt = render_prompt(
+        "preprocessing/session_instructions.md",
+        tmp_path / "prompt.md",
+        paper_markdown=tmp_path / "paper.md",
+        artifacts_dir=tmp_path / "artifacts",
+        skills_dir=tmp_path / "skills",
+        paper_graph_path=tmp_path / "paper_graph.json",
+    ).read_text(encoding="utf-8")
+
+    for required_pass in (
+        "Paper-completeness pass",
+        "Reverse-dependency pass",
+        "Concrete-product pass",
+        "Identity-separation pass",
+        "Responsibility pass",
+    ):
+        assert required_pass in prompt
+    assert "Do not finish after the first extraction pass" in prompt
+    assert "training procedures stored in M" in prompt
+    assert "same base model with different parameters" in prompt

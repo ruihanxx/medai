@@ -15,7 +15,9 @@ never rent hardware.
 Graph coverage includes open node/provenance fields, arbitrary method/result
 JSON, global ID collisions, unknown/repeated inputs, cycles, orphan nodes,
 P→V→C statistical paths, trained-model paths, and claim-aligned Cartesian V
-blocks. No test should require a closed scientific payload enumeration.
+blocks. Prompt coverage pins the five-pass paper-completeness, reverse-edge,
+concrete-product, identity-separation, and category-responsibility self-audit.
+No test should require a closed scientific payload enumeration.
 
 Availability coverage includes exact direct D→P requirements, shared P-prefix
 branching, independent P variants on one D, forward blocker and unknown propagation, maximal runnable

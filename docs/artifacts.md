@@ -72,6 +72,13 @@ V results into the paper claim; C.paper_result holds the paper conclusion.
 Statistical paths such as D→P→V→C are valid. Inputs are AND dependencies;
 alternative paths use separate nodes.
 
+Node methods are local: P contains no fitting/evaluation logic, T owns the
+training procedure, M identifies the trained artifact without duplicating that
+procedure, V owns metric/statistical computation over its direct M/P_eval
+inputs, and C owns claim-level transformation. Model paths explicitly resolve
+as P→T→M, (M,P_eval)→V, and V→C. Every node must be concrete enough to receive
+an actual replication result and evidence.
+
 `graph/node_state.json` is an overlay bound to the paper-graph SHA-256:
 
 ```json

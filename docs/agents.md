@@ -17,7 +17,11 @@ needed columns/aggregates and never substitute a missing paper-required input.
 - Preprocessing alone writes the complete immutable paper graph. It creates
   fine-grained D/P/T/M/V/C nodes, treats V sets as Cartesian blocks, separates
   sparse endpoints, supports P→V→C, and does not create a separate grouping
-  concept.
+  concept. Before completion it rereads the paper for omitted study content,
+  reverse-audits every dependency from C to its sources, verifies that every
+  node denotes a concrete product, separates non-identical same-category
+  products, and removes content outside each node category. It corrects the
+  graph in place and emits no separate self-audit artifact.
 - Data availability reads the graph and covers every direct D→P source boundary.
   It writes only attempt-local evidence. Orchestration owns scope derivation.
 - Later agents do not edit the paper graph. They emit node-local updates in
