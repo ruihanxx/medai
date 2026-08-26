@@ -138,7 +138,7 @@ def test_availability_blocks_preprocessing_variants_independently() -> None:
     ]
 
 
-def test_unknown_requirement_keeps_scope_unknown() -> None:
+def test_unknown_requirement_blocks_only_affected_claims() -> None:
     scope = derive_graph_execution_scope(
         _graph(),
         _availability(p1="unknown", p2="available"),
@@ -146,7 +146,7 @@ def test_unknown_requirement_keeps_scope_unknown() -> None:
         report_sha256=REPORT_SHA,
     )
 
-    assert scope.verdict == "UNKNOWN"
+    assert scope.verdict == "PARTIAL"
     assert "C2" in scope.runnable_node_ids
 
 

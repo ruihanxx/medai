@@ -19,7 +19,7 @@ blocks. No test should require a closed scientific payload enumeration.
 
 Availability coverage includes exact P×upstream-D requirements, independent P
 variants on one D, forward blocker and unknown propagation, maximal runnable
-claim subgraphs, graph/report/scope hashes, and FULL/PARTIAL/NONE/UNKNOWN plus
+claim subgraphs, graph/report/scope hashes, FULL/PARTIAL/NONE verdicts, and
 scope-bound decisions.
 
 Overlay coverage includes idempotent `(source,node_id)` merge, attempt source

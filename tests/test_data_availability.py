@@ -73,10 +73,17 @@ def test_independent_preprocessing_variants_produce_maximal_claim_subgraph() -> 
     ]
 
 
-def test_unknown_on_one_claim_keeps_verdict_unknown() -> None:
+def test_unknown_on_one_claim_produces_partial_scope() -> None:
     scope = _derive(_report("unknown", "available"))
-    assert scope.verdict == "UNKNOWN"
+    assert scope.verdict == "PARTIAL"
     assert "C_stats" in scope.runnable_node_ids
+
+
+@pytest.mark.parametrize("status", ["source_blocked", "unknown"])
+def test_scope_is_none_only_when_all_claims_are_blocked(status: str) -> None:
+    scope = _derive(_report(status, status))
+    assert scope.verdict == "NONE"
+    assert scope.runnable_node_ids == []
 
 
 def test_scope_is_bound_to_availability_content() -> None:

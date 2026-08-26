@@ -103,8 +103,8 @@ origin-to-target paths.
 `execution_scope.json` binds both paper-graph and availability-report hashes.
 It records `runnable_node_ids`, `blocked_nodes`, blocker paths,
 `active_sources`, execution location, and one orchestration lifecycle verdict:
-`FULL`, `PARTIAL`, `NONE`, or `UNKNOWN`. A partial decision is valid for one
-scope hash only.
+`FULL`, `PARTIAL`, or `NONE`. Blocked nodes retain `source_blocked` versus
+`unknown` evidence. A partial decision is valid for one scope hash only.
 
 The replication plan's `verifies` fields collectively equal all runnable node
 IDs. The final report contains each C exactly once in graph order. Every claim

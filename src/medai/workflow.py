@@ -85,10 +85,6 @@ class NoRunnableClaims(RuntimeError):
     """No paper claim can run with the confirmed source data."""
 
 
-class UnknownDataAvailability(RuntimeError):
-    """Availability is uncertain and cannot be converted to a partial run."""
-
-
 def skills_dir() -> Path:
     return _skills_dir()
 
@@ -1374,7 +1370,25 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         scope = load_and_validate(report_path)
         recorded_hash = stage.get("checkpoints", {}).get("scope_sha256")
         if recorded_hash != scope.scope_sha256:
-            raise RuntimeError("Completed data-availability scope does not match its checkpoint")
+            legacy_scope = scope.model_dump(mode="json", exclude={"scope_sha256"})
+            legacy_scope["verdict"] = "UNKNOWN"
+            legacy_hash = hashlib.sha256(
+                json.dumps(legacy_scope, sort_keys=True, separators=(",", ":")).encode(
+                    "utf-8"
+                )
+            ).hexdigest()
+            if (
+                stage.get("checkpoints", {}).get("verdict") != "UNKNOWN"
+                or recorded_hash != legacy_hash
+            ):
+                raise RuntimeError(
+                    "Completed data-availability scope does not match its checkpoint"
+                )
+            pipeline_state.migrate_completed_stage_checkpoints(
+                "data_availability_agent",
+                {"scope_sha256": scope.scope_sha256, "verdict": scope.verdict},
+            )
+            print("migrated legacy UNKNOWN data-availability scope")
         print("resume data_availability_agent stage: skipped (already completed)")
         return {"execution_scope_path": str(scope_path)}
 
@@ -1478,7 +1492,7 @@ def _partial_data_message(scope: GraphExecutionScope, graph: PaperGraph) -> str:
             "Continuing will produce a partial replication. It will not represent a complete",
             "replication of the paper and cannot be used as an Auto Research base run.",
             "",
-            "Continue with the reproducible claim subgraph? [y/N]",
+            "Only the reproducible claim subgraph will be executed.",
         ]
     )
     return "\n".join(lines)
@@ -1531,11 +1545,6 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
         return {"execution_scope_path": str(scope_path)}
 
     pipeline_state.start_stage("partial_data_gate")
-    if scope.verdict == "UNKNOWN":
-        raise UnknownDataAvailability(
-            "Data availability is unknown; partial replication is not allowed. "
-            "Resolve or retry the uncertain source checks."
-        )
     if scope.verdict == "NONE":
         power_off_run_computation_instance(config)
         release_run_computation_instance(config)
@@ -1559,7 +1568,12 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
                 "--on-partial-data continue or --on-partial-data stop."
             )
         else:
-            accepted = input().strip().casefold() in {"y", "yes"}
+            accepted = (
+                input("Continue with the reproducible claim subgraph? [y/N] ")
+                .strip()
+                .casefold()
+                in {"y", "yes"}
+            )
             source = "interactive"
         decision_path = _record_partial_decision(
             config,

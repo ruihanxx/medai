@@ -114,9 +114,9 @@ def run(
         help="Allow up to five audited anchor-guided replication adjustments",
     ),
     on_partial_data: str = typer.Option(
-        "ask",
+        "continue",
         "--on-partial-data",
-        help="Partial-data policy for replication: ask, continue, or stop",
+        help="Partial-data policy for replication: continue (default), ask, or stop",
     ),
     max_iter: Optional[int] = typer.Option(
         None,
@@ -174,7 +174,7 @@ def run(
                 or smart_replicate
                 or clouddrive
                 or cloud_dataset is not None
-                or on_partial_data != "ask"
+                or on_partial_data != "continue"
             ):
                 raise ValueError(
                     "--autoresearch does not accept --paper, --repo, --data, --dataset-name, "

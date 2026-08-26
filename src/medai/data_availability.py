@@ -107,9 +107,7 @@ def derive_graph_execution_scope(
     ]
 
     blocked_claims = [item for item in blocked if category[item.node_id] == "claims"]
-    if any(item.status == "unknown" for item in blocked_claims):
-        verdict = "UNKNOWN"
-    elif not runnable_claim_ids:
+    if not runnable_claim_ids:
         verdict = "NONE"
     elif blocked_claims:
         verdict = "PARTIAL"

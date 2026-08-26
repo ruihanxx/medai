@@ -71,8 +71,9 @@ estimated or measured peak use. With dataset size `D` and unknown peak writable
 work files, remote disk defaults to `D + max(D, 10 GiB)`, while a local run over
 read-only source data requires additional free space of `max(D, 10 GiB)` at the
 actual work/output landing point. Uncertainty requires a bounded capacity probe
-and never itself authorizes remote execution; an unresolved probe stops the
-availability audit with a retryable unknown result.
+and never itself authorizes remote execution; an unresolved probe marks the
+affected claim paths as unknown. Other runnable claim paths still proceed as a
+partial replication; the run stops only when no claim remains runnable.
 A configured provider is only a fallback: sufficient local resources prohibit
 offer search, instance creation, and remote state. Demonstrated insufficiency
 uses the selected provider's documented GPU or CPU-only procedure; absence of a
@@ -82,9 +83,10 @@ local capacity because raw data has no local path; when local data is also
 supplied, the normal local-first capacity decision applies. Codegen consumes
 this persisted location decision and may not repeat or change it.
 
-Replication accepts `--on-partial-data ask|continue|stop` (default `ask`). An
-interactive PARTIAL run lists reproducible and blocked claims, their node paths,
-direct blockers, and dependency chains before asking
+Replication accepts `--on-partial-data continue|ask|stop` (default `continue`).
+A PARTIAL run lists reproducible and blocked claims, their node paths, direct
+blockers, and dependency chains, records the scope-bound decision, and proceeds
+with the runnable claim subgraph by default. Explicit interactive `ask` prompts
 `Continue with the runnable claim subgraph? [y/N]`.
 Non-interactive `ask` safely powers off and exits 3 with resume instructions;
 `stop` exits 4, records `stopped_by_user`, and releases run-owned compute. A

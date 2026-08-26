@@ -394,7 +394,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--on-partial-data",
         choices=("ask", "continue", "stop"),
-        default="ask",
+        default="continue",
     )
     parser.add_argument("--max-iter", type=int)
     parser.add_argument("--assessment-threshold", type=float)
@@ -584,7 +584,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             or args.data is not None
             or args.dataset_path is not None
             or args.clouddrive
-            or args.on_partial_data != "ask"
+            or args.on_partial_data != "continue"
         ):
             raise LauncherError(
                 "--autoresearch does not accept --paper, --repo, --data, "

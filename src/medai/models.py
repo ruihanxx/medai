@@ -194,7 +194,7 @@ class GraphExecutionScope(StrictModel):
     paper_graph_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     availability_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    verdict: Literal["FULL", "PARTIAL", "NONE", "UNKNOWN"]
+    verdict: Literal["FULL", "PARTIAL", "NONE"]
     runnable_node_ids: list[str]
     blocked_nodes: list[BlockedNode]
     active_sources: list[str]

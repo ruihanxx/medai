@@ -66,6 +66,7 @@ def test_codex_settings_are_loaded_from_environment(tmp_path: Path, monkeypatch)
     assert config.codex_model == "gpt-5.6-terra"
     assert config.codex_reasoning_effort == "high"
     assert config.smart_replicate is False
+    assert config.on_partial_data == "continue"
 
 
 def test_codex_reasoning_effort_is_validated(tmp_path: Path):

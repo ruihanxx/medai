@@ -46,7 +46,7 @@ class RunConfig:
     codex_model: str | None = None
     codex_reasoning_effort: str | None = None
     smart_replicate: bool = False
-    on_partial_data: str = "ask"
+    on_partial_data: str = "continue"
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -158,7 +158,7 @@ class RunConfig:
         codex_model: str | None = None,
         codex_reasoning_effort: str | None = None,
         smart_replicate: bool = False,
-        on_partial_data: str = "ask",
+        on_partial_data: str = "continue",
         clouddrive: bool = False,
         cloud_dataset: str | Sequence[str] | None = None,
     ) -> "RunConfig":

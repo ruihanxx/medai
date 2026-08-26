@@ -11,8 +11,9 @@ grouping. One run executes these stages:
 4. Data availability covers every P×upstream-D requirement exactly once.
    Orchestration propagates unavailable or unknown requirements forward and
    writes the hash-bound maximal claim scope.
-5. The PARTIAL gate records a scope-bound user decision. UNKNOWN, NONE, or a
-   rejected PARTIAL stops before mutation or billable execution.
+5. The PARTIAL gate records a scope-bound decision and proceeds by default.
+   NONE or an explicitly rejected PARTIAL stops before mutation or billable
+   execution.
 6. Codegen consumes only the runnable subgraph, inspects sources read-only, and
    writes code plus node-local updates. Missing required input stops explicitly.
 7. Audit checks all runnable preprocessing paths. Each issue has one origin
@@ -30,8 +31,8 @@ grouping. One run executes these stages:
 All graph inputs are AND dependencies. Availability blocking therefore flows
 through every downstream consumer. The final scope verdict is claim-based:
 `FULL` means every C is runnable, `PARTIAL` means some but not all Cs are
-runnable, `NONE` means no C is runnable, and `UNKNOWN` means a required path to
-at least one blocked C remains uncertain. Runnable IDs contain the union of
+runnable, and `NONE` means no C is runnable. An unavailable or unknown
+requirement blocks only its dependent claims. Runnable IDs contain the union of
 each runnable C and its ancestors; unrelated available nodes are not executed.
 
 Paper graph content never changes after preprocessing. Stage findings are
@@ -63,6 +64,9 @@ its change. Hard-coding anchors or editing computed output is prohibited.
 input fingerprint. A skipped completed stage first reloads and validates its
 artifacts. Reporting stores `completed_claims` in graph order. Reopening a fully
 completed run is a validation-only no-op.
+On resume, a v6 scope checkpoint written with the removed global `UNKNOWN`
+verdict is deterministically rederived from its unchanged availability report
+as `PARTIAL` or `NONE` and its checkpoint is migrated before execution.
 
 If explicit resume occurs after replication starts but before the final report,
 replication/report artifacts and cited outputs are archived under

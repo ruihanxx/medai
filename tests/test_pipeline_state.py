@@ -87,3 +87,21 @@ def test_cleanup_warning_preserves_completed_status(tmp_path: Path):
     assert manifest["cleanup_warning"]["operation"] == "release"
     assert manifest["cleanup_warning"]["error"] == "provider unavailable"
     assert manifest["cleanup_warning"]["recorded_at"]
+
+
+def test_completed_stage_checkpoints_can_be_migrated(tmp_path: Path):
+    state = PipelineState.create(tmp_path / "output", {"provider": "codex"})
+    state.start_stage("data_availability_agent")
+    state.update_stage_checkpoints(
+        "data_availability_agent", {"scope_sha256": "old", "verdict": "UNKNOWN"}
+    )
+    state.complete_stage("data_availability_agent", ["execution_scope.json"])
+
+    state.migrate_completed_stage_checkpoints(
+        "data_availability_agent", {"scope_sha256": "new", "verdict": "PARTIAL"}
+    )
+
+    assert state.get_stage_checkpoints("data_availability_agent") == {
+        "scope_sha256": "new",
+        "verdict": "PARTIAL",
+    }

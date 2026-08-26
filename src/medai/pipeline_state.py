@@ -209,6 +209,15 @@ class PipelineState:
         stage.setdefault("checkpoints", {}).update(checkpoints)
         self._save()
 
+    def migrate_completed_stage_checkpoints(
+        self, name: str, checkpoints: dict[str, Any]
+    ) -> None:
+        stage = self.state["stages"].get(name)
+        if stage is None or stage.get("status") != "completed":
+            raise RuntimeError(f"Cannot migrate incomplete stage checkpoints: {name}")
+        stage.setdefault("checkpoints", {}).update(checkpoints)
+        self._save()
+
     def complete_stage(self, name: str, outputs: list[str]) -> None:
         stage = self.state["stages"].get(name)
         if stage is None:
