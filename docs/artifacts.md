@@ -8,12 +8,19 @@ runs/<run_id>/
 ├── preflight/resources.json
 ├── preprocessing/paper.md  # MinerU Markdown audited for asset labels and formulas
 ├── preprocessing/artifacts/
+├── preprocessing/data_availability/attempt_001/
+│   ├── data_availability.json
+│   ├── data_availability_transcript.jsonl
+│   └── results/
+├── preprocessing/execution_scope.json
+├── preprocessing/partial_replication_decisions.json  # PARTIAL decisions only
 ├── preprocessing/claims.json
 ├── preprocessing/experiment_todo.json
 ├── preprocessing/preprocessing_transcript.jsonl
 ├── codegen/codebase/codegen_plan.json
 ├── codegen/codegen_transcript.jsonl
 ├── codegen/codegen_agent_result.json  # direct Codex terminal status
+├── codegen/scope_revision_<scope-sha256>.json  # evidenced late source loss only
 ├── codegen/cloud_pull/commands/  # opted-in Codex cloud handoff only
 │   ├── command_001.json
 │   ├── command_001.log
@@ -138,6 +145,14 @@ name, its experiment-specific role, and its concrete cohort/split,
 preprocessing/linkage, fitting/evaluation, and comparison usage. Dataset names
 are unique within an experiment. This is the canonical logical-dataset contract
 even when all files share one mounted or materialized root directory.
+The original experiment and claim artifacts are never reduced for a partial
+run. Each availability report covers every experiment-dataset pair with its
+mapped source, specific required content, `available|source_blocked|unknown`,
+and non-empty evidence, plus one direct dependency record per experiment.
+`execution_scope.json` binds the availability report SHA-256, its canonical
+scope SHA-256, verdict, ordered runnable IDs, direct/dependency blockers, active
+sources, and execution location. Append-only decisions bind both hashes, full
+runnable/blocked ID lists, decision source, and UTC timestamp.
 That sentence records paper-stated full-scale resources and clearly labels any
 inference for omitted resources. An unstated CPU-only requirement records the
 eight-physical-core sufficient default rather than inferring a higher count from

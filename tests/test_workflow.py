@@ -654,6 +654,37 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
                 ),
                 encoding="utf-8",
             )
+        elif name == "data_availability_attempt_001.md":
+            (working_dir / "data_availability.json").write_text(
+                json.dumps(
+                    {
+                        "capacity_decision": {
+                            "execution_location": "local",
+                            "rationale": "The local capacity probe is sufficient.",
+                        },
+                        "requirements": [
+                            {
+                                "experiment_id": "E1",
+                                "dataset": dataset,
+                                "source_kind": "local",
+                                "source_name": str(data),
+                                "required_content": "the complete cohort",
+                                "status": "available",
+                                "evidence": "The required cohort files are present.",
+                            }
+                            for dataset in ("Development cohort", "External cohort")
+                        ],
+                        "dependencies": [
+                            {
+                                "experiment_id": "E1",
+                                "depends_on": [],
+                                "evidence": "The paper defines no upstream experiment.",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
         elif name == "codegen.md":
             (output / "codegen" / "codebase" / "codegen_plan.json").write_text(
                 json.dumps(
@@ -813,6 +844,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "enter preflight stage",
         "enter preprocessing stage",
         "enter preprocessing agent stage",
+        "enter data availability agent stage",
         "enter codegen stage",
         "enter audit agent stage",
         "enter plan stage",
@@ -822,6 +854,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     assert Path(result["report_path"]).is_file()
     assert transcript_paths == [
         "preprocessing/preprocessing_transcript.jsonl",
+        "preprocessing/data_availability/attempt_001/data_availability_transcript.jsonl",
         "codegen/codegen_transcript.jsonl",
         "codegen/audit/attempt_001/audit_transcript.jsonl",
         "plan/plan_transcript.jsonl",
@@ -843,7 +876,7 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     audit_prompt = (output / "prompts" / "audit_attempt_001.md").read_text(encoding="utf-8")
     assert str(data) in audit_prompt
     assert str(output / "preprocessing" / "experiment_todo.json") in audit_prompt
-    assert "every\nexperiment and every entry in its `datasets` list" in audit_prompt
+    assert "every runnable experiment and every entry in its\n`datasets` list" in audit_prompt
     assert "Do not connect to, query, stop, release" in audit_prompt
     assert "Run the complete preprocessing locally" in audit_prompt
     plan_prompt = (output / "prompts" / "plan.md").read_text(encoding="utf-8")
@@ -876,6 +909,8 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
         "preflight",
         "preprocess_pdf",
         "preprocessing_agent",
+        "data_availability_agent",
+        "partial_data_gate",
         "codegen_agent",
         "audit_agent",
         "plan_agent",
@@ -886,9 +921,9 @@ def test_full_workflow_with_fake_agents(tmp_path: Path, monkeypatch, capsys):
     resumed = create_workflow().invoke({"config": config})
     resumed_lines = capsys.readouterr().out.splitlines()
     assert not [line for line in resumed_lines if line.startswith("enter ")]
-    assert len([line for line in resumed_lines if line.startswith("resume ")]) == 8
+    assert len([line for line in resumed_lines if line.startswith("resume ")]) == 10
     assert Path(resumed["report_path"]) == output / "report" / "reproduction_report.md"
-    assert len(transcript_paths) == 6
+    assert len(transcript_paths) == 7
 
 
 def test_replication_outputs_stay_inside_run_roots(tmp_path: Path):
@@ -1448,6 +1483,8 @@ def test_graph_stops_after_a_stage_failure(monkeypatch):
     monkeypatch.setattr(workflow, "preflight_node", succeeds)
     monkeypatch.setattr(workflow, "preprocess_pdf_node", fails)
     monkeypatch.setattr(workflow, "preprocessing_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "data_availability_agent_node", must_not_run)
+    monkeypatch.setattr(workflow, "partial_data_gate_node", must_not_run)
     monkeypatch.setattr(workflow, "codegen_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "audit_agent_node", must_not_run)
     monkeypatch.setattr(workflow, "cohort_refine_agent_node", must_not_run)
@@ -1480,6 +1517,12 @@ def test_graph_routes_failed_audit_through_cohort_refine_once(monkeypatch):
     monkeypatch.setattr(workflow, "preflight_node", stage("preflight"))
     monkeypatch.setattr(workflow, "preprocess_pdf_node", stage("preprocess_pdf"))
     monkeypatch.setattr(workflow, "preprocessing_agent_node", stage("preprocessing_agent"))
+    monkeypatch.setattr(
+        workflow,
+        "data_availability_agent_node",
+        stage("data_availability_agent"),
+    )
+    monkeypatch.setattr(workflow, "partial_data_gate_node", stage("partial_data_gate"))
     monkeypatch.setattr(workflow, "codegen_agent_node", stage("codegen_agent"))
     monkeypatch.setattr(workflow, "audit_agent_node", audit)
     monkeypatch.setattr(
@@ -1497,6 +1540,8 @@ def test_graph_routes_failed_audit_through_cohort_refine_once(monkeypatch):
         "preflight",
         "preprocess_pdf",
         "preprocessing_agent",
+        "data_availability_agent",
+        "partial_data_gate",
         "codegen_agent",
         "audit_agent",
         "cohort_refine_agent",
@@ -1540,25 +1585,11 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert "/skills/computation_provider/SKILL.md" in prompt
     assert str(tmp_path / "instance.json") in prompt
     assert "vast.ai" not in prompt.lower()
-    assert json.dumps(local_resources, sort_keys=True) in prompt
-    assert "record its release/version" in prompt
-    assert "complete supplied root's actual size" in prompt
-    assert "file and partition counts" in prompt
-    assert "eight physical cores as sufficient by default" in prompt
-    assert "Never infer a requirement above eight cores\n   from dataset size alone" in prompt
-    assert "streaming, chunked, or out-of-core implementation" in prompt
-    assert "1.2 times its estimated\n   or measured peak memory" in prompt
-    assert "20% headroom" in prompt
-    assert "exceed the\n   12-hour local time limit" in prompt
-    assert "D + max(D, 10 GiB)" in prompt
-    assert "additional free space of `max(D, 10 GiB)`" in prompt
-    assert "run a\n   bounded local capacity probe" in prompt
-    assert "Uncertainty alone never authorizes remote\n   execution" in prompt
-    assert "a configured provider is capacity fallback only" in prompt
-    assert "run locally\nand do not search offers" in prompt
+    assert json.dumps(local_resources, sort_keys=True) not in prompt
+    assert "availability stage already made the binding local/remote capacity decision" in prompt
+    assert "Do not search offers, select or rent\nan instance" in prompt
     assert "stop explicitly during Codegen" not in prompt
-    assert "already available to the reviewed adapter in\nthe process environment" in prompt
-    assert "Never treat a missing local `.env` file as missing\nconfiguration" in prompt
+    assert "configuration is\nalready available to the reviewed adapter" in prompt
 
 
 def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
@@ -1594,13 +1625,13 @@ def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
     )
 
     prompt = prompt_path.read_text(encoding="utf-8")
-    assert "Cloud-backed data makes remote computation mandatory" in prompt
-    assert "Before inspecting dataset documentation, schema, metadata, or content" in prompt
+    assert "availability stage already selected the execution location" in prompt
+    assert "created and materialized the run-owned instance" in prompt
     assert "mimic-iv" in prompt
     assert "infrastructure resume" in prompt
     assert "replacement is already running" in prompt
     assert "Do not create or release another" in prompt
-    assert "Never copy\nraw cloud data into the local run" in prompt
+    assert "completed runnable-dataset entries" in prompt
 
 
 def test_codegen_dual_source_prefers_local_and_uses_cloud_only_for_remote(
@@ -1637,9 +1668,9 @@ def test_codegen_dual_source_prefers_local_and_uses_cloud_only_for_remote(
 
     prompt = prompt_path.read_text(encoding="utf-8")
     assert f"preferred for local execution): `{local_data}`" in prompt
-    assert "Complete the local resource judgment\nbefore any provider operation" in prompt
-    assert "do not search, create, materialize cloud data" in prompt
-    assert "If local resources are insufficient, use the configured provider" in prompt
+    assert "availability stage already selected the execution location" in prompt
+    assert "Do not search offers, select or rent\nan instance" in prompt
+    assert "rematerialize skipped data" in prompt
     assert "Cloud-backed data makes remote computation mandatory" not in prompt
     assert "it is\nmandatory for this cloud-backed run" not in prompt
 
@@ -1946,8 +1977,7 @@ def test_codegen_prompt_resolves_paper_omissions_before_implementation(tmp_path:
     assert "Widely accepted medical knowledge and standard medical-research methods" in prompt
     assert "do not leave a TODO,\nsilently apply a library default" in prompt
     assert "where that\nchoice is implemented" in prompt
-    assert "stop explicitly during Codegen" in prompt
-    assert "Report the local CPU, available RAM, free disk, GPU capacity" in prompt
+    assert "scope-revision issue" in prompt
 
 
 def test_remote_plan_and_replication_prompts_require_power_off_not_release():

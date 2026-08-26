@@ -5,6 +5,8 @@ stages. By default campaigns are numbered independently below the completed base
 run's `autoresearch/` directory; an explicit campaign output may be resumed.
 Preflight records hardware resources and fingerprints the canonical base
 artifacts and codebase. A paper-only eligibility agent admits supervised
+Only a base manifest with status `completed` is eligible; `completed_partial`
+is explicitly rejected. Migrated pre-v5 completed full runs remain compatible.
 machine-learning tasks with a defined prediction target and records a concise
 research brief: problem, scientific context, proposed method, and datasets. For
 a paper that mixes prediction with statistical analysis, the decision and brief

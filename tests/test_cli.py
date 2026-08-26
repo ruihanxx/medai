@@ -321,7 +321,7 @@ def test_existing_output_resumes_matching_run(tmp_path: Path, monkeypatch):
     assert PipelineState(output).state["resume_count"] == 1
 
 
-def test_replicate_without_data_fails_in_preflight(tmp_path: Path, monkeypatch):
+def test_replicate_without_data_reaches_paper_preprocessing(tmp_path: Path, monkeypatch):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
     output = tmp_path / "output"
@@ -341,11 +341,11 @@ def test_replicate_without_data_fails_in_preflight(tmp_path: Path, monkeypatch):
     )
 
     assert result.exit_code == 1
-    assert "require --data" in result.stderr
+    assert "Host MinerU output is not configured" in result.stderr
     manifest = PipelineState(output).state
     assert manifest["status"] == "failed"
-    assert manifest["stages"]["preflight"]["status"] == "failed"
-    assert list(manifest["stages"]) == ["preflight"]
+    assert manifest["stages"]["preflight"]["status"] == "completed"
+    assert manifest["stages"]["preprocess_pdf"]["status"] == "failed"
 
 
 def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, monkeypatch):

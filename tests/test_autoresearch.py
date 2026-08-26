@@ -13,6 +13,7 @@ from medai.autoresearch import (
     _run_autoresearch_provider_operation,
     _run_experiment_command_handoff,
     _run_plan_cloud_pull_handoff,
+    _validate_base_run,
     create_autoresearch_workflow,
 )
 from medai.config import AutoResearchConfig
@@ -85,6 +86,20 @@ def _prepare_base_run(tmp_path: Path) -> Path:
                         "artifacts": ["Figure 1"],
                     }
                 ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (base_run / "preprocessing" / "execution_scope.json").write_text(
+        json.dumps(
+            {
+                "availability_report_sha256": "a" * 64,
+                "scope_sha256": "b" * 64,
+                "verdict": "FULL",
+                "runnable_experiment_ids": ["E1"],
+                "blocked_experiments": [],
+                "active_sources": [],
+                "execution_location": "local",
             }
         ),
         encoding="utf-8",
@@ -197,6 +212,20 @@ def _prepare_base_run(tmp_path: Path) -> Path:
         state.complete_stage(stage, [])
     state.mark_completed()
     return base_run
+
+
+def test_completed_partial_base_is_rejected(tmp_path: Path) -> None:
+    base_run = _prepare_base_run(tmp_path)
+    PipelineState(base_run).mark_completed(partial=True)
+    config = AutoResearchConfig.create(
+        base_run=base_run,
+        output=base_run / "autoresearch",
+        provider=None,
+        siliconflow_config=None,
+    )
+
+    with pytest.raises(RuntimeError, match="partial replication"):
+        _validate_base_run(config)
 
 
 def _configure_fake_agents(

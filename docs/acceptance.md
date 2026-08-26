@@ -26,7 +26,7 @@ resume, repeated cloud pull, report-completed no-op, power-off-before-report,
 and persistent cleanup warnings. Tests assert that no safety failure creates a
 second instance.
 
-Codegen prompt tests pin local dataset inventory before capacity selection, the
+Data-availability prompt tests pin local dataset inventory before capacity selection, the
 eight-physical-core CPU-only default, probe-only uncertainty handling, planned
 peak-memory headroom, and the distinct remote versus read-only-local disk
 formulas. Experiment artifact and prompt coverage also requires a non-empty,
@@ -47,6 +47,13 @@ audit-to-cohort-refinement routing; three-round exhaustion that continues to
 planning; local and cloud permission boundaries; same-round technical retries;
 same-session direct-Codex recovery when a successful turn omits its report; and
 codegen remaining a single scientific stage.
+
+Data-availability tests cover exact pair/dependency coverage, the four prompt
+examples, unknown propagation, cycles and unknown IDs, scope hashing,
+FULL/PARTIAL/NONE/UNKNOWN routing, scope-bound accept/reject/pending decisions,
+late Codegen/Audit source rerouting, and runnable-only downstream validation.
+CLI/launcher coverage pins the English default-No prompt, pending exit 3,
+terminal-stop exit 4, resume policies, and stdin forwarding.
 
 Replicate Agent artifact-repair mocks cover a rejected plan that resumes the
 same direct-Codex session, appends its transcript, persists the exact validation

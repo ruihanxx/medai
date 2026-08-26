@@ -30,10 +30,11 @@ the launcher invokes the host `mineru` command and mounts its temporary output
 read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
 sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
 `MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper`,
-`--provider`, and `--data`; `--repo` is optional. Repeat `--data` once for every
-dataset used by the paper (for example `--data mimic-iv --data eicu`). Each
+`--provider`; `--repo` is optional. Repeat `--data` for each explicitly supplied
+dataset (for example `--data mimic-iv --data eicu`). Each
 value is a unique safe directory name and rejects slashes, absolute paths, `.`
-and `..`. At least one data source is required. With `--dataset-path`, the
+and `..`. Data may be omitted so the paper audit can identify unsupplied
+requirements; every explicitly selected local path must still exist. With `--dataset-path`, the
 launcher requires every `<dataset-path>/<data>` directory to exist and mounts
 only the selected directories read-only. A single selection retains the
 legacy `/workspace/data` mount; multiple selections use
@@ -55,8 +56,9 @@ Provider-specific resource selection, create initialization, fallback, and
 retry behavior lives only in the metadata-selected computation-provider
 reference. Host orchestration never infers an undocumented alternative.
 
-Codegen receives the complete preflight CPU, available-memory, free-disk, and
-GPU snapshot. It first determines whether faithful full-scale execution needs a
+The data-availability agent receives the complete preflight CPU,
+available-memory, free-disk, and GPU snapshot. It first determines whether
+faithful full-scale execution needs a
 GPU, then inventories the selected local dataset's release/version, actual size,
 files, partitions, formats, and available row-count metadata before judging
 capacity. Paper-stated hardware remains distinct from inferred capacity. For
@@ -69,14 +71,23 @@ estimated or measured peak use. With dataset size `D` and unknown peak writable
 work files, remote disk defaults to `D + max(D, 10 GiB)`, while a local run over
 read-only source data requires additional free space of `max(D, 10 GiB)` at the
 actual work/output landing point. Uncertainty requires a bounded capacity probe
-and never itself authorizes remote execution; an unresolved probe stops Codegen.
+and never itself authorizes remote execution; an unresolved probe stops the
+availability audit with a retryable unknown result.
 A configured provider is only a fallback: sufficient local resources prohibit
 offer search, instance creation, and remote state. Demonstrated insufficiency
 uses the selected provider's documented GPU or CPU-only procedure; absence of a
-provider or of a provider-specific CPU-only procedure fails Codegen without
+provider or of a provider-specific CPU-only procedure fails availability without
 reducing experiment scale. `--clouddrive` alone remains remote regardless of
 local capacity because raw data has no local path; when local data is also
-supplied, the normal local-first capacity decision applies.
+supplied, the normal local-first capacity decision applies. Codegen consumes
+this persisted location decision and may not repeat or change it.
+
+Replication accepts `--on-partial-data ask|continue|stop` (default `ask`). An
+interactive PARTIAL run lists runnable/skipped experiments, direct blockers and
+dependency chains before asking `Continue with the runnable experiments? [y/N]`.
+Non-interactive `ask` safely powers off and exits 3 with resume instructions;
+`stop` exits 4, records `stopped_by_user`, and releases run-owned compute. A
+decision is valid for one scope hash only.
 
 Auto Research requires `--replicate-run runs/<run_id>` and accepts an optional
 campaign `--output`. Without `--output`, the launcher atomically creates the

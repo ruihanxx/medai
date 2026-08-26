@@ -172,6 +172,10 @@ def test_failed_audit_runs_cohort_refine_then_passes(
         "report_path": second["audit_report_path"],
         "refine_rounds_used": 1,
         "refinement_exhausted": False,
+        "issue_kinds": [],
+        "scope_sha256": json.loads(
+            Path(state["execution_scope_path"]).read_text(encoding="utf-8")
+        )["scope_sha256"],
     }
     assert after_revision.state["stages"]["codegen_agent"]["attempts"] == 1
     assert first_report.is_file()
@@ -344,6 +348,9 @@ def test_cohort_refine_provider_retry_reuses_round(
         "audit_report_path": str(
             config.output / "codegen" / "audit" / "attempt_001" / "audit_report.json"
         ),
+        "scope_sha256": json.loads(
+            Path(state["execution_scope_path"]).read_text(encoding="utf-8")
+        )["scope_sha256"],
     }
     refine_root = config.output / "codegen" / "cohort_refine"
     assert [path.name for path in refine_root.iterdir()] == ["attempt_001"]
@@ -432,6 +439,50 @@ def test_remote_state_is_local_only_audit_context(
     assert "must not connect to it or operate it" in prompt
     assert "complete metadata, modality pairing, label" in prompt
     assert remote_state_path.read_text(encoding="utf-8") == original_state
+
+
+def test_source_unavailable_routes_to_availability_without_refinement(
+    tmp_path: Path,
+    monkeypatch,
+):
+    state = _audit_state(tmp_path)
+    import medai.workflow as workflow
+
+    workflow._execution_scope(state)
+    scope = json.loads(Path(state["execution_scope_path"]).read_text(encoding="utf-8"))
+    scope["runnable_experiment_ids"] = ["E1"]
+    Path(state["execution_scope_path"]).write_text(json.dumps(scope), encoding="utf-8")
+    state.pop("_execution_scope")
+
+    def source_issue(*, working_dir, transcript_path, **_kwargs):
+        transcript_path.write_text('{"type":"done"}\n', encoding="utf-8")
+        (working_dir / "audit_report.json").write_text(
+            json.dumps(
+                {
+                    "verdict": "FAIL",
+                    "issues": [
+                        {
+                            "kind": "source_unavailable",
+                            "experiment_ids": ["E1"],
+                            "datasets": ["Cohort dataset"],
+                            "evidence": "required table X is absent",
+                            "diagnosis": "the supplied source is incomplete",
+                            "required_fix": "supply table X",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    monkeypatch.setattr("medai.workflow.run_agent", source_issue)
+    result = audit_agent_node(state)
+
+    assert audit_route(result) == "data_availability_agent"
+    checkpoints = PipelineState(state["config"].output).get_stage_checkpoints("audit_agent")
+    assert checkpoints == {}
+    report = json.loads(Path(result["audit_report_path"]).read_text(encoding="utf-8"))
+    assert report["issues"][0]["kind"] == "source_unavailable"
 
 
 def test_cloud_drive_audit_uses_isolated_remote_full_preprocessing(

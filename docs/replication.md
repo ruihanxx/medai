@@ -11,32 +11,31 @@ The LangGraph stages are:
    then write text/numeric claims and experiment definitions. Every experiment
    records all logical datasets it consumes, with exact paper names,
    experiment-specific roles, and concrete usage.
-4. `codegen_agent`: inspect supplied data through bounded, read-only,
+4. `data_availability_agent`: after experiment extraction, analyze the paper and
+   read-only supplied sources, report every experiment-dataset requirement and
+   direct paper-evidenced experiment dependency, and make the local-first
+   capacity decision. Orchestration validates coverage and the dependency graph,
+   computes the transitive closure, and writes an independent hashed execution
+   scope without deleting original experiments or claims.
+5. `partial_data_gate`: FULL continues, NONE fails without an override, UNKNOWN
+   remains retryable, and PARTIAL requires a scope-bound orchestration decision.
+   The English prompt defaults to No; non-interactive `ask` powers off remote
+   compute and records `awaiting_confirmation`.
+6. `codegen_agent`: inspect supplied data through bounded, read-only,
    non-executing reads, identify every paper-underspecified implementation
    decision before coding, resolve each using applicable medical knowledge and
    standard medical-research methods, record the executable resolution as a
-   code-generation ambiguity, inventory the selected local dataset, make the
-   local-first capacity decision, use the `computation-provider` skill only when
-   remote compute is justified, plan files, and write code. Paper-stated GPU
-   count and per-GPU VRAM are hard capacity floors; a smaller inferred workload
-   or CPU feasibility cannot substitute when local capacity is below them.
-   Unstated CPU-only hardware defaults to eight sufficient physical cores;
-   larger inferred core counts require explicit parallel-method evidence or a
-   representative benchmark beyond the local time limit. Memory follows the
-   planned streaming/chunked/out-of-core peak with 20% headroom, disk follows
-   actual dataset/work landing points, and uncertainty requires a bounded local
-   probe rather than automatic remote selection. A
-   paper-required file absent from the supplied dataset terminates codegen
-   without invention or substitution, and preprocessing audit does not start.
-   Cloud-only mode always selects the configured provider and materializes the
-   complete dataset before inspection. A dual-source run makes the same
-   local-first capacity decision as a local run, using local data when sufficient
-   and the cloud source only with a remote plan. Remote plans record the
-   completed state's read-only target as `remote_dataset_dir`.
+   code-generation ambiguity, consume the approved scope/location, plan files,
+   and write code only for runnable experiments. It may not repeat or broaden
+   the capacity decision. New concrete source-loss evidence creates a
+   scope-revision issue and returns to data availability; technical and
+   implementation failures keep their existing blocked/failed behavior.
+   Remote plans record the completed state's read-only target as
+   `remote_dataset_dir`.
    Multiple logical datasets may share that root; Codegen inventories and
    implements each experiment-dataset contract separately and stops when the
    extracted contract conflicts with the paper.
-5. `audit_agent`: exhaustively run real-data preprocessing and every applicable
+7. `audit_agent`: exhaustively run real-data preprocessing and every applicable
    independent paper-aware cohort and data-quality check, then write one compact
    JSON report containing the complete discovered issue set. A generated-code
    exception is accumulated as an issue and root-caused; it does not stop
@@ -47,17 +46,17 @@ The LangGraph stages are:
    complete preprocessing with small audit-only instrumentation, prohibit
    training/tuning/evaluation and local CPU adapters, and retrieve only
    aggregate statistics, logs, and the report—not raw or row-level data.
-   The audit covers every declared experiment-dataset pair and retains
+   The audit covers every runnable experiment-dataset pair and retains
    per-dataset evidence before any linkage or pooling.
-6. `cohort_refine_agent`: after a failed audit, fix every reported cohort
+8. `cohort_refine_agent`: after a failed audit, fix every reported cohort
    construction, data-loading, or preprocessing issue; it may update only the
    code-generation plan's `ambiguities` list and may not change models,
    training, evaluation, or generated results.
-7. `plan_agent`: check coverage, install dependencies, smoke-test, and write the
+9. `plan_agent`: check coverage, install dependencies, smoke-test, and write the
    replication plan. Every data-touching step names the exact datasets and
    explains their separate preparation, role, and combination or comparison.
-8. `replicate_agent`: execute every experiment and write evidence.
-9. `report_agents`: sequentially update one report with per-experiment
+10. `replicate_agent`: execute every runnable experiment and write evidence.
+11. `report_agents`: sequentially update one report with per-experiment
    claim/artifact comparisons, validation-anchor assessments, and a risk list
    derived from code-generation ambiguities.
 
@@ -145,6 +144,12 @@ not use the first failure as an early-exit condition. An audit-infrastructure
 interruption that prevents the complete pass exits nonzero for a same-attempt
 technical retry instead of producing an incomplete scientific verdict.
 
+Audit issues distinguish `preprocessing_defect` from `source_unavailable` and
+record affected runnable experiments and datasets. The former consumes the
+cohort-refinement budget; the latter returns to data availability without
+consuming a round. Codegen source revisions follow the same route. A new scope
+invalidates Codegen and every downstream scope-bound checkpoint.
+
 `manifest.json` is the canonical pipeline state. It records a versioned input
 fingerprint, overall and per-stage status, attempts, timestamps, outputs, and
 stage checkpoints. On reuse of an output directory, manifest versions 1–3 are
@@ -152,7 +157,8 @@ migrated to the plural dataset fields, the paper hash and output-affecting confi
 only stages marked `completed` are skipped. Every skipped stage reloads and
 validates its canonical artifacts before downstream work proceeds. A `running`
 or `failed` stage before replication starts another attempt while retaining its
-writable artifacts.
+writable artifacts. Full success is `completed`; partial success is
+`completed_partial`; user rejection is terminal `stopped_by_user`.
 Failure handling reloads the current manifest before recording the error so
 stage updates are not overwritten by stale state. Code generation records
 source preparation before invoking its agent; report generation checkpoints

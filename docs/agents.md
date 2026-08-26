@@ -28,6 +28,12 @@ reference.
   beside the stage artifacts. Before a retry overwrites a transcript, the old
   file is archived as `<name>.attempt-<N>.jsonl`. A transcript is diagnostic
   evidence, never the structured agent result.
+- `data_availability_agent` reads the paper, extracted experiments, bounded
+  read-only source evidence, resources, and reviewed provider references. It
+  writes only its numbered report/evidence/transcript, never asks the user,
+  trains, performs full preprocessing, mutates source data, or converts a
+  technical uncertainty into a skippable source blocker. Orchestration owns
+  dependency validation, closure, scope derivation, and confirmation.
 
 ## Invocation modes
 
