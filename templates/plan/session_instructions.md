@@ -16,6 +16,7 @@ You are generating a step-by-step replication plan for testing whether a paper's
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
+   - Approved execution scope: `{{ execution_scope_path }}`
 - Remote computation state, when remote compute was selected: `{{ computation_provider_state_path }}`
 
 ## Available skills
@@ -57,7 +58,8 @@ from a Figure/Table while retaining the same claim format.
 {% endif %}
 {% endfor %}
 
-The following experiments were extracted from the paper. Every claim and
+The following runnable experiments were selected by the approved execution
+scope. Plan only these experiments. Every claim and
 artifact associated with each experiment must be reproduced.
 
 {% for experiment in experiments.experiments %}

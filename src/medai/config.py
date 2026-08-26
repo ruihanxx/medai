@@ -19,6 +19,7 @@ from medai.computation_providers import (
 
 VALID_PROVIDERS = {"claude", "codex", "codex-siliconflow"}
 VALID_CODEX_REASONING_EFFORTS = {"low", "medium", "high", "xhigh", "max", "ultra"}
+VALID_PARTIAL_DATA_POLICIES = {"ask", "continue", "stop"}
 CLOUD_DATASET_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
@@ -45,6 +46,7 @@ class RunConfig:
     codex_model: str | None = None
     codex_reasoning_effort: str | None = None
     smart_replicate: bool = False
+    on_partial_data: str = "ask"
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -138,6 +140,9 @@ class RunConfig:
         ):
             choices = ", ".join(sorted(VALID_CODEX_REASONING_EFFORTS))
             raise ValueError(f"Unsupported Codex reasoning effort; choose one of: {choices}")
+        if self.on_partial_data not in VALID_PARTIAL_DATA_POLICIES:
+            choices = ", ".join(sorted(VALID_PARTIAL_DATA_POLICIES))
+            raise ValueError(f"Unsupported partial-data policy; choose one of: {choices}")
 
     @classmethod
     def create(
@@ -153,6 +158,7 @@ class RunConfig:
         codex_model: str | None = None,
         codex_reasoning_effort: str | None = None,
         smart_replicate: bool = False,
+        on_partial_data: str = "ask",
         clouddrive: bool = False,
         cloud_dataset: str | Sequence[str] | None = None,
     ) -> "RunConfig":
@@ -232,6 +238,7 @@ class RunConfig:
                 else None
             ),
             smart_replicate=smart_replicate,
+            on_partial_data=on_partial_data.strip().casefold(),
         )
         config.validate()
         return config

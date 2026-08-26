@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, TypedDict
 
@@ -15,13 +16,16 @@ from medai.artifacts import load_model, write_json
 from medai.computation_providers import get_provider_adapter
 from medai.computation_providers import skills_dir as _skills_dir
 from medai.config import AutoResearchConfig, RunConfig
+from medai.data_availability import derive_execution_scope, sha256_file
 from medai.models import (
     AgentStageResult,
     ClaimsFile,
     CodegenCloudPullRequest,
     CodegenPlan,
+    DataAvailabilityReport,
     DatasetPatchFile,
     EvidenceSummary,
+    ExecutionScope,
     Experiment,
     ExperimentTodo,
     ReplicationLog,
@@ -50,12 +54,29 @@ class WorkflowState(TypedDict, total=False):
     resources_path: str
     claims_path: str
     experiments_path: str
+    execution_scope_path: str
     codebase_dir: str
     audit_verdict: str
     audit_report_path: str
     audit_refinement_exhausted: bool
     replicate_plan_path: str
     report_path: str
+
+
+class PartialDataAwaitingConfirmation(RuntimeError):
+    """The current partial scope needs an explicit user decision."""
+
+
+class PartialDataStopped(RuntimeError):
+    """The user declined the current partial scope."""
+
+
+class NoRunnableExperiments(RuntimeError):
+    """No experiment can run with the confirmed source data."""
+
+
+class UnknownDataAvailability(RuntimeError):
+    """Availability is uncertain and cannot be converted to a partial run."""
 
 
 def skills_dir() -> Path:
@@ -66,6 +87,48 @@ def _require_agent_stage_completion(result_path: Path, stage_name: str) -> None:
     result = load_model(result_path, AgentStageResult)
     if result.status != "completed":
         raise RuntimeError(f"{stage_name} reported {result.status}: {result.error}")
+
+
+def _execution_scope(state: WorkflowState) -> ExecutionScope:
+    return load_model(Path(state["execution_scope_path"]), ExecutionScope)
+
+
+def _active_experiments(state: WorkflowState) -> ExperimentTodo:
+    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    runnable = set(_execution_scope(state).runnable_experiment_ids)
+    return ExperimentTodo(
+        experiments=[
+            experiment for experiment in experiments.experiments if experiment.experiment_id in runnable
+        ]
+    )
+
+
+_SCOPED_STAGES = [
+    "codegen_agent",
+    "audit_agent",
+    "cohort_refine_agent",
+    "plan_agent",
+    "replicate_agent",
+    "report_agents",
+]
+
+
+def _ensure_stage_scope(pipeline_state: PipelineState, stage_name: str, scope_hash: str) -> None:
+    if not pipeline_state.is_stage_completed(stage_name):
+        return
+    if pipeline_state.get_stage_checkpoints(stage_name).get("scope_sha256") == scope_hash:
+        return
+    index = _SCOPED_STAGES.index(stage_name)
+    pipeline_state.invalidate_stages(
+        _SCOPED_STAGES[index:],
+        f"Execution scope changed to {scope_hash}",
+    )
+
+
+def _checkpoint_stage_scope(
+    pipeline_state: PipelineState, stage_name: str, scope_hash: str
+) -> None:
+    pipeline_state.update_stage_checkpoints(stage_name, {"scope_sha256": scope_hash})
 
 
 def _validate_agent_artifacts_with_resume(
@@ -198,7 +261,7 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
 
     outputs = [str(replication_log_path), str(evidence_summary_path)]
     if config.smart_replicate:
-        experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+        experiments = _active_experiments(state)
         claims = load_model(Path(state["claims_path"]), ClaimsFile)
         claims_by_id = {claim.claim_id: claim for claim in claims.claims}
         for experiment in experiments.experiments:
@@ -1132,9 +1195,225 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     }
 
 
+def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
+    config = state["config"]
+    pipeline_state = PipelineState(config.output)
+    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    scope_path = config.output / "preprocessing" / "execution_scope.json"
+    stage = pipeline_state.state["stages"].get("data_availability_agent", {})
+
+    def load_and_validate(report_path: Path) -> ExecutionScope:
+        report = load_model(report_path, DataAvailabilityReport)
+        scope = derive_execution_scope(experiments, report, sha256_file(report_path))
+        write_json(scope_path, scope.model_dump(mode="json"))
+        return scope
+
+    if pipeline_state.is_stage_completed("data_availability_agent"):
+        report_path = Path(str(stage.get("checkpoints", {}).get("report_path", "")))
+        scope = load_and_validate(report_path)
+        recorded_hash = stage.get("checkpoints", {}).get("scope_sha256")
+        if recorded_hash != scope.scope_sha256:
+            raise RuntimeError("Completed data-availability scope does not match its checkpoint")
+        print("resume data_availability_agent stage: skipped (already completed)")
+        return {"execution_scope_path": str(scope_path)}
+
+    print("enter data availability agent stage")
+    previous_attempts = int(stage.get("attempts", 0))
+    pipeline_state.start_stage("data_availability_agent")
+    attempt = previous_attempts + 1
+    attempt_dir = (
+        config.output / "preprocessing" / "data_availability" / f"attempt_{attempt:03d}"
+    )
+    results_dir = attempt_dir / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    report_path = attempt_dir / "data_availability.json"
+    transcript_path = attempt_dir / "data_availability_transcript.jsonl"
+    resources_path = Path(state["resources_path"])
+    local_datasets = list(zip(config.dataset_names, config.dataset_paths, strict=True))
+    cloud_datasets = [
+        (dataset, source)
+        for dataset, source in zip(
+            config.selected_cloud_datasets,
+            config.selected_cloud_sources,
+            strict=True,
+        )
+    ]
+    prompt_path = render_prompt(
+        "data_availability/session_instructions.md",
+        config.output / "prompts" / f"data_availability_attempt_{attempt:03d}.md",
+        paper_markdown=state["paper_markdown"],
+        experiments_path=state["experiments_path"],
+        resources_path=resources_path,
+        local_datasets=local_datasets,
+        cloud_datasets=cloud_datasets,
+        report_path=report_path,
+        results_dir=results_dir,
+    )
+    session_id = run_agent(
+        provider=config.provider,
+        prompt_path=prompt_path,
+        working_dir=attempt_dir,
+        transcript_path=transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+    )
+    scope: ExecutionScope | None = None
+
+    def validate_outputs() -> None:
+        nonlocal scope
+        scope = load_and_validate(report_path)
+
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name="data_availability_agent",
+        session_id=session_id,
+        working_dir=attempt_dir,
+        transcript_path=transcript_path,
+        artifact_paths=[report_path, results_dir],
+        validate=validate_outputs,
+    )
+    assert scope is not None
+    pipeline_state.update_stage_checkpoints(
+        "data_availability_agent",
+        {
+            "report_path": str(report_path),
+            "scope_sha256": scope.scope_sha256,
+            "verdict": scope.verdict,
+        },
+    )
+    pipeline_state.complete_stage(
+        "data_availability_agent",
+        [str(report_path), str(results_dir), str(transcript_path), str(scope_path)],
+    )
+    return {"execution_scope_path": str(scope_path)}
+
+
+def _partial_data_message(scope: ExecutionScope) -> str:
+    lines = ["Partial data availability detected.", "", "Runnable experiments:"]
+    lines.extend(f"- {experiment_id}" for experiment_id in scope.runnable_experiment_ids)
+    lines.extend(["", "Experiments that will be skipped:"])
+    for blocked in scope.blocked_experiments:
+        details = list(blocked.direct_data_blockers)
+        details.extend(" -> ".join(path) for path in blocked.dependency_paths if len(path) > 1)
+        lines.append(f"- {blocked.experiment_id}: {'; '.join(details)}")
+    lines.extend(
+        [
+            "",
+            "Continuing will produce a partial replication. It will not represent a complete",
+            "replication of the paper and cannot be used as an Auto Research base run.",
+            "",
+            "Continue with the runnable experiments? [y/N]",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _record_partial_decision(
+    config: RunConfig,
+    scope: ExecutionScope,
+    *,
+    decision: str,
+    source: str,
+) -> Path:
+    path = config.output / "preprocessing" / "partial_replication_decisions.json"
+    if path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Partial-data decision log is invalid: {path}") from exc
+    else:
+        payload = {"decisions": []}
+    decisions = payload.get("decisions") if isinstance(payload, dict) else None
+    if not isinstance(decisions, list):
+        raise RuntimeError(f"Partial-data decision log is invalid: {path}")
+    decisions.append(
+        {
+            "availability_report_sha256": scope.availability_report_sha256,
+            "scope_sha256": scope.scope_sha256,
+            "runnable_experiment_ids": scope.runnable_experiment_ids,
+            "blocked_experiment_ids": [
+                item.experiment_id for item in scope.blocked_experiments
+            ],
+            "decision": decision,
+            "source": source,
+            "decided_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    write_json(path, payload)
+    return path
+
+
+def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
+    config = state["config"]
+    pipeline_state = PipelineState(config.output)
+    scope_path = Path(state["execution_scope_path"])
+    scope = load_model(scope_path, ExecutionScope)
+    checkpoints = pipeline_state.get_stage_checkpoints("partial_data_gate")
+    if (
+        pipeline_state.is_stage_completed("partial_data_gate")
+        and checkpoints.get("scope_sha256") == scope.scope_sha256
+    ):
+        print("resume partial_data_gate stage: skipped (already completed)")
+        return {"execution_scope_path": str(scope_path)}
+
+    pipeline_state.start_stage("partial_data_gate")
+    if scope.verdict == "UNKNOWN":
+        raise UnknownDataAvailability(
+            "Data availability is unknown; partial replication is not allowed. "
+            "Resolve or retry the uncertain source checks."
+        )
+    if scope.verdict == "NONE":
+        raise NoRunnableExperiments(
+            "No experiments are runnable with the available source data."
+        )
+
+    decision_path: Path | None = None
+    if scope.verdict == "PARTIAL":
+        message = _partial_data_message(scope)
+        print(message)
+        if config.on_partial_data == "continue":
+            accepted, source = True, "cli_policy_continue"
+        elif config.on_partial_data == "stop":
+            accepted, source = False, "cli_policy_stop"
+        elif not sys.stdin.isatty():
+            power_off_run_computation_instance(config)
+            pipeline_state.mark_awaiting_confirmation(scope.scope_sha256)
+            raise PartialDataAwaitingConfirmation(
+                "Confirmation is required in non-interactive mode. Resume this output with "
+                "--on-partial-data continue or --on-partial-data stop."
+            )
+        else:
+            accepted = input().strip().casefold() in {"y", "yes"}
+            source = "interactive"
+        decision_path = _record_partial_decision(
+            config,
+            scope,
+            decision="continue" if accepted else "stop",
+            source=source,
+        )
+        if not accepted:
+            power_off_run_computation_instance(config)
+            release_run_computation_instance(config)
+            pipeline_state.mark_stopped_by_user(scope.scope_sha256)
+            raise PartialDataStopped("Partial replication was stopped by the user.")
+
+    outputs = [str(scope_path)]
+    if decision_path is not None:
+        outputs.append(str(decision_path))
+    pipeline_state.update_stage_checkpoints(
+        "partial_data_gate",
+        {"scope_sha256": scope.scope_sha256, "verdict": scope.verdict},
+    )
+    pipeline_state.complete_stage("partial_data_gate", outputs)
+    return {"execution_scope_path": str(scope_path)}
+
+
 def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
+    scope = _execution_scope(state)
+    _ensure_stage_scope(pipeline_state, "codegen_agent", scope.scope_sha256)
     previous_status = pipeline_state.get_stage_status("codegen_agent")
     codebase_dir = config.output / "codegen" / "codebase"
     previous_stage = pipeline_state.state["stages"].get("codegen_agent", {})
@@ -1178,6 +1457,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
 
     print("enter codegen stage")
     pipeline_state.start_stage("codegen_agent")
+    _checkpoint_stage_scope(pipeline_state, "codegen_agent", scope.scope_sha256)
     if not source_prepared or not codebase_dir.is_dir():
         if previous_status is None and codebase_dir.is_dir() and any(codebase_dir.iterdir()):
             raise RuntimeError(f"Codebase output is not empty: {codebase_dir}")
@@ -1218,6 +1498,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         paper_markdown=state["paper_markdown"],
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
+        execution_scope_path=state["execution_scope_path"],
         data_dir=config.data,
         datasets=config.dataset_names,
         data_paths=config.dataset_paths,
@@ -1302,6 +1583,8 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
 def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
+    scope = _execution_scope(state)
+    _ensure_stage_scope(pipeline_state, "audit_agent", scope.scope_sha256)
     codegen_stage = pipeline_state.state["stages"].get("codegen_agent", {})
     codegen_attempt = int(codegen_stage.get("attempts", 0))
     if codegen_stage.get("status") != "completed" or codegen_attempt < 1:
@@ -1333,6 +1616,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     print("enter audit agent stage")
     previous_audit_status = pipeline_state.get_stage_status("audit_agent")
     pipeline_state.start_stage("audit_agent")
+    _checkpoint_stage_scope(pipeline_state, "audit_agent", scope.scope_sha256)
     scientific_attempt = refine_rounds_used + 1
     attempt_dir = config.output / "codegen" / "audit" / f"attempt_{scientific_attempt:03d}"
     scripts_dir = attempt_dir / "scripts"
@@ -1365,6 +1649,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         config.output / "prompts" / f"audit_attempt_{scientific_attempt:03d}.md",
         paper_markdown=state["paper_markdown"],
         experiments_path=state["experiments_path"],
+        execution_scope_path=state["execution_scope_path"],
         codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
         codebase_dir=state["codebase_dir"],
         data_dir=config.data,
@@ -1477,6 +1762,8 @@ def audit_route(state: WorkflowState) -> str:
 def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
+    scope = _execution_scope(state)
+    _ensure_stage_scope(pipeline_state, "cohort_refine_agent", scope.scope_sha256)
     audit_checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
     audit_report_path = Path(str(audit_checkpoints.get("report_path", "")))
     if (
@@ -1506,6 +1793,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         f"Cohort preprocessing refined after failed audit: {audit_report_path}",
     )
     pipeline_state.start_stage("cohort_refine_agent")
+    _checkpoint_stage_scope(pipeline_state, "cohort_refine_agent", scope.scope_sha256)
     attempt_dir = config.output / "codegen" / "cohort_refine" / f"attempt_{refine_round:03d}"
     attempt_dir.mkdir(parents=True, exist_ok=True)
     transcript_path = attempt_dir / "cohort_refine_transcript.jsonl"
@@ -1583,10 +1871,12 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
 def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
+    scope = _execution_scope(state)
+    _ensure_stage_scope(pipeline_state, "plan_agent", scope.scope_sha256)
     replicate_plan_path = config.output / "plan" / "replicate_plan.json"
     transcript_path = config.output / "plan" / "plan_transcript.jsonl"
     claims = load_model(Path(state["claims_path"]), ClaimsFile)
-    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    experiments = _active_experiments(state)
 
     def validate_outputs() -> None:
         plan = load_model(replicate_plan_path, ReplicationPlan)
@@ -1610,6 +1900,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
 
     print("enter plan stage")
     pipeline_state.start_stage("plan_agent")
+    _checkpoint_stage_scope(pipeline_state, "plan_agent", scope.scope_sha256)
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     cloud_data = config.clouddrive
     if config.clouddrive and config.data is not None:
@@ -1632,6 +1923,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         drive_reference=config.drive_reference,
         claims_path=state["claims_path"],
         experiments_path=state["experiments_path"],
+        execution_scope_path=state["execution_scope_path"],
         skills_dir=skills_dir(),
         computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
         replicate_plan_path=replicate_plan_path,
@@ -1667,6 +1959,8 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
 def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
+    scope = _execution_scope(state)
+    _ensure_stage_scope(pipeline_state, "replicate_agent", scope.scope_sha256)
     transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     plan = load_model(Path(state["replicate_plan_path"]), ReplicationPlan)
     cloud_data = _uses_cloud_data(config, plan)
@@ -1689,7 +1983,8 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
 
     print("enter replicate stage")
     pipeline_state.start_stage("replicate_agent")
-    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    _checkpoint_stage_scope(pipeline_state, "replicate_agent", scope.scope_sha256)
+    experiments = _active_experiments(state)
     claims = load_model(Path(state["claims_path"]), ClaimsFile)
     claims_by_id = {claim.claim_id: claim for claim in claims.claims}
     prompt_path = render_prompt(
@@ -1709,6 +2004,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
         smart=config.smart_replicate,
+        execution_scope_path=state["execution_scope_path"],
         smart_anchors=json.dumps(
             [
                 {
@@ -1765,6 +2061,8 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
 def report_agents_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
+    scope = _execution_scope(state)
+    _ensure_stage_scope(pipeline_state, "report_agents", scope.scope_sha256)
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
     claims = load_model(Path(state["claims_path"]), ClaimsFile)
     codegen_plan_path = Path(state["codebase_dir"]) / "codegen_plan.json"
@@ -1785,12 +2083,13 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             )
             if not transcript_path.is_file():
                 raise RuntimeError(f"Completed report transcript is missing: {transcript_path}")
-        pipeline_state.mark_completed()
+        pipeline_state.mark_completed(partial=scope.verdict == "PARTIAL")
         print("resume report_agents stage: skipped (already completed)")
         return {"report_path": str(report_path)}
 
     print("enter report stage")
     pipeline_state.start_stage("report_agents")
+    _checkpoint_stage_scope(pipeline_state, "report_agents", scope.scope_sha256)
     completed_experiments = set(
         pipeline_state.get_stage_checkpoints("report_agents").get("completed_experiments", [])
     )
@@ -1842,6 +2141,7 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             paper_markdown=state["paper_markdown"],
             paper_artifacts=config.output / "preprocessing" / "artifacts",
             experiments_path=state["experiments_path"],
+            execution_scope_path=state["execution_scope_path"],
             replicate_plan_path=state["replicate_plan_path"],
             codebase_dir=state["codebase_dir"],
             replication_dir=config.output / "replication",
@@ -1898,7 +2198,9 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
         "report_agents",
         [str(report_path), *transcript_paths],
     )
-    pipeline_state.mark_completed()
+    scope_path = Path(state["execution_scope_path"])
+    partial = scope_path.is_file() and load_model(scope_path, ExecutionScope).verdict == "PARTIAL"
+    pipeline_state.mark_completed(partial=partial)
     return {"report_path": str(report_path)}
 
 
@@ -1907,6 +2209,8 @@ def create_workflow():
     builder.add_node("preflight", preflight_node)
     builder.add_node("preprocess_pdf", preprocess_pdf_node)
     builder.add_node("preprocessing_agent", preprocessing_agent_node)
+    builder.add_node("data_availability_agent", data_availability_agent_node)
+    builder.add_node("partial_data_gate", partial_data_gate_node)
     builder.add_node("codegen_agent", codegen_agent_node)
     builder.add_node("audit_agent", audit_agent_node)
     builder.add_node("cohort_refine_agent", cohort_refine_agent_node)
@@ -1916,7 +2220,9 @@ def create_workflow():
     builder.add_edge(START, "preflight")
     builder.add_edge("preflight", "preprocess_pdf")
     builder.add_edge("preprocess_pdf", "preprocessing_agent")
-    builder.add_edge("preprocessing_agent", "codegen_agent")
+    builder.add_edge("preprocessing_agent", "data_availability_agent")
+    builder.add_edge("data_availability_agent", "partial_data_gate")
+    builder.add_edge("partial_data_gate", "codegen_agent")
     builder.add_edge("codegen_agent", "audit_agent")
     builder.add_conditional_edges(
         "audit_agent",

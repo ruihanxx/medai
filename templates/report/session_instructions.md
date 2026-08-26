@@ -7,6 +7,7 @@ Read:
 - Paper claims: `{{ claims_path }}`
 - Paper Markdown and figures: `{{ paper_markdown }}`, `{{ paper_artifacts }}`
 - All experiment definitions: `{{ experiments_path }}`
+- Approved execution scope: `{{ execution_scope_path }}`
 - Replication plan: `{{ replicate_plan_path }}`
 - Replication step log: `{{ replication_log_path }}`
 - Replication environment summary: `{{ evidence_summary_path }}`
@@ -40,6 +41,13 @@ top-level sections in this order:
 
 Create one subsection for every experiment. In the current experiment's
 subsection include:
+
+If the current experiment is outside `runnable_experiment_ids`, prominently
+mark it as skipped by the partial replication, cite its scope blockers, and use
+`not produced` / `not assessable` for outputs and assessments. Do not search for
+or infer execution evidence for a skipped experiment. The overall report must
+prominently identify a partial replication whenever the scope verdict is
+`PARTIAL`.
 
 1. A claim comparison table with one row for every claim assigned to the
    experiment. Each row must contain the claim ID and role, the verbatim paper

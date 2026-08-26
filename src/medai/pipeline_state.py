@@ -12,8 +12,8 @@ from typing import Any
 from medai.computation_providers import migrate_legacy_provider_inputs
 from medai.config import AutoResearchConfig, RunConfig
 
-MANIFEST_VERSION = 4
-SUPPORTED_MANIFEST_VERSIONS = {1, 2, 3, MANIFEST_VERSION}
+MANIFEST_VERSION = 5
+SUPPORTED_MANIFEST_VERSIONS = {1, 2, 3, 4, MANIFEST_VERSION}
 
 
 def build_run_inputs(config: RunConfig) -> dict[str, Any]:
@@ -125,6 +125,13 @@ class PipelineState:
         ):
             raise RuntimeError(f"Pipeline state has an invalid structure: {self.path}")
         if version != MANIFEST_VERSION:
+            if (
+                self.state.get("status") == "completed"
+                and self.state.get("stages", {}).get("report_agents", {}).get("status")
+                == "completed"
+                and "data_availability_agent" not in self.state.get("stages", {})
+            ):
+                self.state["legacy_full_scope"] = True
             self.state["inputs"] = _migrate_dataset_inputs(
                 migrate_legacy_provider_inputs(self.state["inputs"])
             )
@@ -153,6 +160,8 @@ class PipelineState:
         return state
 
     def resume(self, inputs: dict[str, Any]) -> None:
+        if self.state.get("status") == "stopped_by_user":
+            raise RuntimeError("A run stopped by the user cannot be resumed")
         recorded = self.state["inputs"]
         changed = [
             name
@@ -255,10 +264,26 @@ class PipelineState:
             self.state.pop("error", None)
             self._save()
 
-    def mark_completed(self) -> None:
-        self.state["status"] = "completed"
+    def mark_completed(self, *, partial: bool = False) -> None:
+        self.state["status"] = "completed_partial" if partial else "completed"
         self.state["completed_at"] = _now()
         self.state["current_stage"] = None
+        self.state.pop("error", None)
+        self._save()
+
+    def mark_awaiting_confirmation(self, scope_sha256: str) -> None:
+        self.state["status"] = "awaiting_confirmation"
+        self.state["current_stage"] = None
+        self.state["awaiting_scope_sha256"] = scope_sha256
+        self.state.pop("completed_at", None)
+        self.state.pop("error", None)
+        self._save()
+
+    def mark_stopped_by_user(self, scope_sha256: str) -> None:
+        self.state["status"] = "stopped_by_user"
+        self.state["current_stage"] = None
+        self.state["stopped_scope_sha256"] = scope_sha256
+        self.state["completed_at"] = _now()
         self.state.pop("error", None)
         self._save()
 

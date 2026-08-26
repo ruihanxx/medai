@@ -45,6 +45,7 @@ implementation of the paper's methodology.
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
+   - Approved execution scope: `{{ execution_scope_path }}`
 ## Available skills
 
 A catalog of scientific-computing skills is staged at
@@ -74,7 +75,9 @@ Read the paper carefully. Prioritize:
 Read the claims at `{{ claims_path }}` and experiments at `{{ experiments_path }}` as supplement to make it clear the output to yield and the structure of the experiment.
 Validation claims may originate from a Figure/Table; their `provenance.section` identifies the source label. When needed, inspect the corresponding image linked from `{{ paper_markdown }}` to implement the intermediate check.
 
-For every experiment, read its complete `datasets` list and cross-check it
+Read the execution scope first. Implement only its `runnable_experiment_ids`;
+keep the original experiment and claim artifacts unchanged. For every runnable
+experiment, read its complete `datasets` list and cross-check it
 against the paper's Methods, cohort/data, experiment, and external-validation
 text before planning files. Treat each dataset's `name`, `role`, and `usage` as
 a required experiment input contract. If a dataset used by the paper's
@@ -91,6 +94,11 @@ do not memorize numerical results for hardcoding (see Self-Review).
 First choose the computational stack, then outline the file structure.
 
 **Match the paper's computational demands.** You can refer to the extracted experiment at `{{ experiments_path }}` for computational demands of each experiment. If it is recorded `"NA"`, you need to infer the computational demands from the paper. Implement in the language and framework the methodology genuinely needs, not whichever is fastest to write. If the method's scale depends on compiled or GPU performance — a large-N numerical simulation, an iterative sampling or optimization procedure with many steps, large-scale model training or inference — use tools that deliver it: GPU-enabled libraries (PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba), C/C++ extensions via the available gcc toolchain, or R for R-native methods — pure Python/NumPy on CPU is the easy default, but it is only correct when the paper's own scale doesn't need more. An implementation that is faithful on paper but cannot run at the paper's scale will fail the replication.
+
+The availability stage already made the binding local/remote capacity decision
+recorded in `{{ execution_scope_path }}`. The resource rules below explain that
+decision's contract; use them to implement within the selected location, but do
+not repeat, override, or broaden the capacity and data-locality decision.
 
 **Explicit paper GPU requirement.** When the paper explicitly reports GPU hardware used for its full experiment, treat its GPU count and per-GPU VRAM as a required capacity floor, even if the paper does not call GPU execution “mandatory.” If the paper gives a model but omits VRAM, obtain that model's VRAM from an authoritative manufacturer specification. A local GPU setup is sufficient only when it has at least the stated GPU count and per-GPU VRAM. If it does not, you must use the configured remote computation provider; CPU feasibility, a small final tabular cohort, or a smaller inferred workload are not substitutes for the paper-stated GPU capacity.
 
@@ -115,7 +123,7 @@ or the selected drive/provider's bounded inventory procedure before finalizing
 the remote disk requirement.
 {% endif %}
 
-Decide the execution location from that inventory, the paper, every experiment's
+Use the recorded execution location, which was decided from that inventory, the paper, every experiment's
 `computational_demand`, the full-scale algorithm, and the preflight snapshot
 before using any computation provider:
 
@@ -373,15 +381,12 @@ results.
 
 Strictly follow the paper's dataset processing and cohort construction procedures.
 
-If the paper requires any data file that is absent from the supplied dataset,
-stop immediately and terminate this workflow. This is terminal regardless of
-whether the likely cause is a dataset-version mismatch, an incomplete download,
-an error in the paper, or another source mismatch.
-{% if structured_stage_result|default(false) %}Return the structured `blocked`
-stage result with a non-empty error; do not try to alter the Codex process exit
-code from a shell tool command.{% endif %} Do not invent a missing file or
-derived artifact, write code that waits for it, substitute other data, or
-continue to the preprocessing audit.
+If new concrete evidence shows that a runnable experiment's required source
+content is absent, do not invent, substitute, or silently skip it. Record the
+experiment, dataset, required content, and evidence as a source-availability
+scope-revision issue and stop so orchestration can rerun the availability stage.
+Technical failures and implementation defects remain ordinary `blocked` or
+`failed` outcomes and must never be mislabeled as unavailable source data.
 
 For large raw tables/dataframes, use this processing pattern: Reads large raw
 tables/dataframe in chunks or bounded batches, applies chunk-eligible

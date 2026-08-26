@@ -391,6 +391,11 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument("--codex-model")
     parser.add_argument("--codex-reasoning-effort")
     parser.add_argument("--smart-replicate", action="store_true")
+    parser.add_argument(
+        "--on-partial-data",
+        choices=("ask", "continue", "stop"),
+        default="ask",
+    )
     parser.add_argument("--max-iter", type=int)
     parser.add_argument("--assessment-threshold", type=float)
     return parser
@@ -542,7 +547,7 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             raise LauncherError(f"--paper must be a PDF: {paper}")
         repo = _optional_directory(args.repo, "--repo")
         dataset_names = [value.strip() for value in (args.data or [])]
-        if not dataset_names or any(
+        if any(
             not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", dataset)
             or dataset in {".", ".."}
             for dataset in dataset_names
@@ -552,10 +557,12 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             )
         if len(set(dataset_names)) != len(dataset_names):
             raise LauncherError("--data dataset names must be unique")
-        if args.dataset_path is None and not args.clouddrive:
-            raise LauncherError(
-                "--replicate requires --dataset-path, --clouddrive, or both"
-            )
+        if args.dataset_path is not None and not dataset_names:
+            raise LauncherError("--dataset-path requires at least one --data dataset name")
+        if args.clouddrive and not dataset_names:
+            raise LauncherError("--clouddrive requires at least one --data dataset name")
+        if dataset_names and args.dataset_path is None and not args.clouddrive:
+            raise LauncherError("--replicate requires --dataset-path, --clouddrive, or both")
         if args.clouddrive:
             cloud_datasets = list(dataset_names)
         if args.dataset_path is not None:
@@ -577,10 +584,11 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             or args.data is not None
             or args.dataset_path is not None
             or args.clouddrive
+            or args.on_partial_data != "ask"
         ):
             raise LauncherError(
                 "--autoresearch does not accept --paper, --repo, --data, "
-                "--dataset-path, or --clouddrive"
+                "--dataset-path, --clouddrive, or --on-partial-data"
             )
         if args.smart_replicate:
             raise LauncherError("--smart-replicate requires --replicate")
@@ -748,6 +756,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
                 provider,
                 "--output",
                 "/workspace/output",
+                "--on-partial-data",
+                args.on_partial_data,
             ]
             if mineru_output:
                 docker_args.extend(
@@ -857,6 +867,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             docker_args.extend(["--env-file", str(env_file)])
         if shutil.which("nvidia-smi"):
             docker_args.extend(["--gpus", "all"])
+        if sys.stdin.isatty():
+            docker_args.append("-i")
         subprocess.run([*docker_args, image_name, *cli_args, *forwarded], check=True)
     return 0
 
@@ -877,6 +889,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"ERROR: Required command is not available: {exc.filename}", file=sys.stderr)
         return 2
     except subprocess.CalledProcessError as exc:
+        if exc.returncode in {3, 4}:
+            return exc.returncode
         command = " ".join(str(part) for part in exc.cmd)
         print(f"ERROR: Command failed with exit code {exc.returncode}: {command}", file=sys.stderr)
         return exc.returncode or 1

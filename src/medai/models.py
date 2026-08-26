@@ -82,6 +82,66 @@ class ExperimentTodo(StrictModel):
         return self
 
 
+class DataRequirementAvailability(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    dataset: str = Field(min_length=1)
+    source_kind: Literal["local", "cloud"] | None
+    source_name: str | None
+    required_content: str = Field(min_length=1)
+    status: Literal["available", "source_blocked", "unknown"]
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def source_fields_match(self) -> "DataRequirementAvailability":
+        if (self.source_kind is None) != (self.source_name is None):
+            raise ValueError("source_kind and source_name must both be set or both be null")
+        if self.source_name is not None and not self.source_name.strip():
+            raise ValueError("source_name must not be blank")
+        return self
+
+
+class ExperimentDependency(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    depends_on: list[str]
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_dependencies(self) -> "ExperimentDependency":
+        if len(self.depends_on) != len(set(self.depends_on)):
+            raise ValueError("depends_on IDs must be unique")
+        if self.experiment_id in self.depends_on:
+            raise ValueError("an experiment cannot depend on itself")
+        return self
+
+
+class CapacityDecision(StrictModel):
+    execution_location: Literal["local", "remote"] | None
+    rationale: str = Field(min_length=1)
+
+
+class DataAvailabilityReport(StrictModel):
+    capacity_decision: CapacityDecision
+    requirements: list[DataRequirementAvailability]
+    dependencies: list[ExperimentDependency]
+
+
+class BlockedExperiment(StrictModel):
+    experiment_id: str
+    status: Literal["source_blocked", "unknown"]
+    direct_data_blockers: list[str]
+    dependency_paths: list[list[str]]
+
+
+class ExecutionScope(StrictModel):
+    availability_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verdict: Literal["FULL", "PARTIAL", "NONE", "UNKNOWN"]
+    runnable_experiment_ids: list[str]
+    blocked_experiments: list[BlockedExperiment]
+    active_sources: list[str]
+    execution_location: Literal["local", "remote"] | None
+
+
 class PlannedFile(StrictModel):
     path: str
     responsibility: str

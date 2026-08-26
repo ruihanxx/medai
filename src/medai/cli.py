@@ -14,6 +14,8 @@ from medai.pipeline_state import (
     build_run_inputs,
 )
 from medai.workflow import (
+    PartialDataAwaitingConfirmation,
+    PartialDataStopped,
     create_workflow,
     power_off_run_computation_instance,
     prepare_autoresearch_resume,
@@ -111,6 +113,11 @@ def run(
         "--smart-replicate",
         help="Allow up to five audited anchor-guided replication adjustments",
     ),
+    on_partial_data: str = typer.Option(
+        "ask",
+        "--on-partial-data",
+        help="Partial-data policy for replication: ask, continue, or stop",
+    ),
     max_iter: Optional[int] = typer.Option(
         None,
         "--max-iter",
@@ -153,6 +160,7 @@ def run(
                 smart_replicate=smart_replicate,
                 clouddrive=clouddrive,
                 cloud_dataset=cloud_dataset,
+                on_partial_data=on_partial_data,
             )
             inputs = build_run_inputs(config)
             workflow = create_workflow()
@@ -166,6 +174,7 @@ def run(
                 or smart_replicate
                 or clouddrive
                 or cloud_dataset is not None
+                or on_partial_data != "ask"
             ):
                 raise ValueError(
                     "--autoresearch does not accept --paper, --repo, --data, --dataset-name, "
@@ -198,6 +207,7 @@ def run(
         skip_release_retry = False
         if (config.output / "manifest.json").exists():
             pipeline_state = PipelineState(config.output)
+            previous_manifest_status = pipeline_state.state.get("status")
             cleanup_stage = "report_agents" if replicate else "final_report"
             skip_release_retry = bool(
                 pipeline_state.is_stage_completed(cleanup_stage)
@@ -213,7 +223,11 @@ def run(
             pipeline_state = PipelineState.create(config.output, inputs)
         run_active = True
         if replicate and pipeline_state.state.get("resume_count", 0) > 0:
-            prepare_replication_resume(config)
+            if not (
+                previous_manifest_status == "awaiting_confirmation"
+                and config.on_partial_data == "stop"
+            ):
+                prepare_replication_resume(config)
         elif autoresearch and pipeline_state.state.get("resume_count", 0) > 0:
             prepare_autoresearch_resume(config)
         result = workflow.invoke({"config": config})
@@ -229,6 +243,12 @@ def run(
                     f"WARNING: {completion_label.casefold()} completed but release failed: {cleanup_exc}",
                     err=True,
                 )
+    except PartialDataAwaitingConfirmation as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=3) from exc
+    except PartialDataStopped as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=4) from exc
     except Exception as exc:
         if "run_active" in locals() and (config.output / "manifest.json").is_file():
             cleanup_error = None
