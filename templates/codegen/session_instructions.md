@@ -25,6 +25,14 @@ reported result into generated output, substitute synthetic data, or silently
 downsize. Reuse paper code when it is faithful; patch it when needed and leave
 the copied source runnable.
 
+When implementing a paper figure or chart, open and inspect its linked image
+artifact rather than relying only on the caption. Identify the corresponding
+plot type and supported formatting parameters in the chosen Python plotting
+package, then reproduce the observable layout, dimensions, axes, scales,
+legends, colors, line and marker styles, fonts, uncertainty displays, and
+annotations in code as closely as practical. Plot only actual reproduced data;
+never infer or hard-code paper results from image pixels.
+
 ## Data and execution
 
 Use only sources activated by the scope. Make dataset paths configurable and
