@@ -88,6 +88,10 @@ dependency chains before asking `Continue with the runnable experiments? [y/N]`.
 Non-interactive `ask` safely powers off and exits 3 with resume instructions;
 `stop` exits 4, records `stopped_by_user`, and releases run-owned compute. A
 decision is valid for one scope hash only.
+For local-only data, Availability may select remote execution but cannot search
+offers, rent, or upload before the gate; Codegen realizes that approved decision
+after confirmation and transfers only runnable-scope data. Cloud-only and
+dual-source remote scopes are materialized and audited by Availability itself.
 
 Auto Research requires `--replicate-run runs/<run_id>` and accepts an optional
 campaign `--output`. Without `--output`, the launcher atomically creates the

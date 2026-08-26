@@ -1587,9 +1587,10 @@ def test_codegen_remote_computation_routes_through_generic_skill(tmp_path: Path)
     assert "vast.ai" not in prompt.lower()
     assert json.dumps(local_resources, sort_keys=True) not in prompt
     assert "availability stage already made the binding local/remote capacity decision" in prompt
-    assert "Do not search offers, select or rent\nan instance" in prompt
+    assert "If data is local-only and the\napproved scope says `remote`" in prompt
+    assert "If the scope says `local`,\ndo not search offers or create an instance" in prompt
     assert "stop explicitly during Codegen" not in prompt
-    assert "configuration is\nalready available to the reviewed adapter" in prompt
+    assert "secrets must never be printed" in prompt
 
 
 def test_codegen_cloud_drive_forces_remote_materialization_before_inspection(
@@ -1669,7 +1670,7 @@ def test_codegen_dual_source_prefers_local_and_uses_cloud_only_for_remote(
     prompt = prompt_path.read_text(encoding="utf-8")
     assert f"preferred for local execution): `{local_data}`" in prompt
     assert "availability stage already selected the execution location" in prompt
-    assert "Do not search offers, select or rent\nan instance" in prompt
+    assert "reuse the state" in prompt
     assert "rematerialize skipped data" in prompt
     assert "Cloud-backed data makes remote computation mandatory" not in prompt
     assert "it is\nmandatory for this cloud-backed run" not in prompt

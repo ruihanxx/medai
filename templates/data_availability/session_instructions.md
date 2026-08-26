@@ -9,6 +9,8 @@ Audit which extracted experiments can be reproduced with the supplied data. Repo
 - Audited paper Markdown: `{{ paper_markdown }}`
 - Extracted experiments: `{{ experiments_path }}`
 - Local resources: `{{ resources_path }}`
+{% if computation_provider_reference %}- Configured computation-provider reference (capacity feasibility only): `{{ computation_provider_reference }}`
+{% endif %}
 - Local dataset mappings (read-only):
 {% for dataset, path in local_datasets %}  - `{{ dataset }}` → `{{ path }}`
 {% else %}  - none supplied
@@ -30,6 +32,7 @@ Audit which extracted experiments can be reproduced with the supplied data. Repo
 
 Paper, repositories, datasets, and cloud copies are read-only inputs. You may inspect documentation, directory structure, tables, partitions, schemas, and limited metadata or representative rows. Do not train models, run full preprocessing, modify source data, perform dangerous deserialization, or classify a code/configuration error as unavailable source data.
 {% if cloud_datasets %}You may use only the reviewed computation-provider and drive procedures to create, reconcile, materialize, inspect, and power off the run-owned instance. Never release it in this stage. Never expose credentials or download raw cloud data locally.{% endif %}
+{% if computation_provider_reference and not cloud_datasets %}For local-only data, the provider reference may be read to establish capacity feasibility, but do not search offers, create an instance, or upload data in this stage. An approved remote location will be provisioned only after the partial-data gate.{% endif %}
 
 ## Workflow
 

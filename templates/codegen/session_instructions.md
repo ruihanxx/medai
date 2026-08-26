@@ -246,17 +246,21 @@ failed offer, or continue after the third create attempt fails.
 {% endif %}
 
 {% if computation_provider %}
-The availability stage already selected the execution location and, when cloud
-data required it, created and materialized the run-owned instance recorded at
-`{{ computation_provider_state_path }}`. Read
+The availability stage already selected the execution location. Read
 `{{ skills_dir }}/computation_provider/SKILL.md` and the selected reference at
 `{{ computation_provider_reference|default("<selected-provider-reference>") }}`
-only to reuse that state for implementation setup. If cloud data is active,
-also read `{{ drive_reference|default("<selected-drive-reference>") }}` and use
-only the completed runnable-dataset entries. Do not search offers, select or rent
-an instance, rematerialize skipped data, or revise the recorded capacity
-decision. The host project `.env` is intentionally absent; configuration is
-already available to the reviewed adapter, and secrets must never be printed.
+only to realize that binding decision. If cloud data is active, Availability
+already created and materialized the run-owned instance at
+`{{ computation_provider_state_path }}`: read
+`{{ drive_reference|default("<selected-drive-reference>") }}`, reuse the state,
+and use only completed runnable-dataset entries. If data is local-only and the
+approved scope says `remote`, create the run-owned instance now—after the gate—
+using the recorded capacity floors and reviewed provider selection procedure,
+then upload only the required runnable-scope data. If the scope says `local`,
+do not search offers or create an instance. Never rematerialize skipped data,
+upload skipped local data, or revise the recorded location/capacity decision.
+The host project `.env` is intentionally absent; configuration is already
+available to the reviewed adapter, and secrets must never be printed.
 {% endif %}
 
 If a successful, evidence-based procedure conflicts with the selected skill
