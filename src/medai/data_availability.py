@@ -62,10 +62,7 @@ def derive_execution_scope(
 
     direct_status: dict[str, str] = {experiment_id: "available" for experiment_id in experiment_ids}
     direct_blockers: dict[str, list[str]] = {experiment_id: [] for experiment_id in experiment_ids}
-    active_sources: list[str] = []
     for requirement in report.requirements:
-        if requirement.source_name and requirement.source_name not in active_sources:
-            active_sources.append(requirement.source_name)
         if requirement.status == "unknown":
             direct_status[requirement.experiment_id] = "unknown"
         elif (
@@ -97,6 +94,14 @@ def derive_execution_scope(
         resolve(experiment_id)
 
     runnable = [experiment_id for experiment_id in experiment_ids if resolved[experiment_id] == "available"]
+    active_sources: list[str] = []
+    for requirement in report.requirements:
+        if (
+            requirement.experiment_id in runnable
+            and requirement.source_name
+            and requirement.source_name not in active_sources
+        ):
+            active_sources.append(requirement.source_name)
     blocked = [
         BlockedExperiment(
             experiment_id=experiment_id,

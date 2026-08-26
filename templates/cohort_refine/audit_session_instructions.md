@@ -17,6 +17,7 @@ This retry does not represent another scientific refinement round.
 ## Inputs
 - Paper Markdown: `{{ paper_markdown }}`
 - Experiments and their required dataset uses: `{{ experiments_path }}`
+- Approved execution scope: `{{ execution_scope_path }}`
 - Generated codebase (read-only for this audit): `{{ codebase_dir }}`
 - Code-generation plan and ambiguities: `{{ codegen_plan_path }}`
 {% if cloud_drive_enabled %}
@@ -93,8 +94,9 @@ sequence structure, target/group expectations, missing-data handling,
 deduplication, splitting, and any stated balancing such as SMOTE. Treat paper
 values as sanity context, never as numbers to hard-code or tune toward.
 
-Read `{{ experiments_path }}` and build an audit checklist containing every
-experiment and every entry in its `datasets` list. For each named dataset,
+Read `{{ experiments_path }}` and `{{ execution_scope_path }}` and build an
+audit checklist containing every runnable experiment and every entry in its
+`datasets` list. Do not audit skipped experiments. For each named dataset,
 check its stated role and usage against the paper and locate the corresponding
 generated loading/preprocessing path. A missing dataset path, a dataset used in
 the wrong role, or a generic loader that cannot distinguish the required
@@ -208,6 +210,9 @@ Write only this compact JSON object to `{{ report_path }}`:
   "verdict": "FAIL",
   "issues": [
     {
+      "kind": "preprocessing_defect",
+      "experiment_ids": ["E1"],
+      "datasets": ["paper-exact dataset name"],
       "evidence": "Concise observed facts, aggregate values, and supporting result/log paths.",
       "diagnosis": "The evidence-bound causal preprocessing or data-contract defect, not merely a symptom.",
       "required_fix": "The exact cohort, loading, or preprocessing correction required."
@@ -218,8 +223,14 @@ Write only this compact JSON object to `{{ report_path }}`:
 
 Use exactly the two top-level fields shown. `PASS` requires an empty `issues`
 list. `FAIL` requires the complete accumulated set of distinct actionable
-issues and at least one issue. Each issue must contain exactly the three
-non-empty strings `evidence`, `diagnosis`, and `required_fix`. Keep evidence
+issues and at least one issue. Each issue must contain exactly `kind`,
+`experiment_ids`, `datasets`, `evidence`, `diagnosis`, and `required_fix`.
+Use `preprocessing_defect` for generated loading/cohort/preprocessing defects;
+use `source_unavailable` only for concrete evidence that required source content
+itself is absent or incomplete. Technical/provider failures are not source
+unavailability and must exit without a verdict. List every affected runnable
+experiment and paper-exact dataset (an empty dataset list is allowed only when
+the defect is not dataset-specific). Keep evidence
 observational, keep diagnosis causal without unsupported speculation, and keep
 the required fix testable. Leave detailed commands and statistics in
 `{{ results_dir }}` rather than copying them into the report.

@@ -16,7 +16,7 @@ You are generating a step-by-step replication plan for testing whether a paper's
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
-   - Approved execution scope: `{{ execution_scope_path }}`
+   - Approved execution scope: `{{ execution_scope_path|default("legacy full scope") }}`
 - Remote computation state, when remote compute was selected: `{{ computation_provider_state_path }}`
 
 ## Available skills

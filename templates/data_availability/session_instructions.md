@@ -17,11 +17,19 @@ Audit which extracted experiments can be reproduced with the supplied data. Repo
 {% for dataset, path in cloud_datasets %}  - `{{ dataset }}` → `{{ path }}`
 {% else %}  - none available
 {% endfor %}
+{% if scope_revision_reports %}- Later source-availability findings that require a fresh scope:
+{% for path in scope_revision_reports %}  - `{{ path }}`
+{% endfor %}{% endif %}
 - Write the report to `{{ report_path }}` and supporting evidence under `{{ results_dir }}`.
+{% if cloud_datasets %}- Selected computation-provider reference: `{{ computation_provider_reference }}`
+- Selected drive reference: `{{ drive_reference }}`
+- Provider state path: `{{ computation_provider_state_path }}`
+{% endif %}
 
 ## Permission boundary
 
 Paper, repositories, datasets, and cloud copies are read-only inputs. You may inspect documentation, directory structure, tables, partitions, schemas, and limited metadata or representative rows. Do not train models, run full preprocessing, modify source data, perform dangerous deserialization, or classify a code/configuration error as unavailable source data.
+{% if cloud_datasets %}You may use only the reviewed computation-provider and drive procedures to create, reconcile, materialize, inspect, and power off the run-owned instance. Never release it in this stage. Never expose credentials or download raw cloud data locally.{% endif %}
 
 ## Workflow
 
@@ -29,6 +37,10 @@ Paper, repositories, datasets, and cloud copies are read-only inputs. You may in
 2. Map each paper dataset to a supplied local or cloud source. Inspect that source read-only and cite concrete, non-empty evidence. Use `available` only when the required content is present, `source_blocked` only for confirmed missing/incomplete source content, and `unknown` for ambiguity, technical failures, permissions/network/API uncertainty, or evidence that is insufficient.
 3. Record every experiment's direct `depends_on` relationships with paper evidence. A dependency exists when an experiment consumes another experiment's model, weights, derived cohort, features, or intermediate artifact. Sharing a method or metric, comparing results, or appearing later in the paper does not by itself create a dependency. Use `unknown` on the affected requirement when the paper does not let you determine whether a needed upstream artifact can be produced.
 4. Assess capacity using the full candidate runnable experiments and the local CPU, RAM, GPU, free work disk, representative capacity probes, and the 12-hour full-scale limit. Prefer local execution when sufficient. Select `remote` only when local capacity is demonstrably insufficient and remote compute is configured; do not use remote compute to rescue missing local source data.
+   Preserve paper-stated GPU count and per-GPU VRAM as hard floors. For CPU-only work with no paper hardware requirement, eight physical cores are sufficient by default; dataset size alone cannot raise that floor. Choose streaming/chunked/out-of-core access before estimating memory and require 20% headroom (`available RAM >= 1.2 × peak`). Let `D` be the deduplicated source size and `W` peak writable work data; when `W` is unknown use `max(D, 10 GiB)`, so remote free disk requires `D + max(D, 10 GiB)` and local execution over read-only data requires additional `max(D, 10 GiB)`. If runtime, memory, or disk remains uncertain, run a bounded representative probe and record its basis and extrapolation; unresolved uncertainty is `unknown`, never permission to rent.
+{% if cloud_only %}   This is cloud-only data. Before the final report, select an instance that satisfies the complete candidate experiment capacity, materialize each cloud dataset independently, and audit each materialized directory read-only. A confirmed absent or empty source directory may be `source_blocked`; network, permission, API, or uncertain responses are technical failures, not skippable data.
+{% elif dual_source %}   This is a dual-source run. Audit local data first and compute the provisional locally runnable dependency closure. If local capacity is sufficient for it, do not access or operate cloud infrastructure. Only when those runnable experiments genuinely require remote execution may you create an instance and audit their corresponding cloud copies. Cloud evidence may shrink that scope, but cloud billing must never be triggered to rescue a locally missing source.
+{% endif %}
 5. Recheck exact pair coverage, source mappings, evidence, and dependencies. The orchestrator will validate IDs, reject cycles, and compute the transitive closure itself.
 
 Dependency examples:

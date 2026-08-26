@@ -7,7 +7,7 @@ Read:
 - Paper claims: `{{ claims_path }}`
 - Paper Markdown and figures: `{{ paper_markdown }}`, `{{ paper_artifacts }}`
 - All experiment definitions: `{{ experiments_path }}`
-- Approved execution scope: `{{ execution_scope_path }}`
+- Approved execution scope: `{{ execution_scope_path|default("legacy full scope") }}`
 - Replication plan: `{{ replicate_plan_path }}`
 - Replication step log: `{{ replication_log_path }}`
 - Replication environment summary: `{{ evidence_summary_path }}`

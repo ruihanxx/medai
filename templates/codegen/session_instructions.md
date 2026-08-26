@@ -45,7 +45,8 @@ implementation of the paper's methodology.
 - Previously extracted reproduction informations, which include:
    - Claims: `{{ claims_path }}`
    - Experiments to reproduce: `{{ experiments_path }}`
-   - Approved execution scope: `{{ execution_scope_path }}`
+   - Approved execution scope: `{{ execution_scope_path|default("legacy full scope") }}`
+   - Scope-revision issue output: `{{ scope_revision_path|default("scope_revision_issues.json") }}`
 ## Available skills
 
 A catalog of scientific-computing skills is staged at
@@ -96,84 +97,16 @@ First choose the computational stack, then outline the file structure.
 **Match the paper's computational demands.** You can refer to the extracted experiment at `{{ experiments_path }}` for computational demands of each experiment. If it is recorded `"NA"`, you need to infer the computational demands from the paper. Implement in the language and framework the methodology genuinely needs, not whichever is fastest to write. If the method's scale depends on compiled or GPU performance — a large-N numerical simulation, an iterative sampling or optimization procedure with many steps, large-scale model training or inference — use tools that deliver it: GPU-enabled libraries (PyTorch / CuPy / JAX) when a GPU is present, JIT or vectorized paths (numba), C/C++ extensions via the available gcc toolchain, or R for R-native methods — pure Python/NumPy on CPU is the easy default, but it is only correct when the paper's own scale doesn't need more. An implementation that is faithful on paper but cannot run at the paper's scale will fail the replication.
 
 The availability stage already made the binding local/remote capacity decision
-recorded in `{{ execution_scope_path }}`. The resource rules below explain that
+recorded in `{{ execution_scope_path|default("the legacy full scope") }}`. The resource rules below explain that
 decision's contract; use them to implement within the selected location, but do
 not repeat, override, or broaden the capacity and data-locality decision.
 
-**Explicit paper GPU requirement.** When the paper explicitly reports GPU hardware used for its full experiment, treat its GPU count and per-GPU VRAM as a required capacity floor, even if the paper does not call GPU execution “mandatory.” If the paper gives a model but omits VRAM, obtain that model's VRAM from an authoritative manufacturer specification. A local GPU setup is sufficient only when it has at least the stated GPU count and per-GPU VRAM. If it does not, you must use the configured remote computation provider; CPU feasibility, a small final tabular cohort, or a smaller inferred workload are not substitutes for the paper-stated GPU capacity.
+Use the execution location and capacity evidence already recorded by the
+availability stage. Match the implementation to that location and full-scale
+methodology without selecting another provider, renting a different instance,
+or shrinking an experiment.
 
-**Local resource snapshot**: {{ local_resources | tojson }}
-
-{% if data_dir %}
-Before deciding capacity for local or dual-source data, inspect `{{ data_dir }}`
-with bounded, read-only metadata operations. For every logical dataset named by
-an experiment, record its release/version and actual on-disk size. Record file and partition counts,
-formats and compression, and any available per-partition or row-count metadata.
-Also inventory the complete supplied root so files shared
-across experiments are counted once. Use the actual source and planned
-work/output landing filesystems rather than an unrelated filesystem. Let `D`
-be the complete supplied root's actual size in GiB, not the size of only the
-first or largest logical dataset. Keep paper-stated hardware requirements
-separate from conservative or measured estimates; an inferred value is never a
-paper hard floor.
-{% else %}
-No local dataset exists to inventory before the data-locality decision. Do not
-invent local capacity evidence. Obtain `D` from reviewed cloud-source metadata
-or the selected drive/provider's bounded inventory procedure before finalizing
-the remote disk requirement.
-{% endif %}
-
-Use the recorded execution location, which was decided from that inventory, the paper, every experiment's
-`computational_demand`, the full-scale algorithm, and the preflight snapshot
-before using any computation provider:
-
-1. Decide whether faithful full-scale execution requires a GPU. Preserve every
-   explicit paper GPU count and per-GPU VRAM value as a hard floor.
-2. For a GPU workload, compare local GPU count and free VRAM plus the required
-   CPU, available RAM, and free disk against all inferred or explicit floors.
-3. For a CPU-only workload with no paper-stated hardware requirement, treat
-   eight physical cores as sufficient by default (use logical cores only when
-   physical cores are unavailable). Never infer a requirement above eight cores
-   from dataset size alone. A higher CPU floor is permitted only when the method
-   has an explicit parallelism requirement or a representative benchmark of the
-   planned implementation demonstrates that the complete run would exceed the
-   12-hour local time limit.
-4. Choose the intended streaming, chunked, or out-of-core implementation before
-   judging memory. Local available RAM must be at least 1.2 times its estimated
-   or measured peak memory, providing 20% headroom. Do not assume the complete
-   dataset must reside in memory unless the method requires it.
-5. Compute disk at the actual data and work-file landing points. Let `W` be the
-   estimated or measured peak writable work files. When `W` is not yet known,
-   use `max(D, 10 GiB)`. A remote filesystem that must hold the dataset and work
-   files therefore defaults to `D + max(D, 10 GiB)`; a local run whose source
-   dataset is read-only defaults to additional free space of `max(D, 10 GiB)`.
-   Use a larger measured or estimated `W` when required.
-6. If CPU runtime, peak memory, or peak work space remains uncertain, run a
-   bounded local capacity probe against representative data with the planned
-   implementation. Record the command, sample/partition basis, measurements,
-   and full-run extrapolation. Uncertainty alone never authorizes remote
-   execution. If the probe cannot establish sufficiency or insufficiency, stop
-   explicitly instead of searching for or renting a remote instance.
-
-Use `computational_demand`, the dataset inventory, any capacity-probe evidence,
-and the persisted preflight snapshot as the evidence for this judgment. For a
-remote conclusion, record the paper hard floors separately from inferred floors,
-`D`, peak-memory basis, `W`, disk calculation, benchmark evidence, time limit,
-and rationale as optional details inside the existing `remote_compute` object.
-For a local conclusion, keep `remote_compute` null and do not add a top-level
-plan field. Do not shrink the experiment to make local execution appear
-sufficient.
-{% if gpu_info %}
-
-**This environment has local GPU resources**: {{ gpu_info | tojson }}. Compare their
-count and available VRAM with the paper's full-scale computational demands. If
-they are sufficient (they don't need to be exactly the same as the paper's demand, as long as the capacity is sufficient), use them through a GPU-enabled library (PyTorch / CuPy /
-JAX) rather than implementing the GPU-dependent work on CPU. 
-{% else %}
-
-**No local NVIDIA GPU was detected during preflight.**
-{% endif %}
-
+{% if false %}
 {% if computation_provider %}
 The computation provider and any selected drive were resolved before this stage,
 so their required configuration is already available to the reviewed adapter in
@@ -310,6 +243,21 @@ renting a different eligible offer. Make at most two additional create attempts
 after the first failure. Do not continue polling after the adapter's create
 timeout, retry an uncertain creation, rent before release succeeds, reuse a
 failed offer, or continue after the third create attempt fails.
+{% endif %}
+
+{% if computation_provider %}
+The availability stage already selected the execution location and, when cloud
+data required it, created and materialized the run-owned instance recorded at
+`{{ computation_provider_state_path }}`. Read
+`{{ skills_dir }}/computation_provider/SKILL.md` and the selected reference at
+`{{ computation_provider_reference|default("<selected-provider-reference>") }}`
+only to reuse that state for implementation setup. If cloud data is active,
+also read `{{ drive_reference|default("<selected-drive-reference>") }}` and use
+only the completed runnable-dataset entries. Do not search offers, select or rent
+an instance, rematerialize skipped data, or revise the recorded capacity
+decision. The host project `.env` is intentionally absent; configuration is
+already available to the reviewed adapter, and secrets must never be printed.
+{% endif %}
 
 If a successful, evidence-based procedure conflicts with the selected skill
 reference, do not edit the repository skill. Append one reviewable correction
@@ -384,7 +332,9 @@ Strictly follow the paper's dataset processing and cohort construction procedure
 If new concrete evidence shows that a runnable experiment's required source
 content is absent, do not invent, substitute, or silently skip it. Record the
 experiment, dataset, required content, and evidence as a source-availability
-scope-revision issue and stop so orchestration can rerun the availability stage.
+scope-revision issue in `{{ scope_revision_path|default("scope_revision_issues.json") }}` as
+`{"scope_sha256":"<current scope hash>","issues":[{"experiment_ids":["E1"],"datasets":["A"],"required_content":"...","evidence":"..."}]}`,
+then return `blocked` so orchestration can rerun the availability stage.
 Technical failures and implementation defects remain ordinary `blocked` or
 `failed` outcomes and must never be mislabeled as unavailable source data.
 

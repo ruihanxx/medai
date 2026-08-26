@@ -380,7 +380,7 @@ def _run_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--data",
         action="append",
-        help="Dataset name; repeat once for every dataset used by the paper",
+        help="Explicitly supplied dataset name; repeat for multiple datasets",
     )
     parser.add_argument("--dataset-path", type=Path)
     parser.add_argument("--clouddrive", action="store_true")

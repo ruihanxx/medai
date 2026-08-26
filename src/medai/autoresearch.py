@@ -77,6 +77,8 @@ REQUIRED_BASE_STAGES = (
     "preflight",
     "preprocess_pdf",
     "preprocessing_agent",
+    "data_availability_agent",
+    "partial_data_gate",
     "codegen_agent",
     "audit_agent",
     "plan_agent",
@@ -346,11 +348,18 @@ def _validate_refinement_implementation(
 
 def _validate_base_run(config: AutoResearchConfig) -> None:
     base_state = PipelineState(config.base_run)
+    if base_state.state.get("status") == "completed_partial":
+        raise RuntimeError("A partial replication cannot be used as an Auto Research base run")
     if base_state.state.get("status") != "completed":
         raise RuntimeError(f"Base replicate run is not completed: {config.base_run}")
-    incomplete = [
-        stage for stage in REQUIRED_BASE_STAGES if not base_state.is_stage_completed(stage)
-    ]
+    required_stages = REQUIRED_BASE_STAGES
+    if base_state.state.get("legacy_full_scope") is True:
+        required_stages = tuple(
+            stage
+            for stage in required_stages
+            if stage not in {"data_availability_agent", "partial_data_gate"}
+        )
+    incomplete = [stage for stage in required_stages if not base_state.is_stage_completed(stage)]
     if incomplete:
         raise RuntimeError(f"Base replicate run has incomplete stages: {incomplete}")
 

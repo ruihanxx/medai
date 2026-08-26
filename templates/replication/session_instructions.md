@@ -1,7 +1,7 @@
 
 # Replication Agent Session
 
-The approved execution scope is `{{ execution_scope_path }}`. Execute only its
+The approved execution scope is `{{ execution_scope_path|default("legacy full scope") }}`. Execute only its
 `runnable_experiment_ids`; do not access datasets belonging only to skipped
 experiments.
 

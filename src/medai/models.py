@@ -125,6 +125,18 @@ class DataAvailabilityReport(StrictModel):
     dependencies: list[ExperimentDependency]
 
 
+class ScopeRevisionIssue(StrictModel):
+    experiment_ids: list[str] = Field(min_length=1)
+    datasets: list[str] = Field(min_length=1)
+    required_content: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
+class ScopeRevisionIssues(StrictModel):
+    scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    issues: list[ScopeRevisionIssue] = Field(min_length=1)
+
+
 class BlockedExperiment(StrictModel):
     experiment_id: str
     status: Literal["source_blocked", "unknown"]

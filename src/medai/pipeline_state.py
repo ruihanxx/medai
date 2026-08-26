@@ -407,6 +407,20 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         "replication/evidence_summary.json",
         "report/reproduction_report.md",
     ]
+    try:
+        manifest_preview = json.loads(
+            (base_run / "manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Base run manifest is invalid: {base_run / 'manifest.json'}") from exc
+    legacy_full_scope = manifest_preview.get("legacy_full_scope") is True or (
+        isinstance(manifest_preview.get("version"), int)
+        and manifest_preview["version"] < 5
+        and manifest_preview.get("status") == "completed"
+        and "data_availability_agent" not in manifest_preview.get("stages", {})
+    )
+    if not legacy_full_scope:
+        required_files.append("preprocessing/execution_scope.json")
     digest = hashlib.sha256()
     for relative in required_files:
         path = base_run / relative
@@ -417,7 +431,7 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         _update_digest_from_file(digest, path)
 
     try:
-        manifest = json.loads((base_run / "manifest.json").read_text(encoding="utf-8"))
+        manifest = manifest_preview
     except json.JSONDecodeError as exc:
         raise ValueError(f"Base run manifest is invalid: {base_run / 'manifest.json'}") from exc
     inputs = manifest.get("inputs") if isinstance(manifest, dict) else None

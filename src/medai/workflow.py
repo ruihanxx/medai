@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -30,6 +31,7 @@ from medai.models import (
     ExperimentTodo,
     ReplicationLog,
     ReplicationPlan,
+    ScopeRevisionIssues,
     SkillCorrectionsFile,
     SmartReplicateLog,
     validate_experiment_coverage,
@@ -58,9 +60,11 @@ class WorkflowState(TypedDict, total=False):
     codebase_dir: str
     audit_verdict: str
     audit_report_path: str
+    audit_issue_kinds: list[str]
     audit_refinement_exhausted: bool
     replicate_plan_path: str
     report_path: str
+    scope_revision_requested: bool
 
 
 class PartialDataAwaitingConfirmation(RuntimeError):
@@ -90,7 +94,40 @@ def _require_agent_stage_completion(result_path: Path, stage_name: str) -> None:
 
 
 def _execution_scope(state: WorkflowState) -> ExecutionScope:
-    return load_model(Path(state["execution_scope_path"]), ExecutionScope)
+    cached = state.get("_execution_scope")
+    if isinstance(cached, ExecutionScope):
+        return cached
+    scope_value = state.get("execution_scope_path")
+    if scope_value is not None:
+        scope = load_model(Path(scope_value), ExecutionScope)
+        state["_execution_scope"] = scope  # type: ignore[typeddict-unknown-key]
+        return scope
+    # Direct stage invocations and completed pre-v5 runs have no scope artifact.
+    # Treat them as the historical full scope; normal v5 graph execution always
+    # reaches the data-availability stage first.
+    try:
+        experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    except ValueError:
+        runnable = []
+    else:
+        runnable = [experiment.experiment_id for experiment in experiments.experiments]
+    payload = {
+        "availability_report_sha256": "0" * 64,
+        "verdict": "FULL",
+        "runnable_experiment_ids": runnable,
+        "blocked_experiments": [],
+        "active_sources": [],
+        "execution_location": "local",
+    }
+    payload["scope_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    scope = ExecutionScope.model_validate(payload)
+    scope_path = state["config"].output / "preprocessing" / "execution_scope.json"
+    write_json(scope_path, scope.model_dump(mode="json"))
+    state["execution_scope_path"] = str(scope_path)
+    state["_execution_scope"] = scope  # type: ignore[typeddict-unknown-key]
+    return scope
 
 
 def _active_experiments(state: WorkflowState) -> ExperimentTodo:
@@ -100,6 +137,24 @@ def _active_experiments(state: WorkflowState) -> ExperimentTodo:
         experiments=[
             experiment for experiment in experiments.experiments if experiment.experiment_id in runnable
         ]
+    )
+
+
+def _active_cloud_datasets(state: WorkflowState) -> tuple[str, ...]:
+    config = state["config"]
+    scope = _execution_scope(state)
+    if scope.availability_report_sha256 == "0" * 64:
+        return config.selected_cloud_datasets
+    active_sources = set(scope.active_sources)
+    cloud_sources = config.selected_cloud_sources or config.selected_cloud_datasets
+    return tuple(
+        dataset
+        for dataset, source in zip(
+            config.selected_cloud_datasets,
+            cloud_sources,
+            strict=True,
+        )
+        if dataset in active_sources or source in active_sources
     )
 
 
@@ -114,6 +169,8 @@ _SCOPED_STAGES = [
 
 
 def _ensure_stage_scope(pipeline_state: PipelineState, stage_name: str, scope_hash: str) -> None:
+    if pipeline_state.state.get("legacy_full_scope") is True:
+        return
     if not pipeline_state.is_stage_completed(stage_name):
         return
     if pipeline_state.get_stage_checkpoints(stage_name).get("scope_sha256") == scope_hash:
@@ -332,6 +389,10 @@ def validate_report_experiment(
 
 
 def read_audit_verdict(report_path: Path) -> str:
+    return str(read_audit_report(report_path)["verdict"])
+
+
+def read_audit_report(report_path: Path) -> dict[str, Any]:
     if report_path.suffix == ".json":
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -347,10 +408,24 @@ def read_audit_verdict(report_path: Path) -> str:
         issues = report["issues"]
         if verdict not in {"PASS", "FAIL"} or not isinstance(issues, list):
             raise RuntimeError(f"Audit report has an invalid verdict or issues: {report_path}")
+        normalized_issues = []
         for issue in issues:
+            legacy = isinstance(issue, dict) and set(issue) == {
+                "evidence",
+                "diagnosis",
+                "required_fix",
+            }
+            expected = {
+                "kind",
+                "experiment_ids",
+                "datasets",
+                "evidence",
+                "diagnosis",
+                "required_fix",
+            }
             if (
                 not isinstance(issue, dict)
-                or set(issue) != {"evidence", "diagnosis", "required_fix"}
+                or (not legacy and set(issue) != expected)
                 or not isinstance(issue["evidence"], str)
                 or not issue["evidence"].strip()
                 or not isinstance(issue["diagnosis"], str)
@@ -359,12 +434,35 @@ def read_audit_verdict(report_path: Path) -> str:
                 or not issue["required_fix"].strip()
             ):
                 raise RuntimeError(f"Audit report contains an invalid issue: {report_path}")
+            if legacy:
+                normalized_issues.append(
+                    {
+                        "kind": "preprocessing_defect",
+                        "experiment_ids": [],
+                        "datasets": [],
+                        **issue,
+                    }
+                )
+                continue
+            if (
+                issue["kind"] not in {"preprocessing_defect", "source_unavailable"}
+                or not isinstance(issue["experiment_ids"], list)
+                or not issue["experiment_ids"]
+                or not all(
+                    isinstance(value, str) and value.strip()
+                    for value in issue["experiment_ids"]
+                )
+                or not isinstance(issue["datasets"], list)
+                or not all(isinstance(value, str) and value.strip() for value in issue["datasets"])
+            ):
+                raise RuntimeError(f"Audit report contains an invalid issue: {report_path}")
+            normalized_issues.append(issue)
         if (verdict == "PASS" and issues) or (verdict == "FAIL" and not issues):
             raise RuntimeError(
                 "Audit report PASS requires no issues and FAIL requires at least one issue: "
                 f"{report_path}"
             )
-        return verdict
+        return {"verdict": verdict, "issues": normalized_issues}
 
     # Compatibility for reports written before the compact JSON contract.
     try:
@@ -389,7 +487,7 @@ def read_audit_verdict(report_path: Path) -> str:
             "Audit report must contain exactly one verdict and end with "
             f"`Verdict: PASS` or `Verdict: FAIL`: {report_path}"
         )
-    return lines[-1].removeprefix("Verdict: ")
+    return {"verdict": lines[-1].removeprefix("Verdict: "), "issues": []}
 
 
 def validate_codegen_remote_compute(
@@ -614,13 +712,18 @@ def release_run_computation_instance(config: RunConfig | AutoResearchConfig) -> 
     )
 
 
-def _cloud_pull(config: RunConfig, *, use_cloud: bool) -> None:
+def _cloud_pull(
+    config: RunConfig,
+    *,
+    use_cloud: bool,
+    datasets: Sequence[str] | None = None,
+) -> None:
     if not use_cloud:
         return
     if not config.selected_cloud_datasets:
         raise RuntimeError("Cloud-drive mode is missing its dataset name")
     state_path = config.output / "remote_compute" / "instance.json"
-    for dataset in config.selected_cloud_datasets:
+    for dataset in datasets or config.selected_cloud_datasets:
         _run_computation_provider_action(
             state_path,
             "cloud-pull",
@@ -647,6 +750,7 @@ def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
 
 def _cloud_drive_materialization_completed(
     config: RunConfig | AutoResearchConfig,
+    datasets: Sequence[str] | None = None,
 ) -> bool:
     if not config.clouddrive or not config.selected_cloud_datasets:
         return False
@@ -664,7 +768,7 @@ def _cloud_drive_materialization_completed(
     cloud_drives = _provider_cloud_drives(provider_state)
     if not cloud_drives:
         return False
-    for dataset in config.selected_cloud_datasets:
+    for dataset in datasets or config.selected_cloud_datasets:
         cloud_drive = cloud_drives.get(dataset)
         if not isinstance(cloud_drive, dict):
             return False
@@ -1049,10 +1153,6 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
     resources_path = config.output / "preflight" / "resources.json"
     dataset_patch_path = config.output / "system_maintenance" / "dataset" / "patch.json"
     skill_corrections_path = config.output / "system_maintenance" / "skills" / "corrections.json"
-    if config.data is None and not config.clouddrive:
-        print("enter preflight stage")
-        pipeline_state.start_stage("preflight")
-        raise ValueError("Replicate runs require --data for preprocessing audit")
     if pipeline_state.is_stage_completed("preflight"):
         try:
             resources = json.loads(resources_path.read_text(encoding="utf-8"))
@@ -1201,11 +1301,63 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
     experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
     scope_path = config.output / "preprocessing" / "execution_scope.json"
     stage = pipeline_state.state["stages"].get("data_availability_agent", {})
+    if (
+        pipeline_state.state.get("legacy_full_scope") is True
+        and pipeline_state.is_stage_completed("report_agents")
+    ):
+        _execution_scope(state)
+        print("resume data_availability_agent stage: legacy full-scope validation")
+        return {"execution_scope_path": str(scope_path)}
 
     def load_and_validate(report_path: Path) -> ExecutionScope:
         report = load_model(report_path, DataAvailabilityReport)
+        local_sources = {str(path) for path in config.dataset_paths}
+        cloud_sources = set(config.selected_cloud_sources) | set(
+            config.selected_cloud_datasets
+        )
+        for requirement in report.requirements:
+            if requirement.status == "available" and requirement.source_name is None:
+                raise ValueError("An available requirement must map to a concrete source")
+            if (
+                requirement.source_kind == "local"
+                and requirement.source_name not in local_sources
+            ):
+                raise ValueError(
+                    f"Availability report maps an unknown local source: "
+                    f"{requirement.source_name}"
+                )
+            if (
+                requirement.source_kind == "cloud"
+                and requirement.source_name not in cloud_sources
+            ):
+                raise ValueError(
+                    f"Availability report maps an unknown cloud source: "
+                    f"{requirement.source_name}"
+                )
         scope = derive_execution_scope(experiments, report, sha256_file(report_path))
+        if scope.verdict in {"FULL", "PARTIAL"} and scope.execution_location is None:
+            raise ValueError("A runnable execution scope requires an execution location")
+        active_sources = set(scope.active_sources)
+        active_cloud = tuple(
+            dataset
+            for dataset, source in zip(
+                config.selected_cloud_datasets,
+                config.selected_cloud_sources,
+                strict=True,
+            )
+            if dataset in active_sources or source in active_sources
+        )
+        if (
+            (config.data is None or scope.execution_location == "remote")
+            and active_cloud
+            and not _cloud_drive_materialization_completed(config, active_cloud)
+        ):
+            raise RuntimeError(
+                "Cloud-only data availability requires every active cloud dataset "
+                "to be materialized and audited"
+            )
         write_json(scope_path, scope.model_dump(mode="json"))
+        state["_execution_scope"] = scope  # type: ignore[typeddict-unknown-key]
         return scope
 
     if pipeline_state.is_stage_completed("data_availability_agent"):
@@ -1238,6 +1390,10 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
             strict=True,
         )
     ]
+    scope_revision_reports = sorted(
+        config.output.glob("codegen/audit/attempt_*/audit_report.json")
+    )
+    scope_revision_reports.extend(sorted(config.output.glob("codegen/scope_revision_*.json")))
     prompt_path = render_prompt(
         "data_availability/session_instructions.md",
         config.output / "prompts" / f"data_availability_attempt_{attempt:03d}.md",
@@ -1246,6 +1402,12 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         resources_path=resources_path,
         local_datasets=local_datasets,
         cloud_datasets=cloud_datasets,
+        scope_revision_reports=scope_revision_reports,
+        cloud_only=config.data is None and bool(config.selected_cloud_datasets),
+        dual_source=config.data is not None and bool(config.selected_cloud_datasets),
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
+        computation_provider_state_path=config.output / "remote_compute" / "instance.json",
         report_path=report_path,
         results_dir=results_dir,
     )
@@ -1349,6 +1511,12 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
     pipeline_state = PipelineState(config.output)
     scope_path = Path(state["execution_scope_path"])
     scope = load_model(scope_path, ExecutionScope)
+    if (
+        pipeline_state.state.get("legacy_full_scope") is True
+        and pipeline_state.is_stage_completed("report_agents")
+    ):
+        print("resume partial_data_gate stage: legacy full-scope validation")
+        return {"execution_scope_path": str(scope_path)}
     checkpoints = pipeline_state.get_stage_checkpoints("partial_data_gate")
     if (
         pipeline_state.is_stage_completed("partial_data_gate")
@@ -1364,6 +1532,8 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
             "Resolve or retry the uncertain source checks."
         )
     if scope.verdict == "NONE":
+        power_off_run_computation_instance(config)
+        release_run_computation_instance(config)
         raise NoRunnableExperiments(
             "No experiments are runnable with the available source data."
         )
@@ -1397,6 +1567,8 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
             release_run_computation_instance(config)
             pipeline_state.mark_stopped_by_user(scope.scope_sha256)
             raise PartialDataStopped("Partial replication was stopped by the user.")
+        if source == "interactive":
+            power_on_run_computation_instance(config)
 
     outputs = [str(scope_path)]
     if decision_path is not None:
@@ -1409,7 +1581,7 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
     return {"execution_scope_path": str(scope_path)}
 
 
-def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
+def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
     scope = _execution_scope(state)
@@ -1429,6 +1601,9 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
     computation_provider_state_path = config.output / "remote_compute" / "instance.json"
     dataset_patch_path = config.output / "system_maintenance" / "dataset" / "patch.json"
     skill_corrections_path = config.output / "system_maintenance" / "skills" / "corrections.json"
+    scope_revision_path = (
+        config.output / "codegen" / f"scope_revision_{scope.scope_sha256}.json"
+    )
     completed_run_validation = pipeline_state.is_stage_completed("report_agents")
     infrastructure_resume = bool(codegen_checkpoints.get("infrastructure_resume"))
 
@@ -1440,7 +1615,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         validate_codegen_remote_compute(
             codegen_plan,
             computation_provider_state_path,
-            cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
+            cloud_datasets=_active_cloud_datasets(state) if cloud_data else (),
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
             require_active=require_active,
@@ -1453,7 +1628,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed codegen transcript is missing: {transcript_path}")
         print("resume codegen_agent stage: skipped (already completed)")
-        return {"codebase_dir": str(codebase_dir)}
+        return {"codebase_dir": str(codebase_dir), "scope_revision_requested": False}
 
     print("enter codegen stage")
     pipeline_state.start_stage("codegen_agent")
@@ -1504,7 +1679,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         data_paths=config.dataset_paths,
         cloud_drive_enabled=config.clouddrive,
         cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=config.selected_cloud_datasets,
+        cloud_datasets=_active_cloud_datasets(state),
         drive_provider=config.drive_provider,
         cloud_source=", ".join(config.selected_cloud_sources),
         cloud_sources=config.selected_cloud_sources,
@@ -1516,6 +1691,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         codegen_plan_path=codegen_plan_path,
         dataset_patch_path=dataset_patch_path,
         skill_corrections_path=skill_corrections_path,
+        scope_revision_path=scope_revision_path,
         computation_provider_state_path=computation_provider_state_path,
         local_resources=resources,
         gpu_info=resources["gpus"],
@@ -1547,6 +1723,39 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
             output_last_message_path=result_path,
         )
     if result_path is not None:
+        stage_result = load_model(result_path, AgentStageResult)
+        if stage_result.status != "completed" and scope_revision_path.is_file():
+            revision = load_model(scope_revision_path, ScopeRevisionIssues)
+            if revision.scope_sha256 != scope.scope_sha256:
+                raise RuntimeError("Codegen scope revision is bound to a different scope")
+            active_ids = set(scope.runnable_experiment_ids)
+            unknown_ids = {
+                experiment_id
+                for issue in revision.issues
+                for experiment_id in issue.experiment_ids
+                if experiment_id not in active_ids
+            }
+            if unknown_ids:
+                raise RuntimeError(
+                    f"Codegen scope revision references inactive experiments: {sorted(unknown_ids)}"
+                )
+            pipeline_state.invalidate_stages(
+                [
+                    "data_availability_agent",
+                    "partial_data_gate",
+                    "codegen_agent",
+                    "audit_agent",
+                    "cohort_refine_agent",
+                    "plan_agent",
+                    "replicate_agent",
+                    "report_agents",
+                ],
+                f"Codegen discovered unavailable source data: {scope_revision_path}",
+            )
+            return {
+                "codebase_dir": str(codebase_dir),
+                "scope_revision_requested": True,
+            }
         _require_agent_stage_completion(result_path, "codegen_agent")
     _validate_agent_artifacts_with_resume(
         config=config,
@@ -1577,7 +1786,13 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, str]:
         "codegen_agent",
         outputs,
     )
-    return {"codebase_dir": str(codebase_dir)}
+    return {"codebase_dir": str(codebase_dir), "scope_revision_requested": False}
+
+
+def codegen_route(state: WorkflowState) -> str:
+    if state.get("scope_revision_requested", False):
+        return "data_availability_agent"
+    return "audit_agent"
 
 
 def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
@@ -1609,6 +1824,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
             "audit_verdict": verdict,
             "audit_report_path": str(report_path),
             "audit_refinement_exhausted": bool(checkpoints.get("refinement_exhausted", False)),
+            "audit_issue_kinds": list(checkpoints.get("issue_kinds", [])),
         }
 
     refine_rounds_used = int(checkpoints.get("refine_rounds_used", 0))
@@ -1630,7 +1846,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     cloud_drive_state = validate_codegen_remote_compute(
         codegen_plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
+        cloud_datasets=_active_cloud_datasets(state) if cloud_data else (),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
     )
@@ -1657,7 +1873,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         data_paths=config.dataset_paths,
         cloud_drive_enabled=cloud_data,
         cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=config.selected_cloud_datasets,
+        cloud_datasets=_active_cloud_datasets(state),
         drive_provider=config.drive_provider,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
@@ -1687,7 +1903,16 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     resume_index = 1
     while True:
         try:
-            verdict = read_audit_verdict(report_path)
+            audit_report = read_audit_report(report_path)
+            verdict = str(audit_report["verdict"])
+            active_ids = set(scope.runnable_experiment_ids)
+            for issue in audit_report["issues"]:
+                unknown_ids = set(issue["experiment_ids"]) - active_ids
+                if unknown_ids:
+                    raise RuntimeError(
+                        f"Audit issue references experiments outside the execution scope: "
+                        f"{sorted(unknown_ids)}"
+                    )
             break
         except RuntimeError as exc:
             if config.provider != "codex":
@@ -1728,25 +1953,47 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
                 resume_session_id=session_id,
             )
             resume_index += 1
+    issue_kinds = sorted({issue["kind"] for issue in audit_report["issues"]})
+    source_revision = "source_unavailable" in issue_kinds
     checkpoint = {
         "audited_codegen_attempt": codegen_attempt,
         "audited_refine_round": completed_refine_round,
         "verdict": verdict,
         "report_path": str(report_path),
         "refine_rounds_used": refine_rounds_used,
+        "issue_kinds": issue_kinds,
         "refinement_exhausted": (
             verdict == "FAIL" and refine_rounds_used >= MAX_COHORT_REFINE_ROUNDS
         ),
     }
     outputs = [str(attempt_dir), str(report_path), str(transcript_path)]
-    if verdict == "FAIL" and not checkpoint["refinement_exhausted"]:
+    if (
+        verdict == "FAIL"
+        and not source_revision
+        and not checkpoint["refinement_exhausted"]
+    ):
         checkpoint["refine_rounds_used"] = refine_rounds_used + 1
     pipeline_state.update_stage_checkpoints("audit_agent", checkpoint)
     pipeline_state.complete_stage("audit_agent", outputs)
+    if source_revision:
+        pipeline_state.invalidate_stages(
+            [
+                "data_availability_agent",
+                "partial_data_gate",
+                "codegen_agent",
+                "audit_agent",
+                "cohort_refine_agent",
+                "plan_agent",
+                "replicate_agent",
+                "report_agents",
+            ],
+            f"Audit discovered unavailable source data: {report_path}",
+        )
     return {
         "audit_verdict": verdict,
         "audit_report_path": str(report_path),
         "audit_refinement_exhausted": checkpoint["refinement_exhausted"],
+        "audit_issue_kinds": issue_kinds,
     }
 
 
@@ -1754,6 +2001,8 @@ def audit_route(state: WorkflowState) -> str:
     verdict = state.get("audit_verdict")
     if verdict not in {"PASS", "FAIL"}:
         raise RuntimeError(f"Invalid preprocessing audit verdict: {verdict!r}")
+    if "source_unavailable" in state.get("audit_issue_kinds", []):
+        return "data_availability_agent"
     if verdict == "PASS" or state.get("audit_refinement_exhausted", False):
         return "plan_agent"
     return "cohort_refine_agent"
@@ -1804,7 +2053,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
     cloud_drive_state = validate_codegen_remote_compute(
         codegen_plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
+        cloud_datasets=_active_cloud_datasets(state) if cloud_data else (),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
     )
@@ -1825,7 +2074,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         data_paths=config.dataset_paths,
         cloud_drive_enabled=cloud_data,
         cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=config.selected_cloud_datasets,
+        cloud_datasets=_active_cloud_datasets(state),
         drive_provider=config.drive_provider,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
@@ -1885,7 +2134,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         validate_codegen_remote_compute(
             plan,
             config.output / "remote_compute" / "instance.json",
-            cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
+            cloud_datasets=_active_cloud_datasets(state) if cloud_data else (),
             drive_provider=config.drive_provider,
             computation_provider=config.computation_provider,
             require_active=not pipeline_state.is_stage_completed("report_agents"),
@@ -1916,7 +2165,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         data_paths=config.dataset_paths,
         cloud_drive_enabled=cloud_data,
         cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=config.selected_cloud_datasets,
+        cloud_datasets=_active_cloud_datasets(state),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         computation_provider_reference=config.computation_provider_reference,
@@ -1965,11 +2214,15 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     plan = load_model(Path(state["replicate_plan_path"]), ReplicationPlan)
     cloud_data = _uses_cloud_data(config, plan)
     if not pipeline_state.is_stage_completed("replicate_agent"):
-        _cloud_pull(config, use_cloud=cloud_data)
+        _cloud_pull(
+            config,
+            use_cloud=cloud_data,
+            datasets=_active_cloud_datasets(state),
+        )
     validate_codegen_remote_compute(
         plan,
         config.output / "remote_compute" / "instance.json",
-        cloud_datasets=config.selected_cloud_datasets if cloud_data else (),
+        cloud_datasets=_active_cloud_datasets(state) if cloud_data else (),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         require_active=not pipeline_state.is_stage_completed("report_agents"),
@@ -1998,7 +2251,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
         cloud_drive_enabled=cloud_data,
         cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=config.selected_cloud_datasets,
+        cloud_datasets=_active_cloud_datasets(state),
         drive_provider=config.drive_provider,
         computation_provider=config.computation_provider,
         computation_provider_reference=config.computation_provider_reference,
@@ -2223,13 +2476,21 @@ def create_workflow():
     builder.add_edge("preprocessing_agent", "data_availability_agent")
     builder.add_edge("data_availability_agent", "partial_data_gate")
     builder.add_edge("partial_data_gate", "codegen_agent")
-    builder.add_edge("codegen_agent", "audit_agent")
+    builder.add_conditional_edges(
+        "codegen_agent",
+        codegen_route,
+        {
+            "audit_agent": "audit_agent",
+            "data_availability_agent": "data_availability_agent",
+        },
+    )
     builder.add_conditional_edges(
         "audit_agent",
         audit_route,
         {
             "plan_agent": "plan_agent",
             "cohort_refine_agent": "cohort_refine_agent",
+            "data_availability_agent": "data_availability_agent",
         },
     )
     builder.add_edge("cohort_refine_agent", "audit_agent")

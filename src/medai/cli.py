@@ -225,7 +225,7 @@ def run(
         if replicate and pipeline_state.state.get("resume_count", 0) > 0:
             if not (
                 previous_manifest_status == "awaiting_confirmation"
-                and config.on_partial_data == "stop"
+                and config.on_partial_data in {"ask", "stop"}
             ):
                 prepare_replication_resume(config)
         elif autoresearch and pipeline_state.state.get("resume_count", 0) > 0:
