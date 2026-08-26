@@ -77,14 +77,15 @@ A configured provider is only a fallback: sufficient local resources prohibit
 offer search, instance creation, and remote state. Demonstrated insufficiency
 uses the selected provider's documented GPU or CPU-only procedure; absence of a
 provider or of a provider-specific CPU-only procedure fails availability without
-reducing experiment scale. `--clouddrive` alone remains remote regardless of
+reducing the required scientific scale. `--clouddrive` alone remains remote regardless of
 local capacity because raw data has no local path; when local data is also
 supplied, the normal local-first capacity decision applies. Codegen consumes
 this persisted location decision and may not repeat or change it.
 
 Replication accepts `--on-partial-data ask|continue|stop` (default `ask`). An
-interactive PARTIAL run lists runnable/skipped experiments, direct blockers and
-dependency chains before asking `Continue with the runnable experiments? [y/N]`.
+interactive PARTIAL run lists reproducible and blocked claims, their node paths,
+direct blockers, and dependency chains before asking
+`Continue with the runnable claim subgraph? [y/N]`.
 Non-interactive `ask` safely powers off and exits 3 with resume instructions;
 `stop` exits 4, records `stopped_by_user`, and releases run-owned compute. A
 decision is valid for one scope hash only.
@@ -122,8 +123,9 @@ directory, named from its UTC start time and paper filename. Passing its existin
 directory through replication `--output` resumes it.
 
 Auto Research restores paper, repository, and data locations from the base
-manifest, skips MinerU, and requires the base run to be completed with all eight
-canonical replicate stages reloadable. The launcher mounts the base run
+manifest, skips MinerU, and requires manifest v6 plus a completed base run with
+all canonical replication stages reloadable. Manifest v1–v5 is rejected before
+writeback. The launcher mounts the base run
 read-only at `/workspace/base-run`, mounts only the selected campaign output
 writable at `/workspace/autoresearch`, and remounts recorded local source data
 read-only. Cloud-only campaigns mount no host data directory; dual-source
@@ -193,7 +195,7 @@ permissions are defined in `agents.md`.
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a
 baseline run, and may make at most five hypothesis-driven adjustment rounds per
-experiment. Each round must compare actual output with its anchor, record a
+claim. Each round must compare actual output with its anchor, record a
 methodological hypothesis and exact change, and rerun the affected commands.
 Hard-coding anchors, editing computed outputs, or unsupported tuning remains
 prohibited. The resolved boolean is recorded in `manifest.json`.

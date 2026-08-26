@@ -1,94 +1,54 @@
 # Acceptance Checks
 
-Run `pytest`, `ruff check .`, `python -m medai --help`, and
-`python -m medai.cli --help`. Tests mock provider, MinerU, and SSH
-boundaries; tests never rent hardware.
+Run:
 
-Cloud-drive mock acceptance covers provider-authorized sign-in, explicit drive
-selection, recursive directory inventory, task polling and timeout reuse, remote
-tree aggregation, read-only materialization, secret non-persistence, and
-released-instance history. Provider-private API response structures are not a
-generic compatibility surface: unknown authentication, binding, listing, or task
-responses must fail rather than trigger a guessed fallback.
+```bash
+pytest
+ruff check .
+python -m medai --help
+python -m medai.cli --help
+```
 
-For a drive that opts into Codex cloud-pull handoff, mocks additionally cover
-active-instance initialization, SSH and write-path preparation before power-off,
-rejection of an unprepared monitor, stopped-instance polling, restart plus SSH
-probe before success or failure returns, cancellation before exact cleanup, and
-same-session Codex command/result recovery. The tests assert that no monitor
-starts before preparation, no uncertain Cloud Copy is posted twice, and no raw
-data reaches the local run.
+Tests mock MinerU, agent, SSH, drive, and computation-provider boundaries and
+never rent hardware.
 
-Resume mocks cover shutdown reuse with one SSH probe, released/missing/SSH-failed
-replacement, uncertain-provider and failed-release safety, recorded fallback
-capacity, replication/report rollback archives, early codegen infrastructure
-resume, repeated cloud pull, report-completed no-op, power-off-before-report,
-and persistent cleanup warnings. Tests assert that no safety failure creates a
-second instance.
+Graph coverage includes open node/provenance fields, arbitrary method/result
+JSON, global ID collisions, unknown/repeated inputs, cycles, orphan nodes,
+P→V→C statistical paths, trained-model paths, and claim-aligned Cartesian V
+blocks. No test should require a closed scientific payload enumeration.
 
-Data-availability prompt tests pin local dataset inventory before capacity selection, the
-eight-physical-core CPU-only default, probe-only uncertainty handling, planned
-peak-memory headroom, and the distinct remote versus read-only-local disk
-formulas. Experiment artifact and prompt coverage also requires a non-empty,
-unique dataset-use list for every experiment, explicit Codegen data-flow
-narration, per-dataset audit coverage, and exact dataset names and operations in
-replication-plan steps.
+Availability coverage includes exact P×upstream-D requirements, independent P
+variants on one D, forward blocker and unknown propagation, maximal runnable
+claim subgraphs, graph/report/scope hashes, and FULL/PARTIAL/NONE/UNKNOWN plus
+scope-bound decisions.
 
-Codex replication mocks cover thread-ID extraction, direct agent execution
-without a command output schema, final-only artifact validation, same-session
-artifact repair with an appended transcript, final cleanup after success or
-terminal failure, and unchanged one-turn behavior for other providers.
+Overlay coverage includes idempotent `(source,node_id)` merge, attempt source
+retention, stage invalidation, replication rollback cleanup, real-ancestor-only
+collection, shared issue deduplication, multiple origin-to-target paths, and
+queries at intermediate nodes.
 
-Preprocessing-audit mocks cover the compact JSON verdict/issue contract with
-separate non-empty evidence, diagnosis, and required-fix fields; rejection of
-the former combined error field; exhaustive issue-accumulation, root-cause, and
-feature-propagation prompt requirements; legacy Markdown verdict reads;
-audit-to-cohort-refinement routing; three-round exhaustion that continues to
-planning; local and cloud permission boundaries; same-round technical retries;
-same-session direct-Codex recovery when a successful turn omits its report; and
-codegen remaining a single scientific stage.
+Base replication coverage includes graph extraction prompts, runnable-only
+codegen/audit/refinement/planning, plan coverage of all active nodes, failure on
+missing actual result or evidence, per-claim report checkpoints/resume,
+claim-keyed Smart Replicate logs, deterministic report composition, and
+path-relevant issues only. Direct-Codex tests also cover structured terminal
+results, bounded same-session artifact repair, appended transcripts, and cleanup
+after success or terminal failure.
 
-Data-availability tests cover exact pair/dependency coverage, the four prompt
-examples, unknown propagation, cycles and unknown IDs, scope hashing,
-FULL/PARTIAL/NONE/UNKNOWN routing, scope-bound accept/reject/pending decisions,
-late Codegen/Audit source rerouting, and runnable-only downstream validation.
-CLI/launcher coverage pins the English default-No prompt, pending exit 3,
-terminal-stop exit 4, resume policies, and stdin forwarding.
+Auto Research coverage includes claim-driven eligible-V selection, zero-weight
+sparsification, positive normalization, zero-weight exclusion from contract/run/
+score, base-node immutability, new M/V creation, full refinement-graph
+validation, free audit check names with per-positive-V evidence, refinement-only
+plan/log coverage, baseline non-execution, numeric deltas/scoring, and mixed
+statistical/prediction papers.
 
-Replicate Agent artifact-repair mocks cover a rejected plan that resumes the
-same direct-Codex session, appends its transcript, persists the exact validation
-error in a repair prompt, and completes only after full claim/artifact coverage.
-Direct-Codex codegen mocks additionally cover strict completed/blocked/failed
-results, immediate terminal routing without artifact-repair turns, and
-command-or-terminal cloud-pull handoffs.
+Compatibility coverage parametrizes manifest v1–v5 and asserts that resume and
+Auto Research base loading fail before any byte is changed. Error text directs
+the operator to a new output directory.
 
-Auto Research mocks cover input-representation, model, and training-strategy
-implementation plans; declared changed-file boundaries; preservation of data,
-final prediction target, evaluator-facing output, and evaluation contracts; and
-the ordered six-aspect refinement audit. Artifact and prompt coverage verifies
-compact agent-written metrics text and selection of only strict prediction
-experiments when a paper also contains statistical analysis. They also cover the
-campaign-wide candidate pool, six-candidate review, three-candidate selection,
-selected-idea removal, and reuse of the remaining candidates in later rounds.
-Launcher and CLI coverage verifies independent `--replicate-run` and `--output`
-arguments, monotonic default `campaign_NNN` allocation, and explicit-output
-resume.
-Cloud-backed coverage verifies inherited provider/drive configuration without a
-local data mount, copied base inventory, base-resource preference through the
-selected provider reference, initial
-prepare/local-monitor/power-off/same-session resume, bounded campaign-pool
-selection, provider-confirmed capacity expansion, per-member inventory
-materialization, local mother-code/environment synchronization, hash-bound
-environment validation and failure-driven environment revision,
-orchestration-owned remote execution and confined downloads, per-operation
-`finally` power-off before agent resume, persisted setup failure and same-session
-repair, resume reconciliation, failure-only power-off, a strict Codex output
-schema whose nullable operation fields remain required, and final release of
-every owned member.
-
-A real cloud-drive E2E is manual and billable. Use an isolated disposable
-instance, run the selected adapter's `cloud-pull` for a disposable dataset,
-compare source and materialized file/byte aggregates, confirm that no raw data
-reached the local run, and release the instance on success or failure. A timeout
-is a failed E2E and still requires release. Provider-specific procedures live in
-the selected skill reference.
+Remote mocks retain provider-authorized drive selection, bounded inventory and
+polling, secret non-persistence, safe replacement/reconciliation, no duplicate
+billable action after uncertainty, confined downloads, per-operation power-off,
+resume recovery, and release only after validated completion. A real cloud E2E
+is manual and billable and must use disposable data/resources with cleanup on
+every outcome.

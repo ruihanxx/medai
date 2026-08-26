@@ -17,12 +17,12 @@
 
 ## Overview
 
-MedAI is an evidence-bound Harness for medical-paper replication and Auto Research, running in Docker. It turns a paper PDF, an optional source repository, and a dataset into executable experiments, auditable replication records, and claim- and artifact-level reports.
+MedAI is an evidence-bound harness for medical-paper replication and Auto Research, running in Docker. It turns a paper PDF, an optional source repository, and data into an executable claim-provenance graph, audited replication records, and claim- and artifact-level reports.
 
 - **Heterogeneous datasets:** MedAI is not restricted to one dataset or one table format. It is designed for the structured clinical, EHR/longitudinal, time-series, medical-imaging, omics, text, and other research inputs required by a paper—provided that complete paper-required source files and a usable runtime are supplied.
-- **Prediction and statistical-analysis models:** The replication workflow can cover supervised prediction and statistical analysis. It extracts checkable textual/numeric claims, experiment definitions, and figure/table anchors, then compares each with real execution evidence.
+- **Prediction and statistical analysis:** The replication workflow extracts a fine-grained D/P/T/M/V/C graph for datasets, preprocessing, training, trained-model artifacts, validations, and claims. Statistical paths do not need training or model nodes.
 - **Scientific fidelity and traceability:** The paper, source repository, and source data are read-only. Missing paper-required files, invalid artifacts, and technical failures stop explicitly; MedAI does not fabricate results, silently substitute inputs, or reduce scale just to produce a successful-looking run.
-- **Paper improvement / Auto Research:** From a completed, valid prediction replication, MedAI proposes paper- and literature-grounded input-representation, model, or training-strategy improvements. It assesses them with isolated code copies, boundary audits, and existing baseline evidence. If a paper also contains statistical analyses, only strict supervised-prediction experiments are selected.
+- **Paper improvement / Auto Research:** From a completed, valid prediction replication, MedAI proposes paper- and literature-grounded input-representation, model, or training-strategy improvements. It assesses isolated refinement graphs against selected prediction-validation nodes and existing baseline evidence; statistical-only validations can receive zero weight.
 
 
 ## Quick start
@@ -208,7 +208,7 @@ Choose a completed supervised-prediction replication. Without <code>--output</co
 | <code>--siliconflow-config &lt;dotenv&gt;</code> | Required for <code>codex-siliconflow</code>; invalid with another provider. |
 | <code>--codex-model &lt;name&gt;</code> | Overrides <code>MEDAI_CODEX_MODEL</code>; <code>codex</code> only. |
 | <code>--codex-reasoning-effort &lt;level&gt;</code> | Overrides default reasoning effort; <code>codex</code> only. One of <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>, <code>ultra</code>. |
-| <code>--smart-replicate</code> | Supplies audited claim anchors and permits at most five hypothesis-recorded adjustments per experiment. Disabled by default. |
+| <code>--smart-replicate</code> | Supplies audited claim anchors and permits at most five hypothesis-recorded adjustments per claim. Disabled by default. |
 | <code>--output &lt;dir&gt;</code> | For replication, an existing manifest-bearing run below <code>runs/</code> to resume. For Auto Research, a new or existing campaign directory. |
 | <code>--replicate-run &lt;dir&gt;</code> | Completed base run for Auto Research; must be below <code>runs/</code>. |
 | <code>--max-iter &lt;1-10&gt;</code> | Maximum Auto Research iterations; default 1. |
@@ -234,12 +234,12 @@ Choose a completed supervised-prediction replication. Without <code>--output</co
 ~~~mermaid
 flowchart LR
     I[Paper PDF / optional code / data] --> A[Preflight and PDF parsing]
-    A --> B[Claims and experiment definitions]
-    B --> C[Code generation and ambiguity record]
+    A --> B[Immutable D/P/T/M/V/C paper graph]
+    B --> C[Runnable subgraph and node updates]
     C --> D[Data and cohort audit]
     D -->|FAIL, up to 3 refinement rounds| E[Cohort/preprocessing refinement]
     E --> D
-    D -->|PASS or refinements exhausted| F[Experiment plan]
+    D -->|PASS or refinements exhausted| F[Node-covering plan]
     F --> G[Full-scale replication]
     G --> H[Claim/artifact comparison report]
 ~~~
@@ -248,30 +248,30 @@ flowchart LR
 | --- | --- | --- |
 | <code>preflight</code> | Validates inputs and records CPU, RAM, disk, and GPU. | <code>preflight/resources.json</code> |
 | <code>preprocess_pdf</code> | Imports host MinerU output and preserves canonical Markdown and paper assets. | <code>preprocessing/paper.md</code>, <code>artifacts/</code> |
-| <code>preprocessing_agent</code> | Audits figure/table labels and formulas; extracts claims, validation anchors, and experiments. | <code>claims.json</code>, <code>experiment_todo.json</code> |
-| <code>codegen_agent</code> | Inspects data read-only, records ambiguities, and copies/writes executable code. Stops if a paper-required file is missing. | <code>codegen/codebase/</code>, <code>codegen_plan.json</code> |
+| <code>preprocessing_agent</code> | Audits paper evidence and extracts the complete fine-grained claim-provenance graph. | <code>paper_graph.json</code>, <code>graph/node_state.json</code> |
+| <code>codegen_agent</code> | Consumes the runnable subgraph, inspects data read-only, and writes executable code plus node-local updates. | <code>codegen/codebase/</code>, <code>codegen_plan.json</code> |
 | <code>audit_agent</code> | Runs real-data preprocessing and applicable independent cohort/data-quality checks, accumulating the full issue set. | <code>codegen/audit/attempt_*/audit_report.json</code> |
-| <code>cohort_refine_agent</code> | After audit failure, changes only cohort construction, loading, preprocessing, and related ambiguities—not model, training, or evaluation. | Numbered attempt directories and updated plan |
-| <code>plan_agent</code> | Covers every claim, prepares dependencies, smoke-tests, and writes the plan. | <code>plan/replicate_plan.json</code> |
-| <code>replicate_agent</code> | Executes every planned experiment at paper full scale and saves evidence. | <code>replication_log.json</code>, <code>evidence_summary.json</code> |
-| <code>report_agents</code> | Compares every claim/figure/table anchor with real artifacts, recording validation judgements and ambiguity risks. | <code>report/reproduction_report.md</code> |
+| <code>cohort_refine_agent</code> | After audit failure, changes only cohort construction, loading, preprocessing, and affected P-local updates. | Numbered attempt directories and overlay updates |
+| <code>plan_agent</code> | Covers every runnable node, prepares dependencies, smoke-tests, and writes the plan. | <code>plan/replicate_plan.json</code> |
+| <code>replicate_agent</code> | Executes the runnable graph at paper full scale and saves a result/evidence update for every active node. | <code>replication_log.json</code>, <code>evidence_summary.json</code> |
+| <code>report_agents</code> | Writes one fragment per C with upstream results, direct comparison, blockers, and exact lineage issues. | <code>report/claims/</code>, <code>reproduction_report.md</code> |
 
 ### Auto Research workflow
 
 ~~~mermaid
 flowchart LR
     A[Completed prediction replication] --> B[Eligibility]
-    B --> C[Result-blind weighting and experiment contracts]
+    B --> C[Result-blind V weighting and validation contracts]
     C --> D[Three evidence-grounded ideas per round]
     D --> E[Independent code copy and minimal implementation]
-    E --> F[Six-boundary audit]
-    F --> G[Full-scale experiment]
+    E --> F[Evidence-based free-form audit]
+    F --> G[Refinement-only validation]
     G --> H[Evidence assessment against replication baseline]
     H -->|No valid idea and iterations remain| D
     H -->|Valid idea or limit reached| I[Auto Research report]
 ~~~
 
-Auto Research first freezes data/cohort/split, prediction outcome and horizon, evaluator input/output, metrics, and evaluation protocol. It then creates three input-representation, model, or training-strategy candidates per round. Each candidate uses an independent code copy and cannot write back to the base replication. The ordered audit checks data, prediction target, input representation, evaluator-facing output, training, and evaluation; only an audited idea can run at full scale. Assessment compares the primary metric with existing baseline evidence and records actual delta, relative change, and an evidence-bound score from -5 to 5. It is not tuning towards a paper-reported result.
+Auto Research lists every eligible prediction V result-blind, gives low-importance Vs zero weight, and contracts only positive-weight Vs. Each of three candidates gets an independent code copy, refinement graph, and overlay; changed P/T/M semantics create new nodes and every positive baseline V maps to a new V. Free-form audit checks require evidence for each positive V. Validation runs only refinement paths and never reruns the baseline. Assessment retains actual values, deltas, frozen rules and weights, and an evidence-bound score from -5 to 5.
 
 ### Interfaces and protocol boundaries
 
@@ -302,16 +302,17 @@ medai/
 └── runs/<run_id>/             # Auditable replication outputs (default)
     ├── manifest.json
     ├── preprocessing/
+    ├── graph/node_state.json
     ├── codegen/
     ├── plan/
     ├── replication/
     ├── report/reproduction_report.md
     ├── remote_compute/
     └── autoresearch/campaign_<NNN>/
-        ├── experiment_setup/
-        ├── idea_generation/
+        ├── validation_setup/
+        ├── research/
         ├── rounds/
-        └── report/auto_research_report.md
+        └── report/autoresearch_report.md
 ~~~
 
 For canonical paths, schemas, and validation rules, see the [documentation router](docs/README.md), [replication workflow](docs/replication.md), [Auto Research contract](docs/autoresearch.md), and [artifact contract](docs/artifacts.md).
@@ -545,12 +546,12 @@ VASTAI_MAX_CAMPAIGN_INSTANCES=3
 ~~~mermaid
 flowchart LR
     I[论文 PDF / 可选代码 / 数据] --> A[预检与 PDF 解析]
-    A --> B[论文声明与实验定义]
-    B --> C[代码生成与歧义记录]
+    A --> B[不可变 D/P/T/M/V/C 论文图]
+    B --> C[可运行子图与节点更新]
     C --> D[数据与队列审计]
     D -->|FAIL，最多 3 轮修正| E[队列/预处理修正]
     E --> D
-    D -->|PASS 或修正耗尽| F[实验计划]
+    D -->|PASS 或修正耗尽| F[覆盖节点的计划]
     F --> G[完整规模复现]
     G --> H[声明/产物对照报告]
 ~~~
@@ -559,30 +560,30 @@ flowchart LR
 | --- | --- | --- |
 | <code>preflight</code> | 验证输入并记录 CPU、内存、磁盘和 GPU。 | <code>preflight/resources.json</code> |
 | <code>preprocess_pdf</code> | 导入宿主机 MinerU 结果，保留标准 Markdown 与论文资源。 | <code>preprocessing/paper.md</code>、<code>artifacts/</code> |
-| <code>preprocessing_agent</code> | 校对图表标签/公式，提取声明、验证锚点和实验。 | <code>claims.json</code>、<code>experiment_todo.json</code> |
-| <code>codegen_agent</code> | 只读检查数据，记录歧义并复制/编写可执行代码；缺少论文指定文件时停止。 | <code>codegen/codebase/</code>、<code>codegen_plan.json</code> |
+| <code>preprocessing_agent</code> | 审计论文证据并提取完整、高颗粒度的 claim 溯源图。 | <code>paper_graph.json</code>、<code>graph/node_state.json</code> |
+| <code>codegen_agent</code> | 消费可运行子图，只读检查数据，编写代码并输出节点局部更新。 | <code>codegen/codebase/</code>、<code>codegen_plan.json</code> |
 | <code>audit_agent</code> | 使用真实数据执行预处理及适用的独立队列/数据质量检查，累积完整问题集。 | <code>codegen/audit/attempt_*/audit_report.json</code> |
-| <code>cohort_refine_agent</code> | 审计失败后仅调整队列构建、加载、预处理及相关歧义；不改模型、训练或评估。 | 编号尝试目录与更新计划 |
-| <code>plan_agent</code> | 覆盖全部声明、准备依赖、烟雾测试并写计划。 | <code>plan/replicate_plan.json</code> |
-| <code>replicate_agent</code> | 按论文完整规模执行所有计划实验并保存证据。 | <code>replication_log.json</code>、<code>evidence_summary.json</code> |
-| <code>report_agents</code> | 逐项比较声明/图表锚点和真实产物，给出验证结论与歧义风险。 | <code>report/reproduction_report.md</code> |
+| <code>cohort_refine_agent</code> | 审计失败后仅调整队列构建、加载、预处理及受影响 P 的局部更新。 | 编号尝试目录与 overlay 更新 |
+| <code>plan_agent</code> | 覆盖全部可运行节点、准备依赖、烟雾测试并写计划。 | <code>plan/replicate_plan.json</code> |
+| <code>replicate_agent</code> | 按论文完整规模执行可运行图，为每个活跃节点保存真实结果和证据。 | <code>replication_log.json</code>、<code>evidence_summary.json</code> |
+| <code>report_agents</code> | 每个 C 独立报告上游结果、直接比较、阻断和精确 lineage issue。 | <code>report/claims/</code>、<code>reproduction_report.md</code> |
 
 ### Auto Research 改进流程
 
 ~~~mermaid
 flowchart LR
     A[已完成预测型复现] --> B[资格判定]
-    B --> C[结果盲的重要性加权与实验契约]
+    B --> C[结果盲的 V 加权与验证契约]
     C --> D[每轮三个有证据的改进想法]
     D --> E[独立代码副本与最小实现]
-    E --> F[六项边界审计]
-    F --> G[完整规模实验]
+    E --> F[有证据的自由命名审计]
+    F --> G[仅执行改进路径的验证]
     G --> H[与复现基线的证据评估]
     H -->|无有效想法且未到上限| D
     H -->|有效或达到上限| I[Auto Research 报告]
 ~~~
 
-Auto Research 先固定数据/队列/划分、预测结局及时间窗、评价器输入输出、指标和评价协议；再每轮产生三个输入表示、模型或训练策略候选。每个候选都用独立代码副本，不能回写基础复现。审计顺序为数据、预测目标、输入表示、评价器输出、训练、评价；通过后才以完整规模运行。评估以已有基线证据比较主指标，记录实际差值、相对变化和 -5 至 5 的证据分数，而非朝论文结果调参。
+Auto Research 以结果盲方式列出所有合格预测 V，低重要性 V 可取零权重，只为正权重 V 建立契约。每个候选都有独立代码副本、refinement graph 和 overlay；任何改变的 P/T/M 语义都建立新节点，每个正权重基线 V 对应一个新 V。自由命名审计必须为每个正权重 V 提供证据。验证只运行改进路径，不重跑基线；评估保留真实值、差值、冻结规则/权重和 -5 至 5 的证据分数。
 
 ### 接口与协议
 
@@ -613,16 +614,17 @@ medai/
 └── runs/<run_id>/             # 可审计的复现产物（默认）
     ├── manifest.json
     ├── preprocessing/
+    ├── graph/node_state.json
     ├── codegen/
     ├── plan/
     ├── replication/
     ├── report/reproduction_report.md
     ├── remote_compute/
     └── autoresearch/campaign_<NNN>/
-        ├── experiment_setup/
-        ├── idea_generation/
+        ├── validation_setup/
+        ├── research/
         ├── rounds/
-        └── report/auto_research_report.md
+        └── report/autoresearch_report.md
 ~~~
 
 规范路径、字段与验证规则请见 [文档路由](docs/README.md)、[复现工作流](docs/replication.md)、[Auto Research](docs/autoresearch.md) 和 [产物契约](docs/artifacts.md)。

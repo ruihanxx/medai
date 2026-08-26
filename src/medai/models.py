@@ -213,157 +213,14 @@ class GraphScopeRevisionIssues(StrictModel):
     issues: list[GraphScopeRevisionIssue] = Field(min_length=1)
 
 
-class Provenance(StrictModel):
-    page: int = Field(ge=1)
-    section: str = Field(min_length=1)
-    quote: str = Field(min_length=1, max_length=200)
-
-
-class Claim(StrictModel):
-    claim_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    statement: str = Field(min_length=1)
-    role: Literal["final", "validation"]
-    kind: Literal["text", "numeric"]
-    paper_result: Any = None
-    provenance: Provenance
-
-
-class ClaimsFile(StrictModel):
-    claims: list[Claim]
-
-    @model_validator(mode="after")
-    def unique_claim_ids(self) -> "ClaimsFile":
-        claim_ids = [claim.claim_id for claim in self.claims]
-        if len(claim_ids) != len(set(claim_ids)):
-            raise ValueError("claim_id values must be unique")
-        return self
-
-
-class ExperimentDataset(StrictModel):
-    name: str = Field(min_length=1)
-    role: str = Field(min_length=1)
-    usage: str = Field(min_length=1)
-
-    @field_validator("name", "role", "usage")
-    @classmethod
-    def nonblank_dataset_text(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("Experiment dataset fields must not be blank")
-        return normalized
-
-
-class Experiment(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    description: str
-    computational_demand: str = Field(min_length=1)
-    datasets: list[ExperimentDataset] = Field(min_length=1)
-    claims: list[str] = Field(min_length=1)
-    artifacts: list[str]
-
-    @model_validator(mode="after")
-    def unique_mappings(self) -> "Experiment":
-        if len(self.claims) != len(set(self.claims)):
-            raise ValueError("Experiment claim IDs must be unique")
-        if len(self.artifacts) != len(set(self.artifacts)):
-            raise ValueError("Experiment artifact labels must be unique")
-        dataset_names = [dataset.name.casefold() for dataset in self.datasets]
-        if len(dataset_names) != len(set(dataset_names)):
-            raise ValueError("Experiment dataset names must be unique")
-        return self
-
-
-class ExperimentTodo(StrictModel):
-    experiments: list[Experiment] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def unique_experiment_ids(self) -> "ExperimentTodo":
-        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("experiment_id values must be unique")
-        return self
-
-
-class DataRequirementAvailability(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    dataset: str = Field(min_length=1)
-    source_kind: Literal["local", "cloud"] | None
-    source_name: str | None
-    required_content: str = Field(min_length=1)
-    status: Literal["available", "source_blocked", "unknown"]
-    evidence: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def source_fields_match(self) -> "DataRequirementAvailability":
-        if (self.source_kind is None) != (self.source_name is None):
-            raise ValueError("source_kind and source_name must both be set or both be null")
-        if self.source_name is not None and not self.source_name.strip():
-            raise ValueError("source_name must not be blank")
-        return self
-
-
-class ExperimentDependency(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    depends_on: list[str]
-    evidence: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def unique_dependencies(self) -> "ExperimentDependency":
-        if len(self.depends_on) != len(set(self.depends_on)):
-            raise ValueError("depends_on IDs must be unique")
-        if self.experiment_id in self.depends_on:
-            raise ValueError("an experiment cannot depend on itself")
-        return self
-
-
 class CapacityDecision(StrictModel):
     execution_location: Literal["local", "remote"] | None
     rationale: str = Field(min_length=1)
 
 
-class DataAvailabilityReport(StrictModel):
-    capacity_decision: CapacityDecision
-    requirements: list[DataRequirementAvailability]
-    dependencies: list[ExperimentDependency]
-
-
-class ScopeRevisionIssue(StrictModel):
-    experiment_ids: list[str] = Field(min_length=1)
-    datasets: list[str] = Field(min_length=1)
-    required_content: str = Field(min_length=1)
-    evidence: str = Field(min_length=1)
-
-
-class ScopeRevisionIssues(StrictModel):
-    scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    issues: list[ScopeRevisionIssue] = Field(min_length=1)
-
-
-class BlockedExperiment(StrictModel):
-    experiment_id: str
-    status: Literal["source_blocked", "unknown"]
-    direct_data_blockers: list[str]
-    dependency_paths: list[list[str]]
-
-
-class ExecutionScope(StrictModel):
-    availability_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    verdict: Literal["FULL", "PARTIAL", "NONE", "UNKNOWN"]
-    runnable_experiment_ids: list[str]
-    blocked_experiments: list[BlockedExperiment]
-    active_sources: list[str]
-    execution_location: Literal["local", "remote"] | None
-
-
 class PlannedFile(StrictModel):
     path: str
     responsibility: str
-
-
-class Ambiguity(StrictModel):
-    question: str
-    assumption: str
 
 
 class DatasetPatch(StrictModel):
@@ -641,30 +498,6 @@ class ValidationContracts(OpenModel):
         return self
 
 
-class ExperimentImportance(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    weight: float = Field(gt=0, le=1)
-    rationale: str = Field(min_length=1)
-
-
-class ExperimentWeights(StrictModel):
-    experiments: list[ExperimentImportance] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def unique_ids_and_normalized_weights(self) -> "ExperimentWeights":
-        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("Experiment-weight IDs must be unique")
-        if not math.isclose(
-            sum(experiment.weight for experiment in self.experiments),
-            1.0,
-            rel_tol=1e-6,
-            abs_tol=1e-9,
-        ):
-            raise ValueError("Experiment weights must sum to 1")
-        return self
-
-
 class IdeaProvenance(StrictModel):
     reference: str = Field(min_length=1)
     support: str = Field(min_length=1)
@@ -732,37 +565,6 @@ class IdeaCandidatePool(StrictModel):
         used_indexes = [int(candidate_id[1:]) for candidate_id in candidate_ids]
         if used_indexes and self.next_candidate_index <= max(used_indexes):
             raise ValueError("next_candidate_index must exceed every candidate ID")
-        return self
-
-
-class ExperimentContract(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    baseline_entry_points: list[str] = Field(min_length=1)
-    model_implementation_paths: list[str] = Field(min_length=1)
-    input_representation_paths: list[str] = Field(min_length=1)
-    training_paths: list[str] = Field(min_length=1)
-    integration_paths: list[str] = Field(min_length=1)
-    data_contract: str = Field(min_length=1)
-    prediction_target_contract: str = Field(min_length=1)
-    input_representation_contract: str = Field(min_length=1)
-    output_contract: str = Field(min_length=1)
-    training_target_contract: str = Field(min_length=1)
-    loss_contract: str = Field(min_length=1)
-    training_contract: str = Field(min_length=1)
-    evaluation_contract: str = Field(min_length=1)
-    metrics: str = Field(min_length=1)
-    primary_metric: str = Field(min_length=1)
-    metric_direction: Literal["higher", "lower"]
-
-
-class ExperimentContracts(StrictModel):
-    experiments: list[ExperimentContract] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def unique_experiment_ids(self) -> "ExperimentContracts":
-        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("Experiment-contract IDs must be unique")
         return self
 
 
@@ -984,7 +786,7 @@ class IdeaAssessment(StrictModel):
             rel_tol=1e-6,
             abs_tol=1e-9,
         ):
-            raise ValueError("Assessment weighted score does not match experiment scores")
+            raise ValueError("Assessment weighted score does not match validation scores")
 
         if (not self.audit_passed or not self.protocol_consistent) and self.verdict != "invalid":
             raise ValueError("A failed audit or inconsistent protocol requires an invalid verdict")
@@ -1026,19 +828,6 @@ class RoundSummary(StrictModel):
         if self.has_valid_refinement != any(idea.verdict == "valid" for idea in self.ideas):
             raise ValueError("has_valid_refinement does not match idea verdicts")
         return self
-
-
-def validate_experiment_coverage(claims: ClaimsFile, todo: ExperimentTodo) -> None:
-    known_claims = {claim.claim_id for claim in claims.claims}
-    referenced_claims = {
-        claim_id for experiment in todo.experiments for claim_id in experiment.claims
-    }
-    unknown_claims = referenced_claims - known_claims
-    missing_claims = known_claims - referenced_claims
-    if unknown_claims:
-        raise ValueError(f"Experiments reference unknown claims: {sorted(unknown_claims)}")
-    if missing_claims:
-        raise ValueError(f"Claims missing from experiments: {sorted(missing_claims)}")
 
 
 def validate_replication_plan(

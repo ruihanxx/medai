@@ -16,7 +16,11 @@ from medai.models import (
 )
 from medai.pipeline_state import PipelineState
 from medai.study_graph import write_empty_node_state
-from medai.workflow import _compose_reproduction_report, validate_replication_artifacts
+from medai.workflow import (
+    _compose_reproduction_report,
+    report_agents_node,
+    validate_replication_artifacts,
+)
 
 
 def _node(node_id: str, inputs: list[str], result=None) -> dict[str, object]:
@@ -228,3 +232,89 @@ def test_legacy_manifest_is_rejected_without_writeback(tmp_path: Path) -> None:
         PipelineState(output)
 
     assert manifest.read_bytes() == before
+
+
+def test_report_resume_skips_valid_completed_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "run"
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"paper")
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+    payload = _graph().model_dump(mode="python")
+    payload["claims"].append(_node("C2", ["V1"], result=0.75))
+    graph = PaperGraph.model_validate(payload)
+    graph_path = output / "preprocessing" / "paper_graph.json"
+    write_json(graph_path, graph.model_dump(mode="json"))
+    node_state_path = output / "graph" / "node_state.json"
+    write_empty_node_state(node_state_path, sha256_file(graph_path))
+    scope = _scope(graph_path, graph)
+    scope_path = output / "preprocessing" / "execution_scope.json"
+    write_json(scope_path, scope.model_dump(mode="json"))
+
+    claims_dir = output / "report" / "claims"
+    claims_dir.mkdir(parents=True)
+
+    def fragment(claim_id: str, paper_result: str) -> str:
+        return f"""# Claim {claim_id}
+
+Paper result: {paper_result}
+Reproduced result: available
+Upstream node results: available
+Direct comparison: assessed
+Scope blockers: none
+Lineage issues: none
+Assessment: close
+"""
+
+    (claims_dir / "C1.md").write_text(fragment("C1", "0.8"), encoding="utf-8")
+    (claims_dir / "C1_transcript.jsonl").write_text("{}\n", encoding="utf-8")
+    pipeline = PipelineState.create(output, {"provider": "codex"})
+    pipeline.start_stage("report_agents")
+    pipeline.update_stage_checkpoints(
+        "report_agents",
+        {"scope_sha256": scope.scope_sha256, "completed_claims": ["C1"]},
+    )
+    pipeline.fail("interrupted")
+
+    invoked: list[str] = []
+
+    def fake_run_agent(**kwargs):
+        prompt = Path(kwargs["prompt_path"]).read_text(encoding="utf-8")
+        assert "C2" in prompt
+        invoked.append("C2")
+        (claims_dir / "C2.md").write_text(fragment("C2", "0.75"), encoding="utf-8")
+        Path(kwargs["transcript_path"]).write_text("{}\n", encoding="utf-8")
+        return "session"
+
+    def fake_validate(**kwargs):
+        kwargs["validate"]()
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_run_agent)
+    monkeypatch.setattr(
+        "medai.workflow._validate_agent_artifacts_with_resume", fake_validate
+    )
+    state = {
+        "config": config,
+        "paper_markdown": str(output / "preprocessing" / "paper.md"),
+        "paper_graph_path": str(graph_path),
+        "node_state_path": str(node_state_path),
+        "execution_scope_path": str(scope_path),
+        "replicate_plan_path": str(output / "plan" / "replicate_plan.json"),
+        "codebase_dir": str(output / "codegen" / "codebase"),
+    }
+
+    report_agents_node(state)  # type: ignore[arg-type]
+
+    assert invoked == ["C2"]
+    checkpoint = PipelineState(output).get_stage_checkpoints("report_agents")
+    assert checkpoint["completed_claims"] == ["C1", "C2"]
+    report = (output / "report" / "reproduction_report.md").read_text(encoding="utf-8")
+    assert report.index("## Claim C1") < report.index("## Claim C2")

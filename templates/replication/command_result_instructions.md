@@ -14,5 +14,5 @@ The replication artifacts are not yet complete. The current validation error is:
 Read the result and any relevant log sections, inspect or repair the writable
 codebase as needed, then return exactly one next non-empty bash command using
 the required output schema. That command will again be executed and monitored
-by local workflow orchestration. Do not launch or monitor a large experiment,
+by local workflow orchestration. Do not launch or monitor a large validation run,
 test, provider command, or remote job directly in this turn.

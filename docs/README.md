@@ -7,7 +7,7 @@ the contract files whose routing conditions match the change:
 | --- | --- |
 | Host launcher, CLI flags, initialization, provider configuration, MinerU, mounts, Docker isolation, or orchestration-owned remote lifecycle and cleanup | `execution.md` |
 | Base replication stages, failure behavior, checkpoints, resume, or manifest state | `replication.md` |
-| Auto Research eligibility, idea rounds, audit, experiment, assessment, routing, or campaign state | `autoresearch.md` |
+| Auto Research eligibility, validation setup, idea graphs, audit, assessment, routing, or campaign state | `autoresearch.md` |
 | Canonical run paths, artifact fields, validation rules, evidence, or report structure | `artifacts.md` |
 | Prompt locations, agent information/mutation boundaries, transcripts, invocation handoffs, or the runtime-skill interface | `agents.md` |
 | Required local checks or mocked external boundaries | `acceptance.md` |

@@ -16,7 +16,7 @@ Inspect and repair the existing stage artifacts in place:
 
 Continue this same conversation and preserve all valid work already completed.
 Modify only artifacts owned by the original stage instructions. Do not repeat
-completed experiments, dataset transfers, remote provisioning, or remote
+completed computation, dataset transfers, remote provisioning, or remote
 lifecycle actions merely because validation failed. Resolve the reported
 contract error, check the complete artifact set rather than only the named
 symptom, and return only after the corrected artifacts satisfy the original

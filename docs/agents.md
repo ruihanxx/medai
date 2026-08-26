@@ -1,202 +1,92 @@
 # Agent, Prompt, and Skill Boundary Contract
 
-This file owns agent-facing information, mutation, invocation, and skill
-boundaries. Workflow ordering, retries, and resume behavior belong in
-`replication.md` or `autoresearch.md`; persistent paths and schemas belong in
-`artifacts.md`; host-owned remote lifecycle belongs in `execution.md`;
-provider-specific procedures belong in the metadata-selected runtime skill
-reference.
+Generic replication prompts live under `templates/<stage>/`, Auto Research
+prompts under `templates/autoresearch/<stage>/`, and runtime skills under
+`templates/skills/`. Prompts are rendered with strict Jinja context and
+persisted before invocation. Every provider event stream is kept as JSONL; a
+transcript is diagnostic evidence, never a structured result.
 
-## Prompt and transcript contract
+Generic prompts remain provider- and dataset-agnostic. Provider APIs,
+credentials, schemas, and recovery procedures belong only to selected skill
+references or adapters. Secrets never enter prompts, transcripts, commands,
+logs, manifests, or reports. Source data is read-only; agents retain only
+needed columns/aggregates and never substitute a missing paper-required input.
 
-- Generic stage prompts and shared examples remain provider- and
-  dataset-agnostic. Provider or dataset names, APIs, commands, credentials,
-  configuration, schemas, cohort rules, and layouts live only in the selected
-  skill reference or script, dataset documentation, or adapter. Examples use
-  placeholders, and adding a provider or dataset never requires hard-coding it
-  into a generic workflow prompt.
-- Replicate prompts live under `templates/<stage>/`, Auto Research prompts under
-  `templates/autoresearch/<stage>/`, and runtime skills under
-  `templates/skills/`; none is stored under `src/`. Preprocessing audit and
-  cohort refinement use `templates/cohort_refine/audit_session_instructions.md`
-  and `templates/cohort_refine/session_instructions.md`; an incomplete
-  direct-Codex audit resumes with
-  `templates/cohort_refine/audit_resume_instructions.md`.
-- Prompts are rendered with Jinja2 and persisted before invocation. Their
-  canonical output paths are defined in `artifacts.md`.
-- Every invocation preserves its provider event stream as a JSONL transcript
-  beside the stage artifacts. Before a retry overwrites a transcript, the old
-  file is archived as `<name>.attempt-<N>.jsonl`. A transcript is diagnostic
-  evidence, never the structured agent result.
-- `data_availability_agent` reads the paper, extracted experiments, bounded
-  read-only source evidence, resources, and reviewed provider references. It
-  writes only its numbered report/evidence/transcript, never asks the user,
-  trains, performs full preprocessing, mutates source data, or converts a
-  technical uncertainty into a skippable source blocker. Orchestration owns
-  dependency validation, closure, scope derivation, and confirmation.
+## Graph ownership
 
-## Invocation modes
+- Preprocessing alone writes the complete immutable paper graph. It creates
+  fine-grained D/P/T/M/V/C nodes, treats V sets as Cartesian blocks, separates
+  sparse endpoints, supports P→V→C, and does not create a separate grouping
+  concept.
+- Data availability reads the graph and covers every P×upstream-D requirement.
+  It writes only attempt-local evidence. Orchestration owns scope derivation.
+- Later agents do not edit the paper graph. They emit node-local updates in
+  their existing stage artifact; orchestration assigns the source and merges
+  the overlay.
+- Issues have one origin node and a nonblank description. Agents never copy an
+  upstream issue to descendants or create separate risk/result nodes.
+- Codegen, audit/refinement attempts, replication, and each idea validation use
+  distinct sources so invalidation can remove only owned updates.
 
-One-turn invocation is the default. These direct-Codex modes instead keep one
-temporary session across explicit orchestration handoffs:
+## Replication boundaries
 
-| Mode | Structured request | Orchestration boundary |
-| --- | --- | --- |
-| Replication | Stage-owned canonical artifacts | Codex executes and monitors its own commands during one agent turn; orchestration validates only after the turn ends and resumes the same session only for invalid final artifacts. |
-| Direct-Codex codegen | `completed`, `blocked`, or `failed` plus a nullable error | `blocked` or `failed` terminates immediately; only `completed` proceeds to artifact validation and bounded same-session repair. |
-| Opted-in cloud codegen | `command`, `blocked`, or `failed` plus nullable command/error fields | After agent-owned preparation and power-off, run a returned foreground cloud monitor locally; terminal statuses run no command. |
-| Opted-in Auto Research planning | `{"command":"<non-empty bash command>"}` | After agent-owned preparation and power-off, run the foreground cloud monitor locally, validate cloud state, and resume the same session. |
-| Remote Auto Research experiment | One `remote_exec` or `download` operation | Select and prepare a campaign instance, execute the provider operation, persist its result, power off, validate local artifacts, and resume only when required. |
-| Preprocessing audit | Compact `audit_report.json` written in the attempt | Validate the report after every successful direct-Codex turn; if it is missing or invalid, resume the same session so existing local or remote work can finish. |
-| Other Replicate Agent outputs | Stage-owned canonical artifacts | Validate preprocessing, final codegen, cohort-refinement, plan, and per-experiment report artifacts; resume the same direct-Codex session for at most two repair turns with the exact error and owned paths. |
+Codegen edits only the copied codebase, plan, and allowed maintenance artifacts.
+It consumes only the runnable subgraph, inventories configured sources with
+bounded reads, follows the persisted execution location, and stops on absent
+required content. Its `node_updates` are open and aligned to graph node IDs.
 
-Initial and resumed turns in one temporary session append to the same
-transcript. Explicit CLI resume preserves command artifacts but never reuses a
-prior process-local session ID. Exact request/result schemas and paths are
-defined in `artifacts.md`. A direct-Codex codegen `completed` status is only a
-gate to artifact validation, which remains authoritative for completion;
-`blocked` and `failed` are terminal. Other stage completion is determined by
-artifact validation, not a completion sentinel, `--last`, or command exit
-status alone.
+Audit treats source data and the codebase as read-only and writes only in its
+attempt directory. It covers all runnable P paths and accumulates every
+supported root cause. Each issue records one `node_id`, description, optional
+open evidence/fix fields, and the orchestration route `preprocessing_fix` or
+`source_unavailable`. Cohort refinement may change only cohort construction,
+loading, preprocessing, directly related configuration, and affected P-local
+updates. Model, training, validation semantics, and results remain read-only.
 
-Direct Codex may inspect files, edit within its stage boundary, and perform
-lightweight interaction. Base replication is the exception: it runs its
-long-running commands directly inside its complete agent turn. Other
-long-running experiments, test suites, and monitors must be returned as one
-foreground operation rather than run inside the agent turn.
+Planning may add setup/smoke-test code but not scientific fallback semantics.
+Its steps collectively verify all runnable nodes. Replication reads paper text
+as a scientific reference, executes at full required scale, records actual
+results and real evidence for every runnable node, and never modifies source
+data. Smart Replicate receives only assigned claim anchors and writes claim-
+specific round logs. Reporting receives one C, its real ancestors, relevant
+updates/blockers, and `collect_lineage_issues(C)`; it writes one claim fragment.
 
-## Shared information and mutation rules
+## Auto Research boundaries
 
-- Agents treat supplied source data as read-only. Large tables are read in
-  chunks or bounded batches, retaining only required columns and postponing
-  global operations until compact chunk outputs are merged.
-- An absent paper-required input is reported explicitly. Agents never invent,
-  derive, wait for, or substitute a missing source artifact merely to continue
-  the workflow.
-- Secrets never enter prompts, transcripts, commands, logs, or persistent
-  artifacts. Cloud-data agents may retrieve only the aggregate or declared
-  result artifacts permitted below, never raw or row-level data.
+The weighting agent is result-blind and reads only paper/paper graph. It lists
+every eligible prediction V, including zero-weight Vs. The contract agent uses
+the completed base code and artifacts and writes contracts only for positive Vs.
 
-## Replication agent boundaries
+Idea codegen changes only declared files allowed by contracts and creates new
+P/T/M/V nodes for changed semantics; base nodes are immutable. Audit checks are
+freely named but must evidence every positive V and prove refinement-only scope.
+The validation planner and runner never rerun the baseline. They cover each
+refined V and its Cartesian endpoints, treat audited source as read-only, and
+write actual/evidence updates for all new nodes. Assessment copies frozen V IDs,
+metrics, rules, weights, and threshold exactly.
 
-- Preprocessing writes claims and experiment definitions under the artifact
-  contract. It inventories the paper's named datasets, then records every
-  dataset consumed by each experiment with its experiment-specific role and
-  concrete usage. The executable prompt owns its paper-search procedure; the
-  resulting `computational_demand` and dataset-use fields are defined in
-  `artifacts.md`.
-- Codegen may modify only the run's copied codebase and its declared plan or
-  maintenance artifacts. It inspects data through bounded, read-only reads and
-  must stop on a missing required source artifact. It receives the complete
-  preflight resource snapshot and makes one evidence-bound local-first resource
-  decision after inventorying local dataset version, size, files, and partitions.
-  Unstated CPU-only hardware defaults to eight sufficient physical cores and is
-  not increased from data scale alone. Memory follows the planned streaming,
-  chunked, or out-of-core peak with 20% headroom; disk follows the dataset and
-  peak work-file landing points. Uncertainty triggers a bounded capacity probe,
-  not remote execution. Provider configuration alone never authorizes remote
-  execution. Cloud-only data is the explicit data-locality exception; with both
-  sources, local execution uses local data and remote execution uses the
-  provider's cloud data.
-- Codegen cross-checks every extracted experiment-dataset contract against the
-  paper and stops on an incomplete or conflicting contract. Its plan narration
-  names each dataset separately and records its path/configuration, role,
-  preprocessing or linkage, fitting/evaluation action, and outputs.
-- Preprocessing audit treats `codegen/codebase/` and source data as read-only
-  and writes only inside its attempt directory. Local-data audit never uses
-  remote compute and may add an equivalent CPU, streaming, or small-batch
-  adapter inside that directory without changing scientific semantics.
-  Cloud-data audit reuses the existing provider state in an independent remote
-  attempt, adds only audit instrumentation, and retrieves only aggregate
-  statistics, logs, and the report; local CPU adapters, training, tuning, and
-  evaluation are prohibited there.
-- Preprocessing audit receives the experiment artifact and covers every
-  experiment-dataset pair. Dataset-specific evidence remains separate before
-  linkage or pooling so a combined aggregate cannot conceal a missing input.
-- Cohort refinement may change only cohort construction, data loading,
-  preprocessing, directly related data configuration, and the plan's
-  `ambiguities`. It must fix and verify every reported issue. Models, training,
-  tuning, evaluation, and result artifacts remain read-only. Local refinement
-  never uses remote compute; cloud refinement reuses the existing instance and
-  may not rent, release, reauthorize, or rematerialize data.
-- A Replicate plan agent may edit the copied codebase for setup and smoke-test
-  needs but may not change model semantics, introduce reduced or fallback
-  plans, or hard-code paper results. Each data-touching step names the exact
-  datasets, their separate operations, and any merge, transfer, or comparison
-  boundary.
-- Replication receives the paper Markdown as a read-only scientific reference.
-  Before changing model, training, evaluation, or derived-data semantics, it
-  rereads the relevant paper text and implements any stated decision exactly.
-  A confirmed paper omission is resolved only with a medically appropriate,
-  broadly accepted medical-research and data-processing convention suited to
-  the study and supplied data; arbitrary defaults and result-driven changes are
-  prohibited. The paper statement or confirmed omission, decision basis, and
-  semantic effect are recorded with the fix evidence. Source data remains
-  read-only.
-- Replication receives no paper target values by default. Smart Replicate sees
-  only its claim-level audited anchors in addition to the read-only paper
-  reference, and records baseline, comparisons, hypotheses, changes, commands,
-  and actual round results in its canonical log.
+Remote validation agents return only one inner foreground `remote_exec` or a
+structured confined `download`. They never construct SSH/adapter commands,
+manage pool membership or lifecycle, rematerialize raw data, or download
+anything outside declared model/metric/log/aggregate roots.
 
-The exhaustive audit decision procedure, cohort-refinement routing, missing
-input failure, and Smart Replicate workflow are defined in `replication.md`.
+## Invocation handoffs
 
-## Auto Research agent boundaries
+One-turn invocation is the default. Direct Codex may keep one temporary session
+across these orchestration handoffs: invalid final stage artifacts (at most two
+repairs), missing/invalid audit report, opted-in cloud materialization monitor,
+Auto Research planning monitor, and one remote validation operation. Initial
+and resumed turns append to one transcript. Explicit CLI resume never restores
+a process-local session ID.
 
-- Experiment weighting is result-blind and runs before code inspection. The
-  weighting agent reads only the paper and experiment definitions and receives
-  no result artifacts. The contract agent instead treats completed replicate
-  code and plans as executable truth.
-- Codegen edits only the paths declared by its implementation plan and allowed
-  by the experiment contract. The permitted refinement semantics and frozen
-  scientific boundaries are defined in `autoresearch.md`. When a direct idea
-  could materially increase computation, codegen prefers semantics-preserving
-  optimizations and may declare a minimal-deviation optimized implementation
-  only to avoid unreasonable resource use; it never reduces frozen experiment
-  scale or required evaluation as an optimization.
-- The experiment-plan agent treats the audited idea codebase as read-only,
-  covers every frozen experiment at audited full scale, and maps outputs to
-  frozen metrics. It receives no paper, baseline, target, or assessment-threshold
-  result values.
-- The experiment agent treats audited source as read-only, never reruns the
-  baseline, and assumes replication intermediates are absent unless explicitly
-  supplied. Deterministic preprocessing required by a refinement belongs to its
-  own execution path from the fixed raw input.
-- The assessment agent may judge evidence and scores but copies frozen
-  experiment IDs, primary-metric names, directions, weights, and threshold
-  exactly without renaming, decorating, or reinterpreting them.
-- For remote experiments, the agent returns only inner foreground
-  `remote_exec` Bash or a structured `download`. It never constructs SSH or
-  adapter commands, manages pool membership or lifecycle, rematerializes data,
-  or downloads anything except models, metrics, logs, and aggregate evidence
-  within the declared artifact roots. A persisted operation or environment
-  setup failure may justify a minimal environment-definition repair; changed
-  hashes require successful setup validation before execution.
+A successful turn alone does not complete a stage; canonical artifact validation
+does. Codegen `blocked` or `failed` is immediately terminal. Base replication
+may execute its planned commands within its complete agent turn. Other long
+running tasks must be returned as one foreground handoff operation.
 
-Eligibility, candidate-pool behavior, refinement semantics, assessment, round
-routing, and campaign lifecycle are defined in `autoresearch.md`.
-
-## Computation-provider boundary
-
-Remote access uses the `computation-provider` skill. The selected provider
-metadata and reference own resource selection, provider APIs, state validation,
-and lifecycle procedures. The shared SSH helper owns provider-independent
-key-first authentication, password fallback, command execution, and transfer.
-CPU-only rental is supported only when that provider reference explicitly
-defines how CPU capacity is represented and selected. Generic prompts never
-encode a provider's zero-GPU support or incidental minimum-GPU rule.
-
-Agents start with the selected reference and may consult official documentation
-for bounded, non-secret diagnostics. They never guess a provider operation or
-blindly repeat a billable action. A successful procedure that conflicts with
-the reference is recorded in the canonical skill-correction artifact rather
-than editing runtime skills during the run. Host orchestration owns plan and
-artifact validation, operation execution outside agent turns, resume
-reconciliation, power-off, replacement, and release as defined in
-`execution.md`.
-
-Provider configuration is inherited by the agent process after orchestration
-validates the metadata-declared required variables. The host `.env` is not a
-stage artifact and need not exist in the agent working directory; agents never
-use its absence as evidence that configuration is missing or expose values while
-checking the environment.
+Remote access uses the metadata-selected computation-provider skill. The
+provider reference owns resource selection and provider procedures; shared SSH
+helpers own transport; host orchestration owns execution outside agent turns,
+state validation, reconciliation, power-off, replacement, and release. Agents
+may consult official provider documentation for bounded diagnostics but never
+guess or blindly repeat a billable action.

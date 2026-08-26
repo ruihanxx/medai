@@ -73,7 +73,7 @@ do not substitute another source. Write `{{ scope_revision_path }}` and stop:
 ## Open node updates
 
 Issues and assumptions belong on their exact origin node. Do not create global
-ambiguities and do not copy an upstream issue into descendants. Each update may
+uncertainties and do not copy an upstream issue into descendants. Each update may
 add any evidence-bound fields needed by this paper; issues need only a nonblank
 `description` and may add resolution, evidence, required_fix, alternatives, or
 other useful fields.
