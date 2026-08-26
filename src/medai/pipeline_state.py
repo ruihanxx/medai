@@ -251,6 +251,21 @@ class PipelineState:
             stage.pop("error", None)
             changed = True
         if changed:
+            node_state_path = self.output / "graph" / "node_state.json"
+            if node_state_path.is_file():
+                from medai.study_graph import remove_node_updates
+
+                prefixes = {
+                    "codegen_agent": "codegen:",
+                    "audit_agent": "audit:",
+                    "cohort_refine_agent": "cohort_refine:",
+                }
+                exact = {"replicate_agent": "replicate_agent"}
+                remove_node_updates(
+                    node_state_path,
+                    sources=[exact[name] for name in names if name in exact],
+                    source_prefixes=[prefixes[name] for name in names if name in prefixes],
+                )
             self.state["status"] = "running"
             self.state.pop("completed_at", None)
             self.state.pop("error", None)

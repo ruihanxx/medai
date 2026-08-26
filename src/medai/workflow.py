@@ -17,24 +17,22 @@ from medai.artifacts import load_model, write_json
 from medai.computation_providers import get_provider_adapter
 from medai.computation_providers import skills_dir as _skills_dir
 from medai.config import AutoResearchConfig, RunConfig
-from medai.data_availability import derive_execution_scope, sha256_file
+from medai.data_availability import derive_graph_execution_scope, sha256_file
 from medai.models import (
     AgentStageResult,
-    ClaimsFile,
     CodegenCloudPullRequest,
     CodegenPlan,
-    DataAvailabilityReport,
     DatasetPatchFile,
     EvidenceSummary,
-    ExecutionScope,
-    Experiment,
-    ExperimentTodo,
+    GraphDataAvailabilityReport,
+    GraphExecutionScope,
+    GraphScopeRevisionIssues,
+    PaperGraph,
     ReplicationLog,
     ReplicationPlan,
-    ScopeRevisionIssues,
     SkillCorrectionsFile,
     SmartReplicateLog,
-    validate_experiment_coverage,
+    validate_claim_report,
     validate_replication_log,
     validate_replication_plan,
     validate_reproduction_report,
@@ -45,6 +43,14 @@ from medai.preprocessing import convert_pdf_to_markdown
 from medai.prompts import render_prompt
 from medai.providers import run_agent
 from medai.resources import detect_resources
+from medai.study_graph import (
+    collect_lineage_issues,
+    graph_ancestors,
+    load_node_state,
+    merge_node_updates,
+    remove_node_updates,
+    write_empty_node_state,
+)
 
 MAX_COHORT_REFINE_ROUNDS = 3
 MAX_AGENT_ARTIFACT_REPAIR_TURNS = 2
@@ -54,8 +60,8 @@ class WorkflowState(TypedDict, total=False):
     config: RunConfig
     paper_markdown: str
     resources_path: str
-    claims_path: str
-    experiments_path: str
+    paper_graph_path: str
+    node_state_path: str
     execution_scope_path: str
     codebase_dir: str
     audit_verdict: str
@@ -75,8 +81,8 @@ class PartialDataStopped(RuntimeError):
     """The user declined the current partial scope."""
 
 
-class NoRunnableExperiments(RuntimeError):
-    """No experiment can run with the confirmed source data."""
+class NoRunnableClaims(RuntimeError):
+    """No paper claim can run with the confirmed source data."""
 
 
 class UnknownDataAvailability(RuntimeError):
@@ -93,36 +99,40 @@ def _require_agent_stage_completion(result_path: Path, stage_name: str) -> None:
         raise RuntimeError(f"{stage_name} reported {result.status}: {result.error}")
 
 
-def _execution_scope(state: WorkflowState) -> ExecutionScope:
+def _paper_graph(state: WorkflowState) -> PaperGraph:
+    return load_model(Path(state["paper_graph_path"]), PaperGraph)
+
+
+def _execution_scope(state: WorkflowState) -> GraphExecutionScope:
     cached = state.get("_execution_scope")
-    if isinstance(cached, ExecutionScope):
+    if isinstance(cached, GraphExecutionScope):
         return cached
     scope_value = state.get("execution_scope_path")
     if scope_value is not None:
-        scope = load_model(Path(scope_value), ExecutionScope)
+        scope = load_model(Path(scope_value), GraphExecutionScope)
+        current_graph_hash = sha256_file(Path(state["paper_graph_path"]))
+        if scope.paper_graph_sha256 != current_graph_hash:
+            raise RuntimeError("Execution scope does not match the immutable paper graph")
+        node_state = load_node_state(Path(state["node_state_path"]))
+        if node_state.paper_graph_sha256 != current_graph_hash:
+            raise RuntimeError("Node state does not match the immutable paper graph")
         state["_execution_scope"] = scope  # type: ignore[typeddict-unknown-key]
         return scope
-    # Direct stage invocations and completed pre-v5 runs have no scope artifact.
-    # Treat them as the historical full scope; normal v5 graph execution always
-    # reaches the data-availability stage first.
-    try:
-        experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
-    except ValueError:
-        runnable = []
-    else:
-        runnable = [experiment.experiment_id for experiment in experiments.experiments]
+    graph = _paper_graph(state)
+    runnable = [node.id for node in graph.nodes]
     payload = {
+        "paper_graph_sha256": sha256_file(Path(state["paper_graph_path"])),
         "availability_report_sha256": "0" * 64,
         "verdict": "FULL",
-        "runnable_experiment_ids": runnable,
-        "blocked_experiments": [],
+        "runnable_node_ids": runnable,
+        "blocked_nodes": [],
         "active_sources": [],
         "execution_location": "local",
     }
     payload["scope_sha256"] = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    scope = ExecutionScope.model_validate(payload)
+    scope = GraphExecutionScope.model_validate(payload)
     scope_path = state["config"].output / "preprocessing" / "execution_scope.json"
     write_json(scope_path, scope.model_dump(mode="json"))
     state["execution_scope_path"] = str(scope_path)
@@ -130,14 +140,8 @@ def _execution_scope(state: WorkflowState) -> ExecutionScope:
     return scope
 
 
-def _active_experiments(state: WorkflowState) -> ExperimentTodo:
-    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
-    runnable = set(_execution_scope(state).runnable_experiment_ids)
-    return ExperimentTodo(
-        experiments=[
-            experiment for experiment in experiments.experiments if experiment.experiment_id in runnable
-        ]
-    )
+def _active_node_ids(state: WorkflowState) -> set[str]:
+    return set(_execution_scope(state).runnable_node_ids)
 
 
 def _active_cloud_datasets(state: WorkflowState) -> tuple[str, ...]:
@@ -299,6 +303,8 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
     replication_log = load_model(replication_log_path, ReplicationLog)
     validate_replication_log(plan, replication_log)
     load_model(evidence_summary_path, EvidenceSummary)
+    graph = _paper_graph(state)
+    scope = _execution_scope(state)
     managed_artifacts = {
         replication_log_path.resolve(),
         evidence_summary_path.resolve(),
@@ -316,19 +322,58 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
                     f"as its output: {output_file}"
                 )
 
+    update_ids = [update.node_id for update in replication_log.node_updates]
+    if len(update_ids) != len(set(update_ids)):
+        raise RuntimeError("Replication log contains duplicate node updates")
+    expected_ids = set(scope.runnable_node_ids)
+    if set(update_ids) != expected_ids:
+        raise RuntimeError(
+            "Replication node updates must cover every runnable node exactly once; "
+            f"missing={sorted(expected_ids - set(update_ids))!r}, "
+            f"extra={sorted(set(update_ids) - expected_ids)!r}"
+        )
+    for update in replication_log.node_updates:
+        result = getattr(update, "result", None)
+        if result is None or result == "" or result == [] or result == {}:
+            raise RuntimeError(f"Runnable node {update.node_id} has no actual replication result")
+        evidence = getattr(update, "evidence", None)
+        if (
+            not isinstance(evidence, list)
+            or not evidence
+            or not all(isinstance(value, str) and value.strip() for value in evidence)
+        ):
+            raise RuntimeError(f"Runnable node {update.node_id} has no actual evidence paths")
+        for evidence_path in evidence:
+            resolved = resolve_replication_output(
+                evidence_path,
+                Path(state["codebase_dir"]),
+                replication_dir,
+            )
+            if resolved in managed_artifacts:
+                raise RuntimeError(
+                    f"Runnable node {update.node_id} cites a managed log as evidence: "
+                    f"{evidence_path}"
+                )
+
+    merge_node_updates(
+        Path(state["node_state_path"]),
+        graph,
+        scope.paper_graph_sha256,
+        "replicate_agent",
+        replication_log.node_updates,
+    )
+
     outputs = [str(replication_log_path), str(evidence_summary_path)]
     if config.smart_replicate:
-        experiments = _active_experiments(state)
-        claims = load_model(Path(state["claims_path"]), ClaimsFile)
-        claims_by_id = {claim.claim_id: claim for claim in claims.claims}
-        for experiment in experiments.experiments:
-            smart_log_path = replication_dir / experiment.experiment_id / "smart_replicate_log.json"
-            smart_log = load_model(smart_log_path, SmartReplicateLog)
-            validate_smart_replicate_log(
-                experiment,
-                smart_log,
-                {claim_id: claims_by_id[claim_id].paper_result for claim_id in experiment.claims},
+        runnable = set(scope.runnable_node_ids)
+        for claim in graph.claims:
+            if claim.id not in runnable or claim.paper_result is None:
+                continue
+            smart_log_path = (
+                replication_dir / "claims" / claim.id / "smart_replicate_log.json"
             )
+            smart_log = load_model(smart_log_path, SmartReplicateLog)
+            validate_smart_replicate_log(claim, smart_log)
             outputs.append(str(smart_log_path))
     return outputs
 
@@ -373,19 +418,17 @@ def _run_agent_command(
     return result
 
 
-def validate_report_experiment(
-    report_text: str,
-    claims: ClaimsFile,
-    experiment: Experiment,
-    codegen_plan: CodegenPlan,
-) -> None:
-    claim_ids = set(experiment.claims)
-    validate_reproduction_report(
-        report_text,
-        ClaimsFile(claims=[claim for claim in claims.claims if claim.claim_id in claim_ids]),
-        ExperimentTodo(experiments=[experiment]),
-        codegen_plan,
-    )
+def _compose_reproduction_report(graph: PaperGraph, claims_dir: Path, report_path: Path) -> None:
+    sections = ["# Reproduction Report"]
+    for claim in graph.claims:
+        fragment_path = claims_dir / f"{claim.id}.md"
+        fragment = fragment_path.read_text(encoding="utf-8").strip()
+        validate_claim_report(fragment, claim.id)
+        sections.append(fragment.replace(f"# Claim {claim.id}", f"## Claim {claim.id}", 1))
+    temporary = report_path.with_name(f".{report_path.name}.tmp")
+    temporary.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
+    temporary.replace(report_path)
+    validate_reproduction_report(report_path.read_text(encoding="utf-8"), graph)
 
 
 def read_audit_verdict(report_path: Path) -> str:
@@ -393,101 +436,59 @@ def read_audit_verdict(report_path: Path) -> str:
 
 
 def read_audit_report(report_path: Path) -> dict[str, Any]:
-    if report_path.suffix == ".json":
-        try:
-            report = json.loads(report_path.read_text(encoding="utf-8"))
-        except FileNotFoundError as exc:
-            raise RuntimeError(f"Audit agent did not write its report: {report_path}") from exc
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Audit report is not valid JSON: {report_path}") from exc
-        if not isinstance(report, dict) or set(report) != {"verdict", "issues"}:
-            raise RuntimeError(
-                f"Audit report must contain exactly `verdict` and `issues`: {report_path}"
-            )
-        verdict = report["verdict"]
-        issues = report["issues"]
-        if verdict not in {"PASS", "FAIL"} or not isinstance(issues, list):
-            raise RuntimeError(f"Audit report has an invalid verdict or issues: {report_path}")
-        normalized_issues = []
-        for issue in issues:
-            legacy = isinstance(issue, dict) and set(issue) == {
-                "evidence",
-                "diagnosis",
-                "required_fix",
-            }
-            expected = {
-                "kind",
-                "experiment_ids",
-                "datasets",
-                "evidence",
-                "diagnosis",
-                "required_fix",
-            }
-            if (
-                not isinstance(issue, dict)
-                or (not legacy and set(issue) != expected)
-                or not isinstance(issue["evidence"], str)
-                or not issue["evidence"].strip()
-                or not isinstance(issue["diagnosis"], str)
-                or not issue["diagnosis"].strip()
-                or not isinstance(issue["required_fix"], str)
-                or not issue["required_fix"].strip()
-            ):
-                raise RuntimeError(f"Audit report contains an invalid issue: {report_path}")
-            if legacy:
-                normalized_issues.append(
-                    {
-                        "kind": "preprocessing_defect",
-                        "experiment_ids": [],
-                        "datasets": [],
-                        **issue,
-                    }
-                )
-                continue
-            if (
-                issue["kind"] not in {"preprocessing_defect", "source_unavailable"}
-                or not isinstance(issue["experiment_ids"], list)
-                or not issue["experiment_ids"]
-                or not all(
-                    isinstance(value, str) and value.strip()
-                    for value in issue["experiment_ids"]
-                )
-                or not isinstance(issue["datasets"], list)
-                or not all(isinstance(value, str) and value.strip() for value in issue["datasets"])
-            ):
-                raise RuntimeError(f"Audit report contains an invalid issue: {report_path}")
-            normalized_issues.append(issue)
-        if (verdict == "PASS" and issues) or (verdict == "FAIL" and not issues):
-            raise RuntimeError(
-                "Audit report PASS requires no issues and FAIL requires at least one issue: "
-                f"{report_path}"
-            )
-        return {"verdict": verdict, "issues": normalized_issues}
-
-    # Compatibility for reports written before the compact JSON contract.
     try:
-        lines = [
-            line.strip()
-            for line in report_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        report = json.loads(report_path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise RuntimeError(f"Audit agent did not write its report: {report_path}") from exc
-    verdict_lines = [line for line in lines if line.startswith("Verdict:")]
-    if (
-        len(verdict_lines) != 1
-        or not lines
-        or lines[-1]
-        not in {
-            "Verdict: PASS",
-            "Verdict: FAIL",
-        }
-    ):
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Audit report is not valid JSON: {report_path}") from exc
+    if not isinstance(report, dict) or set(report) != {"verdict", "issues"}:
         raise RuntimeError(
-            "Audit report must contain exactly one verdict and end with "
-            f"`Verdict: PASS` or `Verdict: FAIL`: {report_path}"
+            f"Audit report must contain exactly `verdict` and `issues`: {report_path}"
         )
-    return {"verdict": lines[-1].removeprefix("Verdict: "), "issues": []}
+    verdict = report["verdict"]
+    issues = report["issues"]
+    if verdict not in {"PASS", "FAIL"} or not isinstance(issues, list):
+        raise RuntimeError(f"Audit report has an invalid verdict or issues: {report_path}")
+    for issue in issues:
+        if (
+            not isinstance(issue, dict)
+            or not isinstance(issue.get("node_id"), str)
+            or not issue["node_id"].strip()
+            or not isinstance(issue.get("description"), str)
+            or not issue["description"].strip()
+            or issue.get("route", "preprocessing_fix")
+            not in {"preprocessing_fix", "source_unavailable"}
+        ):
+            raise RuntimeError(f"Audit report contains an invalid issue: {report_path}")
+    if (verdict == "PASS" and issues) or (verdict == "FAIL" and not issues):
+        raise RuntimeError(
+            "Audit report PASS requires no issues and FAIL requires at least one issue: "
+            f"{report_path}"
+        )
+    return report
+
+
+def _merge_audit_node_updates(
+    state: WorkflowState,
+    source: str,
+    audit_report: dict[str, Any],
+) -> None:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for issue in audit_report["issues"]:
+        payload = dict(issue)
+        node_id = str(payload.pop("node_id"))
+        grouped.setdefault(node_id, []).append(payload)
+    merge_node_updates(
+        Path(state["node_state_path"]),
+        _paper_graph(state),
+        _execution_scope(state).paper_graph_sha256,
+        source,
+        [
+            {"node_id": node_id, "issues": issues}
+            for node_id, issues in grouped.items()
+        ],
+    )
 
 
 def validate_codegen_remote_compute(
@@ -1081,6 +1082,9 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
         if config.clouddrive and reconciliation["replaced"]:
             _cloud_pull(config, use_cloud=True)
         archive_root = _archive_replicate_attempt(config, resume_count)
+        node_state_path = config.output / "graph" / "node_state.json"
+        if node_state_path.is_file():
+            remove_node_updates(node_state_path, sources=["replicate_agent"])
         pipeline_state.invalidate_stages(
             ["replicate_agent", "report_agents"],
             f"Explicit resume restarted replication from its first step: {archive_root}",
@@ -1179,6 +1183,7 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         "plan",
         "replication",
         "report",
+        "graph",
         "prompts",
         "remote_compute",
         "system_maintenance/dataset",
@@ -1228,18 +1233,22 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
     paper_markdown = Path(state["paper_markdown"])
-    claims_path = config.output / "preprocessing" / "claims.json"
-    experiments_path = config.output / "preprocessing" / "experiment_todo.json"
+    paper_graph_path = config.output / "preprocessing" / "paper_graph.json"
+    node_state_path = config.output / "graph" / "node_state.json"
     transcript_path = config.output / "preprocessing" / "preprocessing_transcript.jsonl"
 
-    def validate_outputs() -> None:
+    def validate_graph_output() -> None:
         if not paper_markdown.is_file() or not paper_markdown.read_text(encoding="utf-8").strip():
             raise RuntimeError(
                 f"Preprocessing agent left paper artifact missing or empty: {paper_markdown}"
             )
-        claims = load_model(claims_path, ClaimsFile)
-        experiments = load_model(experiments_path, ExperimentTodo)
-        validate_experiment_coverage(claims, experiments)
+        load_model(paper_graph_path, PaperGraph)
+
+    def validate_outputs() -> None:
+        validate_graph_output()
+        node_state = load_node_state(node_state_path)
+        if node_state.paper_graph_sha256 != sha256_file(paper_graph_path):
+            raise RuntimeError("Node state does not match the immutable paper graph")
 
     if pipeline_state.is_stage_completed("preprocessing_agent"):
         validate_outputs()
@@ -1247,8 +1256,8 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
             raise RuntimeError(f"Completed preprocessing transcript is missing: {transcript_path}")
         print("resume preprocessing_agent stage: skipped (already completed)")
         return {
-            "claims_path": str(claims_path),
-            "experiments_path": str(experiments_path),
+            "paper_graph_path": str(paper_graph_path),
+            "node_state_path": str(node_state_path),
         }
 
     print("enter preprocessing agent stage")
@@ -1259,8 +1268,7 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         paper_markdown=paper_markdown,
         artifacts_dir=config.output / "preprocessing" / "artifacts",
         skills_dir=skills_dir(),
-        claims_path=claims_path,
-        experiments_path=experiments_path,
+        paper_graph_path=paper_graph_path,
     )
     session_id = run_agent(
         provider=config.provider,
@@ -1277,40 +1285,36 @@ def preprocessing_agent_node(state: WorkflowState) -> dict[str, str]:
         session_id=session_id,
         working_dir=config.output / "preprocessing",
         transcript_path=transcript_path,
-        artifact_paths=[paper_markdown, claims_path, experiments_path],
-        validate=validate_outputs,
+        artifact_paths=[paper_markdown, paper_graph_path],
+        validate=validate_graph_output,
     )
+    write_empty_node_state(node_state_path, sha256_file(paper_graph_path))
+    validate_outputs()
     pipeline_state.complete_stage(
         "preprocessing_agent",
         [
             str(paper_markdown),
-            str(claims_path),
-            str(experiments_path),
+            str(paper_graph_path),
+            str(node_state_path),
             str(transcript_path),
         ],
     )
     return {
-        "claims_path": str(claims_path),
-        "experiments_path": str(experiments_path),
+        "paper_graph_path": str(paper_graph_path),
+        "node_state_path": str(node_state_path),
     }
 
 
 def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
-    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
+    graph = _paper_graph(state)
+    graph_sha256 = sha256_file(Path(state["paper_graph_path"]))
     scope_path = config.output / "preprocessing" / "execution_scope.json"
     stage = pipeline_state.state["stages"].get("data_availability_agent", {})
-    if (
-        pipeline_state.state.get("legacy_full_scope") is True
-        and pipeline_state.is_stage_completed("report_agents")
-    ):
-        _execution_scope(state)
-        print("resume data_availability_agent stage: legacy full-scope validation")
-        return {"execution_scope_path": str(scope_path)}
 
-    def load_and_validate(report_path: Path) -> ExecutionScope:
-        report = load_model(report_path, DataAvailabilityReport)
+    def load_and_validate(report_path: Path) -> GraphExecutionScope:
+        report = load_model(report_path, GraphDataAvailabilityReport)
         local_sources = {str(path) for path in config.dataset_paths}
         cloud_sources = set(config.selected_cloud_sources) | set(
             config.selected_cloud_datasets
@@ -1334,7 +1338,12 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
                     f"Availability report maps an unknown cloud source: "
                     f"{requirement.source_name}"
                 )
-        scope = derive_execution_scope(experiments, report, sha256_file(report_path))
+        scope = derive_graph_execution_scope(
+            graph,
+            report,
+            paper_graph_sha256=graph_sha256,
+            report_sha256=sha256_file(report_path),
+        )
         if scope.verdict in {"FULL", "PARTIAL"} and scope.execution_location is None:
             raise ValueError("A runnable execution scope requires an execution location")
         active_sources = set(scope.active_sources)
@@ -1398,7 +1407,7 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         "data_availability/session_instructions.md",
         config.output / "prompts" / f"data_availability_attempt_{attempt:03d}.md",
         paper_markdown=state["paper_markdown"],
-        experiments_path=state["experiments_path"],
+        paper_graph_path=state["paper_graph_path"],
         resources_path=resources_path,
         local_datasets=local_datasets,
         cloud_datasets=cloud_datasets,
@@ -1420,7 +1429,7 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         codex_model=config.codex_model,
         codex_reasoning_effort=config.codex_reasoning_effort,
     )
-    scope: ExecutionScope | None = None
+    scope: GraphExecutionScope | None = None
 
     def validate_outputs() -> None:
         nonlocal scope
@@ -1451,21 +1460,25 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
     return {"execution_scope_path": str(scope_path)}
 
 
-def _partial_data_message(scope: ExecutionScope) -> str:
-    lines = ["Partial data availability detected.", "", "Runnable experiments:"]
-    lines.extend(f"- {experiment_id}" for experiment_id in scope.runnable_experiment_ids)
-    lines.extend(["", "Experiments that will be skipped:"])
-    for blocked in scope.blocked_experiments:
+def _partial_data_message(scope: GraphExecutionScope, graph: PaperGraph) -> str:
+    runnable = set(scope.runnable_node_ids)
+    claim_ids = {claim.id for claim in graph.claims}
+    lines = ["Partial data availability detected.", "", "Reproducible claims:"]
+    lines.extend(f"- {claim.id}" for claim in graph.claims if claim.id in runnable)
+    lines.extend(["", "Claims that will not be reproduced:"])
+    for blocked in scope.blocked_nodes:
+        if blocked.node_id not in claim_ids:
+            continue
         details = list(blocked.direct_data_blockers)
         details.extend(" -> ".join(path) for path in blocked.dependency_paths if len(path) > 1)
-        lines.append(f"- {blocked.experiment_id}: {'; '.join(details)}")
+        lines.append(f"- {blocked.node_id}: {'; '.join(details)}")
     lines.extend(
         [
             "",
             "Continuing will produce a partial replication. It will not represent a complete",
             "replication of the paper and cannot be used as an Auto Research base run.",
             "",
-            "Continue with the runnable experiments? [y/N]",
+            "Continue with the reproducible claim subgraph? [y/N]",
         ]
     )
     return "\n".join(lines)
@@ -1473,7 +1486,7 @@ def _partial_data_message(scope: ExecutionScope) -> str:
 
 def _record_partial_decision(
     config: RunConfig,
-    scope: ExecutionScope,
+    scope: GraphExecutionScope,
     *,
     decision: str,
     source: str,
@@ -1493,10 +1506,8 @@ def _record_partial_decision(
         {
             "availability_report_sha256": scope.availability_report_sha256,
             "scope_sha256": scope.scope_sha256,
-            "runnable_experiment_ids": scope.runnable_experiment_ids,
-            "blocked_experiment_ids": [
-                item.experiment_id for item in scope.blocked_experiments
-            ],
+            "runnable_node_ids": scope.runnable_node_ids,
+            "blocked_node_ids": [item.node_id for item in scope.blocked_nodes],
             "decision": decision,
             "source": source,
             "decided_at": datetime.now(timezone.utc).isoformat(),
@@ -1510,13 +1521,7 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
     scope_path = Path(state["execution_scope_path"])
-    scope = load_model(scope_path, ExecutionScope)
-    if (
-        pipeline_state.state.get("legacy_full_scope") is True
-        and pipeline_state.is_stage_completed("report_agents")
-    ):
-        print("resume partial_data_gate stage: legacy full-scope validation")
-        return {"execution_scope_path": str(scope_path)}
+    scope = load_model(scope_path, GraphExecutionScope)
     checkpoints = pipeline_state.get_stage_checkpoints("partial_data_gate")
     if (
         pipeline_state.is_stage_completed("partial_data_gate")
@@ -1534,13 +1539,13 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
     if scope.verdict == "NONE":
         power_off_run_computation_instance(config)
         release_run_computation_instance(config)
-        raise NoRunnableExperiments(
-            "No experiments are runnable with the available source data."
+        raise NoRunnableClaims(
+            "No claims are runnable with the available source data."
         )
 
     decision_path: Path | None = None
     if scope.verdict == "PARTIAL":
-        message = _partial_data_message(scope)
+        message = _partial_data_message(scope, _paper_graph(state))
         print(message)
         if config.on_partial_data == "continue":
             accepted, source = True, "cli_policy_continue"
@@ -1606,11 +1611,21 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
     )
     completed_run_validation = pipeline_state.is_stage_completed("report_agents")
     infrastructure_resume = bool(codegen_checkpoints.get("infrastructure_resume"))
+    graph = _paper_graph(state)
+    active_node_ids = _active_node_ids(state)
 
     def validate_outputs(*, require_active: bool = True) -> None:
         if not codebase_dir.is_dir():
             raise RuntimeError(f"Completed codebase directory is missing: {codebase_dir}")
         codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+        update_ids = [update.node_id for update in codegen_plan.node_updates]
+        if len(update_ids) != len(set(update_ids)):
+            raise ValueError("Codegen plan contains duplicate node updates")
+        unknown_update_ids = set(update_ids) - active_node_ids
+        if unknown_update_ids:
+            raise ValueError(
+                f"Codegen plan updates inactive graph nodes: {sorted(unknown_update_ids)}"
+            )
         cloud_data = _uses_cloud_data(config, codegen_plan)
         validate_codegen_remote_compute(
             codegen_plan,
@@ -1625,6 +1640,15 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
 
     if pipeline_state.is_stage_completed("codegen_agent"):
         validate_outputs(require_active=not completed_run_validation)
+        codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+        attempt = int(pipeline_state.state["stages"]["codegen_agent"].get("attempts", 1))
+        merge_node_updates(
+            Path(state["node_state_path"]),
+            graph,
+            scope.paper_graph_sha256,
+            f"codegen:{attempt:03d}",
+            codegen_plan.node_updates,
+        )
         if not transcript_path.is_file():
             raise RuntimeError(f"Completed codegen transcript is missing: {transcript_path}")
         print("resume codegen_agent stage: skipped (already completed)")
@@ -1671,8 +1695,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
         config.output / "prompts" / "codegen.md",
         codebase_dir=codebase_dir,
         paper_markdown=state["paper_markdown"],
-        claims_path=state["claims_path"],
-        experiments_path=state["experiments_path"],
+        paper_graph_path=state["paper_graph_path"],
         execution_scope_path=state["execution_scope_path"],
         data_dir=config.data,
         datasets=config.dataset_names,
@@ -1725,19 +1748,19 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
     if result_path is not None:
         stage_result = load_model(result_path, AgentStageResult)
         if stage_result.status != "completed" and scope_revision_path.is_file():
-            revision = load_model(scope_revision_path, ScopeRevisionIssues)
+            revision = load_model(scope_revision_path, GraphScopeRevisionIssues)
             if revision.scope_sha256 != scope.scope_sha256:
                 raise RuntimeError("Codegen scope revision is bound to a different scope")
-            active_ids = set(scope.runnable_experiment_ids)
+            active_ids = set(scope.runnable_node_ids)
             unknown_ids = {
-                experiment_id
+                node_id
                 for issue in revision.issues
-                for experiment_id in issue.experiment_ids
-                if experiment_id not in active_ids
+                for node_id in issue.node_ids
+                if node_id not in active_ids
             }
             if unknown_ids:
                 raise RuntimeError(
-                    f"Codegen scope revision references inactive experiments: {sorted(unknown_ids)}"
+                    f"Codegen scope revision references inactive nodes: {sorted(unknown_ids)}"
                 )
             pipeline_state.invalidate_stages(
                 [
@@ -1772,6 +1795,15 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
         validate=validate_outputs,
         result_schema_path=result_schema_path,
         result_path=result_path,
+    )
+    codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+    attempt = int(pipeline_state.state["stages"]["codegen_agent"].get("attempts", 1))
+    merge_node_updates(
+        Path(state["node_state_path"]),
+        graph,
+        scope.paper_graph_sha256,
+        f"codegen:{attempt:03d}",
+        codegen_plan.node_updates,
     )
     outputs = [
         str(codebase_dir),
@@ -1816,9 +1848,15 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         and audited_refine_round == completed_refine_round
     ):
         report_path = Path(str(checkpoints.get("report_path", "")))
-        verdict = read_audit_verdict(report_path)
+        audit_report = read_audit_report(report_path)
+        verdict = str(audit_report["verdict"])
         if verdict != checkpoints.get("verdict"):
             raise RuntimeError(f"Audit report verdict does not match its checkpoint: {report_path}")
+        _merge_audit_node_updates(
+            state,
+            f"audit:{int(checkpoints.get('scientific_attempt', 1)):03d}",
+            audit_report,
+        )
         print("resume audit_agent stage: skipped (already completed)")
         return {
             "audit_verdict": verdict,
@@ -1864,7 +1902,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         "cohort_refine/audit_session_instructions.md",
         config.output / "prompts" / f"audit_attempt_{scientific_attempt:03d}.md",
         paper_markdown=state["paper_markdown"],
-        experiments_path=state["experiments_path"],
+        paper_graph_path=state["paper_graph_path"],
         execution_scope_path=state["execution_scope_path"],
         codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
         codebase_dir=state["codebase_dir"],
@@ -1905,13 +1943,12 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         try:
             audit_report = read_audit_report(report_path)
             verdict = str(audit_report["verdict"])
-            active_ids = set(scope.runnable_experiment_ids)
+            active_ids = set(scope.runnable_node_ids)
             for issue in audit_report["issues"]:
-                unknown_ids = set(issue["experiment_ids"]) - active_ids
-                if unknown_ids:
+                if issue["node_id"] not in active_ids:
                     raise RuntimeError(
-                        f"Audit issue references experiments outside the execution scope: "
-                        f"{sorted(unknown_ids)}"
+                        "Audit issue references a node outside the execution scope: "
+                        f"{issue['node_id']}"
                     )
             break
         except RuntimeError as exc:
@@ -1953,7 +1990,9 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
                 resume_session_id=session_id,
             )
             resume_index += 1
-    issue_kinds = sorted({issue["kind"] for issue in audit_report["issues"]})
+    issue_kinds = sorted(
+        {issue.get("route", "preprocessing_fix") for issue in audit_report["issues"]}
+    )
     source_revision = "source_unavailable" in issue_kinds
     checkpoint = {
         "audited_codegen_attempt": codegen_attempt,
@@ -1965,6 +2004,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         "refinement_exhausted": (
             verdict == "FAIL" and refine_rounds_used >= MAX_COHORT_REFINE_ROUNDS
         ),
+        "scientific_attempt": scientific_attempt,
     }
     outputs = [str(attempt_dir), str(report_path), str(transcript_path)]
     if (
@@ -1973,6 +2013,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         and not checkpoint["refinement_exhausted"]
     ):
         checkpoint["refine_rounds_used"] = refine_rounds_used + 1
+    _merge_audit_node_updates(state, f"audit:{scientific_attempt:03d}", audit_report)
     pipeline_state.update_stage_checkpoints("audit_agent", checkpoint)
     pipeline_state.complete_stage("audit_agent", outputs)
     if source_revision:
@@ -2032,6 +2073,17 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         and checkpoints.get("completed_round") == refine_round
         and checkpoints.get("audit_report_path") == str(audit_report_path)
     ):
+        refined_plan = load_model(
+            Path(state["codebase_dir"]) / "codegen_plan.json",
+            CodegenPlan,
+        )
+        merge_node_updates(
+            Path(state["node_state_path"]),
+            _paper_graph(state),
+            scope.paper_graph_sha256,
+            f"cohort_refine:{refine_round:03d}",
+            refined_plan.node_updates,
+        )
         print("resume cohort_refine_agent stage: skipped (already completed)")
         return {"codebase_dir": state["codebase_dir"]}
 
@@ -2066,6 +2118,8 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         "cohort_refine/session_instructions.md",
         config.output / "prompts" / f"cohort_refine_attempt_{refine_round:03d}.md",
         paper_markdown=state["paper_markdown"],
+        paper_graph_path=state["paper_graph_path"],
+        execution_scope_path=state["execution_scope_path"],
         codebase_dir=codebase_dir,
         codegen_plan_path=codegen_plan_path,
         audit_report_path=audit_report_path,
@@ -2103,6 +2157,21 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         artifact_paths=[codegen_plan_path],
         validate=lambda: load_model(codegen_plan_path, CodegenPlan),
     )
+    refined_plan = load_model(codegen_plan_path, CodegenPlan)
+    unknown_update_ids = {
+        update.node_id for update in refined_plan.node_updates
+    } - set(scope.runnable_node_ids)
+    if unknown_update_ids:
+        raise ValueError(
+            f"Cohort refinement updates inactive graph nodes: {sorted(unknown_update_ids)}"
+        )
+    merge_node_updates(
+        Path(state["node_state_path"]),
+        _paper_graph(state),
+        scope.paper_graph_sha256,
+        f"cohort_refine:{refine_round:03d}",
+        refined_plan.node_updates,
+    )
     pipeline_state.update_stage_checkpoints(
         "cohort_refine_agent",
         {
@@ -2124,12 +2193,11 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
     _ensure_stage_scope(pipeline_state, "plan_agent", scope.scope_sha256)
     replicate_plan_path = config.output / "plan" / "replicate_plan.json"
     transcript_path = config.output / "plan" / "plan_transcript.jsonl"
-    claims = load_model(Path(state["claims_path"]), ClaimsFile)
-    experiments = _active_experiments(state)
+    graph = _paper_graph(state)
 
     def validate_outputs() -> None:
         plan = load_model(replicate_plan_path, ReplicationPlan)
-        validate_replication_plan(experiments, plan)
+        validate_replication_plan(graph, scope, plan)
         cloud_data = _uses_cloud_data(config, plan)
         validate_codegen_remote_compute(
             plan,
@@ -2170,14 +2238,13 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         computation_provider=config.computation_provider,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
-        claims_path=state["claims_path"],
-        experiments_path=state["experiments_path"],
+        paper_graph_path=state["paper_graph_path"],
         execution_scope_path=state["execution_scope_path"],
         skills_dir=skills_dir(),
         computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
         replicate_plan_path=replicate_plan_path,
-        claims=claims.model_dump(mode="json"),
-        experiments=experiments.model_dump(mode="json"),
+        paper_graph=graph.model_dump(mode="json"),
+        runnable_node_ids=scope.runnable_node_ids,
         gpu_info=resources["gpus"],
     )
     session_id = run_agent(
@@ -2237,9 +2304,8 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     print("enter replicate stage")
     pipeline_state.start_stage("replicate_agent")
     _checkpoint_stage_scope(pipeline_state, "replicate_agent", scope.scope_sha256)
-    experiments = _active_experiments(state)
-    claims = load_model(Path(state["claims_path"]), ClaimsFile)
-    claims_by_id = {claim.claim_id: claim for claim in claims.claims}
+    graph = _paper_graph(state)
+    runnable = set(scope.runnable_node_ids)
     prompt_path = render_prompt(
         "replication/session_instructions.md",
         config.output / "prompts" / "replicate.md",
@@ -2258,16 +2324,18 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         drive_reference=config.drive_reference,
         smart=config.smart_replicate,
         execution_scope_path=state["execution_scope_path"],
+        paper_graph_path=state["paper_graph_path"],
+        node_state_path=state["node_state_path"],
         smart_anchors=json.dumps(
             [
                 {
-                    "claim_id": claim_id,
-                    "statement": claims_by_id[claim_id].statement,
-                    "anchor": claims_by_id[claim_id].paper_result,
-                    "provenance": claims_by_id[claim_id].provenance.model_dump(),
+                    "claim_id": claim.id,
+                    "method": claim.method,
+                    "paper_result": claim.paper_result,
+                    "provenance": claim.provenance,
                 }
-                for experiment in experiments.experiments
-                for claim_id in experiment.claims
+                for claim in graph.claims
+                if claim.id in runnable and claim.paper_result is not None
             ],
             ensure_ascii=False,
             indent=2,
@@ -2316,24 +2384,19 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     pipeline_state = PipelineState(config.output)
     scope = _execution_scope(state)
     _ensure_stage_scope(pipeline_state, "report_agents", scope.scope_sha256)
-    experiments = load_model(Path(state["experiments_path"]), ExperimentTodo)
-    claims = load_model(Path(state["claims_path"]), ClaimsFile)
-    codegen_plan_path = Path(state["codebase_dir"]) / "codegen_plan.json"
-    codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+    graph = _paper_graph(state)
+    node_state = load_node_state(Path(state["node_state_path"]))
     report_path = config.output / "report" / "reproduction_report.md"
+    claims_dir = config.output / "report" / "claims"
+    claims_dir.mkdir(parents=True, exist_ok=True)
     if pipeline_state.is_stage_completed("report_agents"):
         if not report_path.is_file():
             raise RuntimeError(f"Completed reproduction report is missing: {report_path}")
-        validate_reproduction_report(
-            report_path.read_text(encoding="utf-8"),
-            claims,
-            experiments,
-            codegen_plan,
-        )
-        for experiment in experiments.experiments:
-            transcript_path = (
-                config.output / "report" / f"{experiment.experiment_id}_transcript.jsonl"
-            )
+        validate_reproduction_report(report_path.read_text(encoding="utf-8"), graph)
+        for claim in graph.claims:
+            fragment_path = claims_dir / f"{claim.id}.md"
+            validate_claim_report(fragment_path.read_text(encoding="utf-8"), claim.id)
+            transcript_path = claims_dir / f"{claim.id}_transcript.jsonl"
             if not transcript_path.is_file():
                 raise RuntimeError(f"Completed report transcript is missing: {transcript_path}")
         pipeline_state.mark_completed(partial=scope.verdict == "PARTIAL")
@@ -2343,80 +2406,81 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     print("enter report stage")
     pipeline_state.start_stage("report_agents")
     _checkpoint_stage_scope(pipeline_state, "report_agents", scope.scope_sha256)
-    completed_experiments = set(
-        pipeline_state.get_stage_checkpoints("report_agents").get("completed_experiments", [])
+    completed_claims = set(
+        pipeline_state.get_stage_checkpoints("report_agents").get("completed_claims", [])
     )
-    transcript_paths = []
-    for experiment in experiments.experiments:
-        experiment_payload = experiment.model_dump(mode="json")
-        transcript_path = config.output / "report" / f"{experiment.experiment_id}_transcript.jsonl"
+    transcript_paths: list[str] = []
+    blocked_by_id = {item.node_id: item for item in scope.blocked_nodes}
+    for claim in graph.claims:
+        fragment_path = claims_dir / f"{claim.id}.md"
+        transcript_path = claims_dir / f"{claim.id}_transcript.jsonl"
         transcript_paths.append(str(transcript_path))
-        if experiment.experiment_id in completed_experiments:
+        if claim.id in completed_claims:
             try:
                 if not transcript_path.is_file():
                     raise RuntimeError(
                         f"Checkpointed report transcript is missing: {transcript_path}"
                     )
-                validate_report_experiment(
-                    report_path.read_text(encoding="utf-8"),
-                    claims,
-                    experiment,
-                    codegen_plan,
-                )
+                validate_claim_report(fragment_path.read_text(encoding="utf-8"), claim.id)
             except (OSError, RuntimeError, ValueError):
-                completed_experiments.remove(experiment.experiment_id)
+                completed_claims.remove(claim.id)
                 pipeline_state.update_stage_checkpoints(
                     "report_agents",
                     {
-                        "completed_experiments": [
-                            item.experiment_id
-                            for item in experiments.experiments
-                            if item.experiment_id in completed_experiments
+                        "completed_claims": [
+                            item.id for item in graph.claims if item.id in completed_claims
                         ]
                     },
                 )
-                print(
-                    f"resume report experiment {experiment.experiment_id}: "
-                    "checkpoint invalid; rerunning"
-                )
+                print(f"resume report claim {claim.id}: checkpoint invalid; rerunning")
             else:
-                print(
-                    f"resume report experiment {experiment.experiment_id}: "
-                    "skipped (already completed)"
-                )
+                print(f"resume report claim {claim.id}: skipped (already completed)")
                 continue
+        ancestor_ids = graph_ancestors(graph, claim.id)
+        upstream_updates = [
+            update.model_dump(mode="json")
+            for update in node_state.updates
+            if update.node_id in ancestor_ids
+        ]
+        blockers = [
+            item.model_dump(mode="json")
+            for node_id, item in blocked_by_id.items()
+            if node_id in ancestor_ids
+        ]
         prompt_path = render_prompt(
             "report/session_instructions.md",
-            config.output / "prompts" / f"report_{experiment.experiment_id}.md",
-            report_path=report_path,
-            experiment_id=experiment.experiment_id,
-            claims_path=state["claims_path"],
+            config.output / "prompts" / f"report_{claim.id}.md",
+            claim_report_path=fragment_path,
+            claim_id=claim.id,
             paper_markdown=state["paper_markdown"],
             paper_artifacts=config.output / "preprocessing" / "artifacts",
-            experiments_path=state["experiments_path"],
+            paper_graph_path=state["paper_graph_path"],
+            node_state_path=state["node_state_path"],
             execution_scope_path=state["execution_scope_path"],
             replicate_plan_path=state["replicate_plan_path"],
             codebase_dir=state["codebase_dir"],
             replication_dir=config.output / "replication",
             replication_log_path=(config.output / "replication" / "replication_log.json"),
             evidence_summary_path=(config.output / "replication" / "evidence_summary.json"),
-            experiment_json=json.dumps(experiment_payload, ensure_ascii=False, indent=2),
-            codegen_plan_path=codegen_plan_path,
-            ambiguities_json=json.dumps(
-                [ambiguity.model_dump(mode="json") for ambiguity in codegen_plan.ambiguities],
+            claim_json=json.dumps(claim.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            ancestor_node_ids=sorted(ancestor_ids),
+            upstream_updates_json=json.dumps(
+                upstream_updates,
+                ensure_ascii=False,
+                indent=2,
+            ),
+            scope_blockers_json=json.dumps(blockers, ensure_ascii=False, indent=2),
+            lineage_issues_json=json.dumps(
+                collect_lineage_issues(graph, node_state, claim.id),
                 ensure_ascii=False,
                 indent=2,
             ),
         )
-        is_final_experiment = experiment.experiment_id == experiments.experiments[-1].experiment_id
 
         def validate_outputs() -> None:
-            if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
-                raise RuntimeError(f"Report agent did not write the shared report: {report_path}")
-            report_text = report_path.read_text(encoding="utf-8")
-            validate_report_experiment(report_text, claims, experiment, codegen_plan)
-            if is_final_experiment:
-                validate_reproduction_report(report_text, claims, experiments, codegen_plan)
+            if not fragment_path.is_file() or not fragment_path.read_text(encoding="utf-8").strip():
+                raise RuntimeError(f"Report agent did not write claim fragment: {fragment_path}")
+            validate_claim_report(fragment_path.read_text(encoding="utf-8"), claim.id)
 
         session_id = run_agent(
             provider=config.provider,
@@ -2429,30 +2493,34 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
         )
         _validate_agent_artifacts_with_resume(
             config=config,
-            stage_name=f"report_{experiment.experiment_id}",
+            stage_name=f"report_{claim.id}",
             session_id=session_id,
             working_dir=config.output,
             transcript_path=transcript_path,
-            artifact_paths=[report_path],
+            artifact_paths=[fragment_path],
             validate=validate_outputs,
         )
-        completed_experiments.add(experiment.experiment_id)
+        completed_claims.add(claim.id)
         pipeline_state.update_stage_checkpoints(
             "report_agents",
             {
-                "completed_experiments": [
-                    item.experiment_id
-                    for item in experiments.experiments
-                    if item.experiment_id in completed_experiments
-                ]
+                "completed_claims": [item.id for item in graph.claims if item.id in completed_claims]
             },
         )
+    _compose_reproduction_report(graph, claims_dir, report_path)
     pipeline_state.complete_stage(
         "report_agents",
-        [str(report_path), *transcript_paths],
+        [
+            str(report_path),
+            *(str(claims_dir / f"{claim.id}.md") for claim in graph.claims),
+            *transcript_paths,
+        ],
     )
     scope_path = Path(state["execution_scope_path"])
-    partial = scope_path.is_file() and load_model(scope_path, ExecutionScope).verdict == "PARTIAL"
+    partial = (
+        scope_path.is_file()
+        and load_model(scope_path, GraphExecutionScope).verdict == "PARTIAL"
+    )
     pipeline_state.mark_completed(partial=partial)
     return {"report_path": str(report_path)}
 

@@ -401,7 +401,7 @@ class CodegenPlan(StrictModel):
     dependency_order: list[str] = Field(min_length=1)
     entry_points: list[str] = Field(min_length=1)
     shared_state: str
-    ambiguities: list[Ambiguity]
+    node_updates: list[PendingNodeUpdate]
     remote_compute: RemoteComputePlan | None
 
 
@@ -455,6 +455,7 @@ class ReplicationStepOutcome(StrictModel):
 
 class ReplicationLog(StrictModel):
     step_outcomes: list[ReplicationStepOutcome] = Field(min_length=1)
+    node_updates: list[PendingNodeUpdate] = Field(min_length=1)
 
     @model_validator(mode="after")
     def unique_step_ids(self) -> "ReplicationLog":
@@ -558,9 +559,9 @@ class SmartReplicateRound(StrictModel):
 
 
 class SmartReplicateLog(StrictModel):
-    experiment_id: str
+    claim_id: str
     baseline_result: Any
-    anchors: dict[str, Any]
+    paper_result: Any
     rounds: list[SmartReplicateRound] = Field(max_length=5)
     final_result: Any
 
@@ -1014,19 +1015,22 @@ def validate_experiment_coverage(claims: ClaimsFile, todo: ExperimentTodo) -> No
         raise ValueError(f"Claims missing from experiments: {sorted(missing_claims)}")
 
 
-def validate_replication_plan(todo: ExperimentTodo, plan: ReplicationPlan) -> None:
-    expected = {
-        reference
-        for experiment in todo.experiments
-        for reference in (*experiment.claims, *experiment.artifacts)
-    }
+def validate_replication_plan(
+    graph: PaperGraph,
+    scope: GraphExecutionScope,
+    plan: ReplicationPlan,
+) -> None:
+    expected = set(scope.runnable_node_ids)
+    unknown_scope = expected - set(graph.node_map)
+    if unknown_scope:
+        raise ValueError(f"Execution scope contains unknown graph nodes: {sorted(unknown_scope)}")
     actual = {reference for step in plan.steps for reference in step.verifies}
     unknown = actual - expected
     missing = expected - actual
     if unknown:
-        raise ValueError(f"Replication plan verifies unknown references: {sorted(unknown)}")
+        raise ValueError(f"Replication plan verifies inactive node IDs: {sorted(unknown)}")
     if missing:
-        raise ValueError(f"Replication plan is missing references: {sorted(missing)}")
+        raise ValueError(f"Replication plan does not cover runnable node IDs: {sorted(missing)}")
 
 
 def validate_replication_log(plan: ReplicationPlan, log: ReplicationLog) -> None:
@@ -1186,94 +1190,62 @@ def validate_autoresearch_experiment_log(
             )
 
 
-def validate_smart_replicate_log(
-    experiment: Experiment,
-    log: SmartReplicateLog,
-    anchors: dict[str, Any],
-) -> None:
-    if log.experiment_id != experiment.experiment_id:
-        raise ValueError(
-            f"Smart-replicate log ID {log.experiment_id} does not match {experiment.experiment_id}"
-        )
-    if set(anchors) != set(experiment.claims):
-        raise ValueError(
-            f"Expected smart-replicate anchors do not match {experiment.experiment_id}"
-        )
-    if log.anchors != anchors:
-        raise ValueError(f"Smart-replicate log anchors do not match {experiment.experiment_id}")
+def validate_smart_replicate_log(claim: GraphNode, log: SmartReplicateLog) -> None:
+    if log.claim_id != claim.id:
+        raise ValueError(f"Smart-replicate log ID {log.claim_id} does not match {claim.id}")
+    if claim.paper_result is None:
+        raise ValueError(f"Claim {claim.id} has no paper result for Smart Replicate")
+    if log.paper_result != claim.paper_result:
+        raise ValueError(f"Smart-replicate paper result does not match claim {claim.id}")
 
 
 def validate_reproduction_report(
     report_text: str,
-    claims: ClaimsFile,
-    experiments: ExperimentTodo,
-    codegen_plan: CodegenPlan,
+    graph: PaperGraph,
 ) -> None:
-    required_sections = [
-        "## 1. Per-experiment reports",
-        "## 2. Validation claim assessment",
-        "## 3. Replication risk list",
-    ]
-    invalid_sections = [section for section in required_sections if report_text.count(section) != 1]
-    if invalid_sections:
-        raise ValueError(
-            f"Report must contain exactly one of each required section: {invalid_sections}"
-        )
-    section_positions = [report_text.index(section) for section in required_sections]
-    if section_positions != sorted(section_positions):
-        raise ValueError("Report required sections are out of order")
-    per_experiment_text = report_text.split(required_sections[0], 1)[1].split(
-        required_sections[1], 1
-    )[0]
-    validation_text = report_text.split(required_sections[1], 1)[1].split(required_sections[2], 1)[
-        0
-    ]
-    risk_text = report_text.split(required_sections[2], 1)[1]
+    if report_text.count("# Reproduction Report") != 1:
+        raise ValueError("Report must contain exactly one `# Reproduction Report` heading")
+    markers = [f"## Claim {claim.id}" for claim in graph.claims]
+    missing = [marker for marker in markers if report_text.count(marker) != 1]
+    if missing:
+        raise ValueError(f"Report must contain each claim exactly once: {missing}")
+    positions = [report_text.index(marker) for marker in markers]
+    if positions != sorted(positions):
+        raise ValueError("Report claim sections are not in paper-graph order")
+    for claim in graph.claims:
+        start = report_text.index(f"## Claim {claim.id}")
+        later = [position for position in positions if position > start]
+        end = min(later) if later else len(report_text)
+        validate_claim_report(report_text[start:end], claim.id, heading_level=2)
 
-    def contains_identifier(text: str, identifier: str) -> bool:
-        return (
-            re.search(
-                rf"(?<![A-Za-z0-9_.-]){re.escape(identifier)}(?![A-Za-z0-9_.-])",
-                text,
-            )
-            is not None
-        )
 
-    missing_experiments = [
-        experiment.experiment_id
-        for experiment in experiments.experiments
-        if not contains_identifier(per_experiment_text, experiment.experiment_id)
+def validate_claim_report(
+    report_text: str,
+    claim_id: str,
+    *,
+    heading_level: int = 1,
+) -> None:
+    heading = f"{'#' * heading_level} Claim {claim_id}"
+    if report_text.count(heading) != 1:
+        raise ValueError(f"Claim report must contain exactly one {heading!r} heading")
+    required_labels = [
+        "Paper result:",
+        "Reproduced result:",
+        "Upstream node results:",
+        "Direct comparison:",
+        "Scope blockers:",
+        "Lineage issues:",
+        "Assessment:",
     ]
-    if missing_experiments:
-        raise ValueError(f"Report is missing experiments: {missing_experiments}")
-    missing_claims = [
-        claim.claim_id
-        for claim in claims.claims
-        if not contains_identifier(per_experiment_text, claim.claim_id)
-    ]
-    if missing_claims:
-        raise ValueError(f"Report is missing claims: {missing_claims}")
-    missing_artifacts = [
-        artifact
-        for experiment in experiments.experiments
-        for artifact in experiment.artifacts
-        if artifact not in per_experiment_text
-    ]
-    if missing_artifacts:
-        raise ValueError(f"Report is missing artifacts: {missing_artifacts}")
-    missing_validation_claims = [
-        claim.claim_id
-        for claim in claims.claims
-        if claim.role == "validation" and not contains_identifier(validation_text, claim.claim_id)
-    ]
-    if missing_validation_claims:
+    missing = [label for label in required_labels if label not in report_text]
+    if missing:
+        raise ValueError(f"Claim report {claim_id} is missing fields: {missing}")
+    verdicts = re.findall(
+        r"Assessment:\s*(close|not close|not assessable)(?![A-Za-z-])",
+        report_text,
+    )
+    if len(verdicts) != 1:
         raise ValueError(
-            f"Report is missing validation claim assessments: {missing_validation_claims}"
+            f"Claim report {claim_id} must contain one explicit close/not close/not assessable "
+            "assessment"
         )
-    missing_ambiguities = [
-        ambiguity.question
-        for ambiguity in codegen_plan.ambiguities
-        if ambiguity.question not in risk_text or ambiguity.assumption not in risk_text
-    ]
-    if missing_ambiguities:
-        raise ValueError(f"Report is missing ambiguity risks: {missing_ambiguities}")
