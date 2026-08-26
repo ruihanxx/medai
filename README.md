@@ -229,6 +229,51 @@ Choose a completed supervised-prediction replication. Without <code>--output</co
 
 ## Architecture, workflow, and interfaces
 
+### Claim provenance graph
+
+MedAI represents a paper as a fine-grained directed acyclic graph rather than
+asking one large workflow unit to carry many downstream responsibilities. A new
+vertex is created whenever a scientific difference can change execution,
+results, or risk propagation—even when two preprocessing paths differ only in
+their split, or two trained models differ only in a seed or parameter setting.
+This produces more low-degree vertices and makes every claim's support path
+explicit.
+
+| Vertex | Meaning |
+| --- | --- |
+| `D` | A source dataset as defined by the paper. |
+| `P` | One complete cohort, label, split, and preprocessing definition. |
+| `T` | One training operation applied to its upstream data path. |
+| `M` | One unique trained-model artifact; it is not merely an architecture name. |
+| `V` | A claim-aligned validation block. Its model, data, and metric sets form a full Cartesian product; sparse endpoints are separate Vs. |
+| `C` | A paper claim plus the comparison, aggregation, or transformation that derives it from upstream validation results. |
+
+Every vertex fixes only the open envelope `id`, `inputs`, `method`,
+`paper_result`, and `provenance`. Method and result payloads may use any JSON
+shape needed by the paper, while provenance retains auditable paper locators.
+
+~~~mermaid
+flowchart LR
+    D[Dataset D] --> P[Preprocessing P]
+    P --> T[Training T]
+    T --> M[Trained model M]
+    M --> V[Validation V]
+    P --> V
+    V --> C[Claim C]
+    P -. statistical path .-> VS[Statistical validation V]
+    VS --> CS[Statistical claim C]
+~~~
+
+All inputs are AND dependencies; alternative paths are represented by distinct
+nodes. The paper definition in `preprocessing/paper_graph.json` is immutable.
+Execution results, evidence, and node-local issues are merged separately into
+`graph/node_state.json`. Issues stay at their origin instead of being copied
+downstream; lineage collection traverses the actual ancestors of any node and
+returns the relevant issue origins and propagation paths. Consequently, MedAI
+can identify which claims are affected by an unreliable model or unavailable
+data path, while still finding the maximal claim subgraph that can be faithfully
+reproduced.
+
 ### Replication workflow
 
 ~~~mermaid
@@ -540,6 +585,46 @@ VASTAI_MAX_CAMPAIGN_INSTANCES=3
 | <code>VAST_*</code> / <code>VASTAI_*</code> | Vast API、镜像、资源、成本、可靠性和 Google Drive connection 设置。 |
 
 ## 模型流程、结构与接口
+
+### Claim 溯源图
+
+MedAI 将论文表示为高颗粒度的有向无环图，而不是让一个大型工作单元承担许多
+下游责任。只要某个科学语义差异可能改变执行路径、结果或风险传播，就建立新的
+vertex——即使两个预处理流程仅有数据划分不同，或两个训练模型仅有 seed、参数
+设置不同。这样会产生更多但 degree 较低的节点，使每条 claim 的证据路径保持
+明确。
+
+| 节点 | 含义 |
+| --- | --- |
+| `D` | 论文定义的一个源数据集。 |
+| `P` | 一套完整的 cohort、label、split 与预处理定义。 |
+| `T` | 在上游数据路径上执行的一次训练操作。 |
+| `M` | 唯一的 trained-model artifact，而不只是模型架构名称。 |
+| `V` | 与 claim 对齐的验证块；其中模型、数据和 metric 集合默认组成完整笛卡尔积，稀疏 endpoint 拆成独立的 V。 |
+| `C` | 论文 claim，以及将上游验证结果转化为该 claim 的比较、聚合或 transformation。 |
+
+每个节点只固定开放 envelope：`id`、`inputs`、`method`、`paper_result` 和
+`provenance`。其中 method 与 result 可以采用论文所需的任意 JSON 结构，provenance
+则保留可审计的论文定位信息。
+
+~~~mermaid
+flowchart LR
+    D[数据集 D] --> P[预处理 P]
+    P --> T[训练 T]
+    T --> M[训练模型 M]
+    M --> V[验证 V]
+    P --> V
+    V --> C[Claim C]
+    P -. 统计分析路径 .-> VS[统计验证 V]
+    VS --> CS[统计 Claim C]
+~~~
+
+所有 `inputs` 都按 AND 依赖解释；替代路径由不同节点表达。论文定义保存在不可变的
+`preprocessing/paper_graph.json` 中；运行结果、证据和节点局部 issue 则由编排器
+合并到独立的 `graph/node_state.json`。Issue 保留在来源节点，不复制到下游；lineage
+收集函数沿任意节点的真实祖先遍历，返回相关 issue 的来源及传播路径。因此，当某个
+模型不可靠或某条数据路径不可用时，MedAI 可以准确定位受影响的 claims，同时找到
+仍可忠实复现的最大 claim 子图。
 
 ### 复现流程
 
