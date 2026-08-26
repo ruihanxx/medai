@@ -1,6 +1,6 @@
 # Auto Research idea-generation agent
 
-You are generating nontrivial refinement ideas for the experiments in a medical paper.
+You are generating nontrivial refinement ideas for the validation paths in a medical paper.
 {% if round_index > 1 %}
 This is round {{ round_index }}. Learn from the experience of previous rounds at `{{ prior_rounds_json }}`
 {% endif %}
@@ -9,8 +9,8 @@ This is round {{ round_index }}. Learn from the experience of previous rounds at
 
 - Paper Markdown: `{{ paper_markdown }}`
 - Eligibility and research brief: `{{ eligibility_path }}`
-- Selected strict prediction experiments and weights: `{{ weights_path }}`
-- Frozen prediction experiment contracts: `{{ contracts_path }}`
+- Selected strict prediction V nodes and weights: `{{ weights_path }}`
+- Frozen prediction V contracts: `{{ contracts_path }}`
 - Base reproduction report: `{{ reproduction_report_path }}`
 - Completed base codebase: `{{ codebase_dir }}`
 - Shared candidate pool: `{{ candidates_path }}` (may not exist in round 1)
@@ -23,7 +23,7 @@ line, then propose standalone refinements to input representation, model design,
 or training strategy that stay within the methodological category or categories
 of the paper's main contribution(s), address a limitation meaningful in the
 paper's research context, and can be embedded into the already replicated
-prediction experiments selected in the weights and contracts artifacts. If the
+selected prediction V nodes in the weights and contracts artifacts. If the
 paper or base code also contains statistical, association, explanatory, causal,
 matching, or effect-estimation analyses, do not propose ideas for them and do
 not use them as refinement targets.
@@ -44,7 +44,7 @@ Write `{{ ideas_path }}` using this JSON schema:
     {
       "idea_id": "{{ idea_id }}",
       "description": "diagnosed problem and final proposed method",
-      "motivation": "selection rationale, paper or experiment evidence, and expected improvement mechanism",
+      "motivation": "selection rationale, paper or validation evidence, and expected improvement mechanism",
       "provenance": [
         {
           "reference": "identifiable citation",
@@ -170,7 +170,7 @@ A candidate is meaningful in the paper's context only when it:
 - preserves the Paper Anchor and the core clinical/scientific question;
 - makes its primary intervention in an eligible contribution category;
 - targets a limitation, questionable assumption, or failure mode supported by
-  the paper or reproduced experiment, rather than generic upgrade potential;
+  the paper or reproduced validation, rather than generic upgrade potential;
 - explains why the proposed mechanism addresses that limitation and how a
   controlled comparison can distinguish the mechanism from scale, compute, or
   tuning effects.
@@ -223,7 +223,7 @@ For each candidate record:
 - **Motivation**: the explicit chain from the contribution category and paper
   context to the diagnosed limitation, proposed intervention, and expected
   improvement mechanism.
-- **Evidence**: concrete support from the paper or reproduced experimental
+- **Evidence**: concrete support from the paper or reproduced validational
   results, such as an ablation, error pattern, metric, table, figure, or stated limitation.
 
 Reject a candidate if that context-to-intervention chain is missing, or if its
@@ -242,7 +242,7 @@ evaluate the proposed methods. Revise the methods when the literature suggests a
 stronger design, or replace them with a better method within the same eligible
 category and paper context. Then update the motivation and add the supporting
 references and the exact point each reference supports to the evidence. Before
-selection, every candidate must have at least one `paper` or `experiment`
+selection, every candidate must have at least one `paper` or `validation`
 evidence entry and at least one `literature` entry.
 
 Literature-search requirements:
@@ -255,7 +255,7 @@ Literature-search requirements:
   to the current problem and that connection is explained.
 - Do not use a paper merely because it applies the same model to an unrelated problem.
 - Distinguish findings reported by a reference from your own inference, and do
-  not claim that a method works in the current experiment before it is tested.
+  not claim that a method works in the current validation path before it is tested.
 
 ### 4. Record the ideas in this round
 
@@ -270,7 +270,7 @@ Write only these three ideas to `{{ ideas_path }}` using the required schema and
 - `description`: the paper-context limitation and the final method within an
   eligible contribution category.
 - `motivation`: the explicit chain from the contribution category and research
-  context through paper or experimental evidence and the diagnosed limitation
+  context through paper or validation evidence and the diagnosed limitation
   to the expected improvement mechanism.
 - `provenance`: one object per relevant reference, with `reference` identifying
   the source and `support` stating the specific supported claim or design choice.
@@ -955,7 +955,7 @@ strategy is one primary modification when that eligible component is the
 hypothesis under test and the rest of the pipeline remains controlled.
 
 
-**4.7 What Experiment Could Falsify the Hypothesis?**
+**4.7 What Validation Could Falsify the Hypothesis?**
 
 Do not ask only:
 

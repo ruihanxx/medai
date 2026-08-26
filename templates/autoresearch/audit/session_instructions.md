@@ -1,25 +1,21 @@
-# Auto Research codegen audit agent
+# Refinement validation audit
 
-Audit refinement `{{ idea_id }}` without modifying its code.
+Audit idea `{{ idea_id }}` without editing code or graph.
 
-## Inputs
+Read contracts, base/refined graphs, implementation plan, and both codebases:
 
-- Frozen experiment contracts: `{{ contracts_path }}`
-- Read-only base codebase: `{{ base_codebase_dir }}`
-- Refined idea codebase: `{{ codebase_dir }}`
-- Implementation plan: `{{ implementation_plan_path }}`
+- `{{ contracts_path }}`
+- `{{ base_graph_path }}` and `{{ refinement_graph_path }}`
+- `{{ implementation_plan_path }}`
+- `{{ base_codebase_dir }}` and `{{ codebase_dir }}`
 
-## Task
-
-Compare the base and refined code. Confirm that all changes are limited to the
-declared standalone input-representation, model, or training-strategy refinement
-and its minimum wiring. Confirm that `refine_file_list` contains exactly the
-modified base files, `new_file_list` contains exactly the added files, and every
-`change` accurately describes the corresponding diff. For every experiment in
-the contracts, check `data`, `prediction_target`, `input_representation`,
-`output`, `training`, and `evaluation` exactly once and in that order.
-
-## Output
+Use freely named checks appropriate to the refinement. For every positive-weight
+baseline V, include at least one evidence-backed check of its corresponding new
+V. Verify base nodes are byte-for-byte semantically unchanged, changed P/T/M
+semantics are represented by new nodes, any model/parameter change creates a
+new M, baseline mapping is explicit, frozen contracts remain unchanged, only
+declared/editable code changed, and the refined V executes its complete
+Cartesian block without rerunning the baseline.
 
 Write `{{ audit_path }}`:
 
@@ -28,14 +24,14 @@ Write `{{ audit_path }}`:
   "idea_id": "{{ idea_id }}",
   "verdict": "pass",
   "refinement_only": true,
-  "scope_evidence": ["exact changed-file evidence"],
+  "scope_evidence": ["specific graph/code evidence"],
   "scope_issue": null,
   "checks": [
     {
-      "experiment_id": "E1",
-      "aspect": "data",
+      "validation_id": "V1",
+      "name": "free-form frozen evaluator check",
       "verdict": "pass",
-      "evidence": ["path and exact comparison"],
+      "evidence": ["path:line or artifact"],
       "issue": null
     }
   ],
@@ -43,38 +39,6 @@ Write `{{ audit_path }}`:
 }
 ```
 
-For a scope violation, set `refinement_only` to false and explain `scope_issue`.
-For each failed contract check, explain `issue` and include an exact required
-fix. A passing audit has no issues or required fixes.
-
-## Constraints
-
-- Include all six checks for every experiment, in contract order.
-- Confirm that dataset/cohort membership, data splits, prediction-time
-  information availability, final prediction outcome/horizon, evaluator-facing
-  output, metrics, and evaluation protocol remain unchanged.
-- Treat all replication intermediates as absent unless this prompt explicitly
-  supplies them. Reject a refinement that reads a base-run cohort or feature
-  table, split file, cache, checkpoint, temporary output root, or model state.
-  A refinement may deterministically reconstruct needed preprocessing from the
-  fixed raw inputs in its own execution path, provided it preserves every frozen
-  data, cohort, split, and prediction-time boundary and does not invoke a
-  baseline entry point.
-- Permit declared input-representation changes only when they derive from the
-  fixed available inputs without outcome or split leakage.
-- Permit declared training changes, including training targets, loss/objective,
-  balancing, sampling, augmentation, optimization, pretraining, and training
-  logic, only when the final prediction task and evaluation protocol remain
-  unchanged and validation/test information is not leaked into training.
-- Treat external pretraining as eligible only when it is declared, leaves the
-  downstream experiment dataset/cohort/split unchanged, and does not expose
-  evaluation examples or unavailable prediction-time information.
-- Confirm that every existing-file change is declared under its matching
-  contract path category in `refine_file_list`, all added files are declared in
-  `new_file_list` and refinement-owned, model-side changes do not mutate the
-  baseline model, and shared-file changes retain baseline behavior and entry
-  points.
-- Trust the completed replicate contracts; do not reinterpret whether the
-  baseline agrees with the paper.
-- Do not edit either codebase.
-- Write only the requested audit JSON.
+Check names are free-form; do not use a fixed aspect taxonomy. A failed check
+needs an issue. Overall pass requires refinement_only=true, no scope issue, all
+checks pass, and no required fixes. Overall fail requires concrete fixes.

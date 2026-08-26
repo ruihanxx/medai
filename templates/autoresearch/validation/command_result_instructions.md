@@ -1,4 +1,4 @@
-# Auto Research experiment command result
+# Auto Research validation command result
 
 The orchestration attempt for the operation requested by this Codex session
 reached a terminal state. Its result is at `{{ command_result_path }}` and its
@@ -6,7 +6,7 @@ complete combined log is at `{{ command_log_path }}`. It exited with code
 {{ exit_code }} after {{ duration_seconds }} seconds. Local orchestration has
 powered the campaign instance off before resuming this session.
 
-The required local experiment artifacts are not yet complete:
+The required local validation artifacts are not yet complete:
 
 ```text
 {{ artifact_validation_error }}

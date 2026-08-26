@@ -45,6 +45,6 @@ For an ineligible study, set `"eligible": false`, explain why, and set
 ## Constraints
 
 - Use only evidence from the supplied paper.
-- Do not infer experiment-level inputs, targets, outputs, training, or evaluation contracts.
+- Do not infer V-level inputs, targets, outputs, training, or evaluation contracts.
 - Do not modify any input or code.
 - Write only the requested JSON artifact.

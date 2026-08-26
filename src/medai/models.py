@@ -595,6 +595,52 @@ class EligibilityResult(StrictModel):
         return self
 
 
+class ValidationImportance(OpenModel):
+    validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    weight: float = Field(ge=0, le=1)
+    rationale: str = Field(min_length=1)
+
+
+class ValidationWeights(OpenModel):
+    validations: list[ValidationImportance] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_ids_and_normalized_positive_weights(self) -> "ValidationWeights":
+        validation_ids = [item.validation_id for item in self.validations]
+        if len(validation_ids) != len(set(validation_ids)):
+            raise ValueError("Validation-weight IDs must be unique")
+        positive = [item.weight for item in self.validations if item.weight > 0]
+        if not positive:
+            raise ValueError("At least one validation must have positive weight")
+        if not math.isclose(sum(positive), 1.0, rel_tol=1e-6, abs_tol=1e-9):
+            raise ValueError("Positive validation weights must sum to 1")
+        return self
+
+    @property
+    def positive_ids(self) -> list[str]:
+        return [item.validation_id for item in self.validations if item.weight > 0]
+
+
+class ValidationContract(OpenModel):
+    validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    baseline_entry_points: list[str] = Field(min_length=1)
+    editable_paths: list[str] = Field(min_length=1)
+    frozen_contract: Any
+    primary_metric: Any
+    comparison_rule: Any
+
+
+class ValidationContracts(OpenModel):
+    validations: list[ValidationContract] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_validation_ids(self) -> "ValidationContracts":
+        validation_ids = [item.validation_id for item in self.validations]
+        if len(validation_ids) != len(set(validation_ids)):
+            raise ValueError("Validation-contract IDs must be unique")
+        return self
+
+
 class ExperimentImportance(StrictModel):
     experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
     weight: float = Field(gt=0, le=1)
@@ -645,7 +691,7 @@ class IdeaGenerationArtifact(StrictModel):
 
 
 class IdeaCandidateEvidence(StrictModel):
-    source: Literal["paper", "experiment", "literature"]
+    source: Literal["paper", "validation", "literature"]
     reference: str = Field(min_length=1)
     support: str = Field(min_length=1)
 
@@ -725,21 +771,15 @@ class IdeaFileChange(StrictModel):
     change: str = Field(min_length=1)
 
 
-RefinementType = Literal["input_representation", "model", "training_strategy"]
-
-
-class IdeaImplementationPlan(StrictModel):
+class IdeaImplementationPlan(OpenModel):
     idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
     summary: str = Field(min_length=1)
-    refinement_types: list[RefinementType] = Field(min_length=1)
-    refinement_description: str = Field(min_length=1)
+    method: Any
     refine_file_list: list[IdeaFileChange]
     new_file_list: list[IdeaFileChange]
 
     @model_validator(mode="after")
     def unique_refinement_fields(self) -> "IdeaImplementationPlan":
-        if len(self.refinement_types) != len(set(self.refinement_types)):
-            raise ValueError("refinement_types must be unique")
         refine_paths = [item.file_path for item in self.refine_file_list]
         new_paths = [item.file_path for item in self.new_file_list]
         if len(refine_paths) != len(set(refine_paths)):
@@ -753,49 +793,37 @@ class IdeaImplementationPlan(StrictModel):
             )
         if not refine_paths and not new_paths:
             raise ValueError("An implementation plan must declare at least one file change")
-        if "model" in self.refinement_types and not new_paths:
-            raise ValueError("A model refinement must declare a new file")
         return self
 
 
-ContractAspect = Literal[
-    "data",
-    "prediction_target",
-    "input_representation",
-    "output",
-    "training",
-    "evaluation",
-]
-
-
-class CodegenAuditCheck(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    aspect: ContractAspect
+class ValidationAuditCheck(OpenModel):
+    validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    name: str = Field(min_length=1)
     verdict: Literal["pass", "fail"]
     evidence: list[str] = Field(min_length=1)
     issue: str | None = None
 
     @model_validator(mode="after")
-    def failed_check_has_issue(self) -> "CodegenAuditCheck":
+    def failed_check_has_issue(self) -> "ValidationAuditCheck":
         if self.verdict == "fail" and not self.issue:
             raise ValueError("A failed codegen audit check must describe its issue")
         return self
 
 
-class CodegenAudit(StrictModel):
+class ValidationCodegenAudit(OpenModel):
     idea_id: str = Field(pattern=r"^R\d{2}-I\d{2}$")
     verdict: Literal["pass", "fail"]
     refinement_only: bool
     scope_evidence: list[str] = Field(min_length=1)
     scope_issue: str | None = None
-    checks: list[CodegenAuditCheck] = Field(min_length=1)
+    checks: list[ValidationAuditCheck] = Field(min_length=1)
     required_fixes: list[str]
 
     @model_validator(mode="after")
-    def verdict_matches_scope_and_checks(self) -> "CodegenAudit":
-        pairs = [(check.experiment_id, check.aspect) for check in self.checks]
+    def verdict_matches_scope_and_checks(self) -> "ValidationCodegenAudit":
+        pairs = [(check.validation_id, check.name) for check in self.checks]
         if len(pairs) != len(set(pairs)):
-            raise ValueError("Codegen audit experiment/aspect checks must be unique")
+            raise ValueError("Codegen audit validation/check names must be unique")
         if not self.refinement_only and not self.scope_issue:
             raise ValueError("An out-of-scope refinement audit must describe the scope issue")
         if self.refinement_only and self.scope_issue:
@@ -814,51 +842,54 @@ class CodegenAudit(StrictModel):
         return self
 
 
-class RefinementExperimentPlan(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+class RefinementValidationPlan(StrictModel):
+    validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    baseline_validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
     steps: list[ReplicationStep] = Field(min_length=1, max_length=10)
 
     @model_validator(mode="after")
-    def unique_step_ids(self) -> "RefinementExperimentPlan":
+    def unique_step_ids(self) -> "RefinementValidationPlan":
         step_ids = [step.id for step in self.steps]
         if len(step_ids) != len(set(step_ids)):
-            raise ValueError("Refinement experiment step IDs must be unique")
+            raise ValueError("Refinement validation step IDs must be unique")
         return self
 
 
-class AutoResearchExperimentPlan(StrictModel):
+class AutoResearchValidationPlan(StrictModel):
     environment: PlanEnvironment
-    experiments: list[RefinementExperimentPlan] = Field(min_length=1)
+    validations: list[RefinementValidationPlan] = Field(min_length=1)
     remote_compute: RemoteComputePlan | None = None
 
     @model_validator(mode="after")
-    def unique_experiment_ids(self) -> "AutoResearchExperimentPlan":
-        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("Auto Research experiment-plan IDs must be unique")
+    def unique_validation_ids(self) -> "AutoResearchValidationPlan":
+        validation_ids = [item.validation_id for item in self.validations]
+        if len(validation_ids) != len(set(validation_ids)):
+            raise ValueError("Auto Research validation-plan IDs must be unique")
         return self
 
 
-class RefinementExperimentLog(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+class RefinementValidationLog(StrictModel):
+    validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
     step_outcomes: list[ReplicationStepOutcome] = Field(min_length=1)
 
 
-class AutoResearchExperimentLog(StrictModel):
-    experiments: list[RefinementExperimentLog] = Field(min_length=1)
+class AutoResearchValidationLog(StrictModel):
+    validations: list[RefinementValidationLog] = Field(min_length=1)
+    node_updates: list[PendingNodeUpdate] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def unique_experiment_ids(self) -> "AutoResearchExperimentLog":
-        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("Auto Research experiment-log IDs must be unique")
+    def unique_validation_ids(self) -> "AutoResearchValidationLog":
+        validation_ids = [item.validation_id for item in self.validations]
+        if len(validation_ids) != len(set(validation_ids)):
+            raise ValueError("Auto Research validation-log IDs must be unique")
         return self
 
 
-class ExperimentMetricComparison(StrictModel):
-    experiment_id: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
-    metric_name: str = Field(min_length=1)
-    direction: Literal["higher", "lower"]
+class ValidationMetricComparison(OpenModel):
+    validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    refined_validation_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    primary_metric: Any
+    comparison_rule: Any
     weight: float = Field(gt=0, le=1)
     baseline_value: float | None
     refined_value: float | None
@@ -870,7 +901,7 @@ class ExperimentMetricComparison(StrictModel):
     evidence_paths: list[str] = Field(min_length=1)
 
     @model_validator(mode="after")
-    def validate_comparison(self) -> "ExperimentMetricComparison":
+    def validate_comparison(self) -> "ValidationMetricComparison":
         if self.baseline_value is None or self.refined_value is None:
             if any(
                 value is not None
@@ -893,13 +924,8 @@ class ExperimentMetricComparison(StrictModel):
         ):
             raise ValueError("absolute_delta must equal refined_value - baseline_value")
         if self.baseline_value == 0:
-            if any(
-                value is not None
-                for value in (self.relative_delta, self.score, self.weighted_score)
-            ):
-                raise ValueError(
-                    "Relative and weighted scores must be null when baseline_value is zero"
-                )
+            if self.relative_delta is not None:
+                raise ValueError("relative_delta must be null when baseline_value is zero")
         else:
             expected_relative = expected_delta / abs(self.baseline_value)
             if self.relative_delta is None or not math.isclose(
@@ -909,18 +935,18 @@ class ExperimentMetricComparison(StrictModel):
                 abs_tol=1e-9,
             ):
                 raise ValueError("relative_delta is inconsistent with the metric values")
-            if self.score is None:
-                raise ValueError("A complete comparison must define an assessment score")
-            expected_weighted = self.score * self.weight
-            if self.weighted_score is None or not math.isclose(
-                self.weighted_score,
-                expected_weighted,
-                rel_tol=1e-6,
-                abs_tol=1e-9,
-            ):
-                raise ValueError(
-                    "weighted_score is inconsistent with the assessment score and weight"
-                )
+        if self.score is None:
+            raise ValueError("A complete comparison must define an assessment score")
+        expected_weighted = self.score * self.weight
+        if self.weighted_score is None or not math.isclose(
+            self.weighted_score,
+            expected_weighted,
+            rel_tol=1e-6,
+            abs_tol=1e-9,
+        ):
+            raise ValueError(
+                "weighted_score is inconsistent with the assessment score and weight"
+            )
         return self
 
 
@@ -930,28 +956,28 @@ class IdeaAssessment(StrictModel):
     summary: str = Field(min_length=1)
     audit_passed: bool
     protocol_consistent: bool
-    experiments: list[ExperimentMetricComparison]
+    validations: list[ValidationMetricComparison]
     weighted_score: float | None
     threshold: float = Field(ge=0)
     failure_reasons: list[str]
 
     @model_validator(mode="after")
     def verdict_matches_weighted_score(self) -> "IdeaAssessment":
-        experiment_ids = [experiment.experiment_id for experiment in self.experiments]
-        if len(experiment_ids) != len(set(experiment_ids)):
-            raise ValueError("Assessment experiment IDs must be unique")
+        validation_ids = [item.validation_id for item in self.validations]
+        if len(validation_ids) != len(set(validation_ids)):
+            raise ValueError("Assessment validation IDs must be unique")
         expected_score = None
-        if self.experiments and all(
-            experiment.weighted_score is not None for experiment in self.experiments
+        if self.validations and all(
+            item.weighted_score is not None for item in self.validations
         ):
             expected_score = sum(
-                experiment.weighted_score
-                for experiment in self.experiments
-                if experiment.weighted_score is not None
+                item.weighted_score
+                for item in self.validations
+                if item.weighted_score is not None
             )
         if expected_score is None:
             if self.weighted_score is not None:
-                raise ValueError("Incomplete experiment comparisons require a null weighted score")
+                raise ValueError("Incomplete validation comparisons require a null weighted score")
         elif self.weighted_score is None or not math.isclose(
             self.weighted_score,
             expected_score,
@@ -1048,27 +1074,24 @@ def validate_replication_log(plan: ReplicationPlan, log: ReplicationLog) -> None
         )
 
 
-def validate_experiment_weights(
-    todo: ExperimentTodo,
-    weights: ExperimentWeights,
-) -> None:
-    available = [experiment.experiment_id for experiment in todo.experiments]
-    actual = [experiment.experiment_id for experiment in weights.experiments]
-    expected = [experiment_id for experiment_id in available if experiment_id in actual]
+def validate_validation_weights(graph: PaperGraph, weights: ValidationWeights) -> None:
+    available = [node.id for node in graph.validations]
+    actual = [item.validation_id for item in weights.validations]
+    expected = [validation_id for validation_id in available if validation_id in actual]
     if actual != expected:
         raise ValueError(
-            "Experiment weights must select known prediction experiments in input order"
+            "Validation weights must select known prediction V nodes in graph order"
         )
 
 
-def validate_experiment_contracts(
-    weights: ExperimentWeights,
-    contracts: ExperimentContracts,
+def validate_validation_contracts(
+    weights: ValidationWeights,
+    contracts: ValidationContracts,
 ) -> None:
-    expected = [experiment.experiment_id for experiment in weights.experiments]
-    actual = [experiment.experiment_id for experiment in contracts.experiments]
+    expected = weights.positive_ids
+    actual = [item.validation_id for item in contracts.validations]
     if actual != expected:
-        raise ValueError("Experiment contracts must cover every weighted prediction experiment")
+        raise ValueError("Validation contracts must cover only positive-weight V nodes")
 
 
 def validate_candidate_pool_for_selection(pool: IdeaCandidatePool) -> None:
@@ -1078,9 +1101,9 @@ def validate_candidate_pool_for_selection(pool: IdeaCandidatePool) -> None:
         raise ValueError("Idea generation must select exactly three candidates")
     for candidate in pool.candidates:
         sources = {evidence.source for evidence in candidate.evidence}
-        if not sources.intersection({"paper", "experiment"}):
+        if not sources.intersection({"paper", "validation"}):
             raise ValueError(
-                f"Candidate {candidate.candidate_id} lacks paper or experiment evidence"
+                f"Candidate {candidate.candidate_id} lacks paper or validation evidence"
             )
         if "literature" not in sources:
             raise ValueError(f"Candidate {candidate.candidate_id} lacks literature evidence")
@@ -1097,17 +1120,13 @@ def validate_idea_generation_artifact(
 
 
 def validate_idea_implementation_plan(
-    contracts: ExperimentContracts,
+    contracts: ValidationContracts,
     plan: IdeaImplementationPlan,
 ) -> None:
     permitted_paths = {
         path
-        for contract in contracts.experiments
-        for path in (
-            *contract.input_representation_paths,
-            *contract.training_paths,
-            *contract.integration_paths,
-        )
+        for contract in contracts.validations
+        for path in contract.editable_paths
     }
     invalid_paths = {item.file_path for item in plan.refine_file_list} - permitted_paths
     if invalid_paths:
@@ -1117,77 +1136,143 @@ def validate_idea_implementation_plan(
         )
 
 
+def validate_refinement_graph(
+    base_graph: PaperGraph,
+    refinement_graph: PaperGraph,
+    weights: ValidationWeights,
+) -> None:
+    base_nodes = base_graph.node_map
+    refined_nodes = refinement_graph.node_map
+    missing_base = sorted(set(base_nodes) - set(refined_nodes))
+    if missing_base:
+        raise ValueError(f"Refinement graph omits base node IDs: {missing_base}")
+    changed_base = sorted(
+        node_id
+        for node_id, node in base_nodes.items()
+        if refined_nodes[node_id].model_dump(mode="json") != node.model_dump(mode="json")
+    )
+    if changed_base:
+        raise ValueError(f"Refinement graph modifies base nodes in place: {changed_base}")
+    base_categories = base_graph.category_map
+    refined_categories = refinement_graph.category_map
+    recategorized = sorted(
+        node_id
+        for node_id in base_nodes
+        if base_categories[node_id] != refined_categories[node_id]
+    )
+    if recategorized:
+        raise ValueError(f"Refinement graph recategorizes base nodes: {recategorized}")
+    new_datasets = sorted(
+        node_id
+        for node_id in set(refined_nodes) - set(base_nodes)
+        if refined_categories[node_id] == "datasets"
+    )
+    if new_datasets:
+        raise ValueError(
+            f"Refinement graph may not add datasets: {new_datasets}"
+        )
+    new_validations = [
+        node
+        for node in refinement_graph.validations
+        if node.id not in base_nodes
+    ]
+    baseline_ids = [getattr(node, "baseline_validation_id", None) for node in new_validations]
+    if baseline_ids != weights.positive_ids:
+        raise ValueError(
+            "Refinement graph must add one V node for each positive-weight baseline V in order"
+        )
+    base_claim_ids = {node.id for node in base_graph.claims}
+    invalid_new_claims = sorted(
+        node.id
+        for node in refinement_graph.claims
+        if node.id not in base_nodes
+        and getattr(node, "baseline_claim_id", None) not in base_claim_ids
+    )
+    if invalid_new_claims:
+        raise ValueError(
+            "New refinement claims must map to a base claim with baseline_claim_id: "
+            f"{invalid_new_claims}"
+        )
+
+
 def validate_codegen_audit(
-    contracts: ExperimentContracts,
-    audit: CodegenAudit,
+    contracts: ValidationContracts,
+    audit: ValidationCodegenAudit,
 ) -> None:
-    aspects = [
-        "data",
-        "prediction_target",
-        "input_representation",
-        "output",
-        "training",
-        "evaluation",
-    ]
-    expected = [
-        (experiment.experiment_id, aspect)
-        for experiment in contracts.experiments
-        for aspect in aspects
-    ]
-    actual = [(check.experiment_id, check.aspect) for check in audit.checks]
-    if actual != expected:
-        raise ValueError("Codegen audit must check every experiment contract aspect in order")
+    expected = [item.validation_id for item in contracts.validations]
+    actual = [check.validation_id for check in audit.checks]
+    unknown = sorted(set(actual) - set(expected))
+    missing = [validation_id for validation_id in expected if validation_id not in actual]
+    if unknown or missing:
+        raise ValueError(
+            f"Codegen audit validation coverage mismatch; missing={missing}, unknown={unknown}"
+        )
 
 
-def validate_autoresearch_experiment_plan(
-    contracts: ExperimentContracts,
-    plan: AutoResearchExperimentPlan,
+def validate_autoresearch_validation_plan(
+    contracts: ValidationContracts,
+    refinement_graph: PaperGraph,
+    plan: AutoResearchValidationPlan,
 ) -> None:
-    expected = [experiment.experiment_id for experiment in contracts.experiments]
-    actual = [experiment.experiment_id for experiment in plan.experiments]
-    if actual != expected:
-        raise ValueError("Auto Research experiment plan must cover every experiment in order")
-    contracts_by_id = {contract.experiment_id: contract for contract in contracts.experiments}
-    for experiment in plan.experiments:
-        commands = {step.command_hint.strip() for step in experiment.steps}
+    expected_baselines = [item.validation_id for item in contracts.validations]
+    expected_refined = [
+        node.id
+        for node in refinement_graph.validations
+        if getattr(node, "baseline_validation_id", None) in expected_baselines
+    ]
+    actual = [item.validation_id for item in plan.validations]
+    if actual != expected_refined:
+        raise ValueError("Auto Research validation plan must cover every refined V in order")
+    baselines = [item.baseline_validation_id for item in plan.validations]
+    if baselines != expected_baselines:
+        raise ValueError("Auto Research validation plan baseline mappings are invalid")
+    contracts_by_id = {item.validation_id: item for item in contracts.validations}
+    for item in plan.validations:
+        commands = {step.command_hint.strip() for step in item.steps}
         baseline_commands = {
             command.strip()
-            for command in contracts_by_id[experiment.experiment_id].baseline_entry_points
+            for command in contracts_by_id[item.baseline_validation_id].baseline_entry_points
         }
         if commands & baseline_commands:
-            raise ValueError(f"Auto Research plan reruns a baseline: {experiment.experiment_id}")
+            raise ValueError(
+                f"Auto Research validation plan reruns baseline {item.baseline_validation_id}"
+            )
 
 
-def validate_autoresearch_experiment_log(
-    plan: AutoResearchExperimentPlan,
-    log: AutoResearchExperimentLog,
+def validate_autoresearch_validation_log(
+    base_graph: PaperGraph,
+    refinement_graph: PaperGraph,
+    plan: AutoResearchValidationPlan,
+    log: AutoResearchValidationLog,
 ) -> None:
-    expected = [experiment.experiment_id for experiment in plan.experiments]
-    actual = [experiment.experiment_id for experiment in log.experiments]
+    expected = [item.validation_id for item in plan.validations]
+    actual = [item.validation_id for item in log.validations]
     if actual != expected:
-        raise ValueError("Auto Research experiment log must cover every experiment in order")
-    for planned_experiment, logged_experiment in zip(
-        plan.experiments,
-        log.experiments,
+        raise ValueError("Auto Research validation log must cover every refined V in order")
+    for planned, logged in zip(
+        plan.validations,
+        log.validations,
         strict=True,
     ):
-        planned_ids = [step.id for step in planned_experiment.steps]
-        outcome_ids = [outcome.step_id for outcome in logged_experiment.step_outcomes]
+        planned_ids = [step.id for step in planned.steps]
+        outcome_ids = [outcome.step_id for outcome in logged.step_outcomes]
         if outcome_ids != planned_ids:
-            raise ValueError(
-                f"Experiment log must cover steps in order: {planned_experiment.experiment_id}"
-            )
-        outcomes_by_id = {outcome.step_id: outcome for outcome in logged_experiment.step_outcomes}
+            raise ValueError(f"Validation log must cover steps in order: {planned.validation_id}")
+        outcomes_by_id = {outcome.step_id: outcome for outcome in logged.step_outcomes}
         missing_outputs = [
             step.id
-            for step in planned_experiment.steps
+            for step in planned.steps
             if step.verifies and not outcomes_by_id[step.id].output_files
         ]
         if missing_outputs:
             raise ValueError(
                 "Result-producing Auto Research steps have no output files for "
-                f"{planned_experiment.experiment_id}: {missing_outputs}"
+                f"{planned.validation_id}: {missing_outputs}"
             )
+    new_ids = set(refinement_graph.node_map) - set(base_graph.node_map)
+    update_ids = [update.node_id for update in log.node_updates]
+    if len(update_ids) != len(set(update_ids)) or set(update_ids) != new_ids:
+        raise ValueError("Validation log node updates must cover every refinement node exactly")
 
 
 def validate_smart_replicate_log(claim: GraphNode, log: SmartReplicateLog) -> None:

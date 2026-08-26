@@ -29,10 +29,8 @@ def generate_autoresearch_visualizations(
             axis.set_yticks([])
             axis.set_title(f"{assessment.idea_id}\nincomplete weighted comparison")
             continue
-        labels = [experiment.experiment_id for experiment in assessment.experiments]
-        values = [
-            experiment.weighted_score for experiment in assessment.experiments
-        ]
+        labels = [item.validation_id for item in assessment.validations]
+        values = [item.weighted_score for item in assessment.validations]
         bars = axis.bar(
             labels,
             values,
@@ -47,7 +45,7 @@ def generate_autoresearch_visualizations(
         axis.grid(axis="y", alpha=0.25)
     for axis in flat_axes[len(assessments) :]:
         axis.axis("off")
-    figure.suptitle("Auto Research: per-experiment weighted contributions", fontsize=15)
+    figure.suptitle("Auto Research: per-validation weighted contributions", fontsize=15)
     figure.tight_layout()
     figure.savefig(metric_path, dpi=160, bbox_inches="tight")
     plt.close(figure)

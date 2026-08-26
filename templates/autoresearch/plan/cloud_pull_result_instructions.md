@@ -16,5 +16,5 @@ Read the result, relevant log sections, and the non-secret provider state at
 Before returning, repeat the selected drive reference's complete preparation
 procedure and leave the instance stopped, then return exactly one next
 non-empty foreground monitor Bash command using the required output schema.
-Do not inspect raw cloud data or continue experiment planning while state is
+Do not inspect raw cloud data or continue validation planning while state is
 incomplete. Exit nonzero when safe recovery is not possible.

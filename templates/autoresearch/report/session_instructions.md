@@ -1,48 +1,38 @@
-# Auto Research final-report agent
+# Auto Research report agent
 
-Create the evidence-bound final report for the completed Auto Research campaign.
+Write `{{ report_path }}` from the immutable base report, validation setup, and
+canonical round/idea artifacts.
 
-## Inputs
+Read:
 
-- Eligibility and research brief: `{{ eligibility_path }}`
-- Frozen result-blind experiment weights: `{{ weights_path }}`
-- Frozen executable experiment contracts: `{{ contracts_path }}`
-- Base reproduction report: `{{ base_reproduction_report }}`
-- Round idea artifacts, implementation/audit/experiment artifacts, assessments,
-  and deterministic summaries:
+- eligibility: `{{ eligibility_path }}`
+- validation weights/contracts: `{{ weights_path }}`, `{{ contracts_path }}`
+- base claim report: `{{ base_reproduction_report }}`
+- round artifacts:
 
 ```json
 {{ rounds_json }}
 ```
 
-- Metric comparison visualization: `{{ metric_visualization_path }}`
-- Idea-status visualization: `{{ status_visualization_path }}`
-
-## Output
-
-Write `{{ report_path }}` with exactly these sections in order:
+Use exactly:
 
 ```markdown
 # Auto Research Report
 
 ## 1. Base problem and research context
-
 ## 2. Idea ledger
-
-## 3. Experiment comparisons
-
+## 3. Validation comparisons
 ## 4. Validity and failure assessment
-
 ## 5. Visualizations
 ```
 
-Include every attempted idea ID, its motivation/provenance, per-experiment
-implementation and results when present, weighted score, threshold, verdict,
-and failure or inconclusive reason.
-Embed both supplied PNG files using Markdown image links.
+Include every attempted idea and every positive-weight baseline/refined V
+comparison, with V IDs, related paper claims, frozen metric/rule/weight, actual
+values, deltas, score, weighted contribution, evidence, and verdict. State that
+zero-weight V nodes were intentionally not contracted, executed, or scored.
+Describe audit failures and inconclusive numeric mappings precisely. Use only
+V IDs and claim IDs; do not invent missing results.
 
-## Constraints
-
-- Report valid ideas in parallel without ranking, merging, or promoting code.
-- Clearly mark ideas skipped after audit failure as not experimented.
-- Do not invent evidence or modify any other artifact.
+Embed `{{ metric_visualization_path }}` and
+`{{ status_visualization_path }}` by filename in section 5. Ensure every idea ID
+appears and the section order is exact.
