@@ -18,7 +18,7 @@ needed columns/aggregates and never substitute a missing paper-required input.
   fine-grained D/P/T/M/V/C nodes, treats V sets as Cartesian blocks, separates
   sparse endpoints, supports P→V→C, and does not create a separate grouping
   concept.
-- Data availability reads the graph and covers every P×upstream-D requirement.
+- Data availability reads the graph and covers every direct D→P source boundary.
   It writes only attempt-local evidence. Orchestration owns scope derivation.
 - Later agents do not edit the paper graph. They emit node-local updates in
   their existing stage artifact; orchestration assigns the source and merges

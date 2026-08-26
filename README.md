@@ -242,7 +242,7 @@ explicit.
 | Vertex | Meaning |
 | --- | --- |
 | `D` | A source dataset as defined by the paper. |
-| `P` | One complete cohort, label, split, and preprocessing definition. |
+| `P` | One materializable preprocessing state. A terminal P's complete semantics are composed from the P methods along its ancestor path. |
 | `T` | One training operation applied to its upstream data path. |
 | `M` | One unique trained-model artifact; it is not merely an architecture name. |
 | `V` | A claim-aligned validation block. Its model, data, and metric sets form a full Cartesian product; sparse endpoints are separate Vs. |
@@ -273,6 +273,11 @@ returns the relevant issue origins and propagation paths. Consequently, MedAI
 can identify which claims are affected by an unreliable model or unavailable
 data path, while still finding the maximal claim subgraph that can be faithfully
 reproduced.
+
+A `P→P` edge is used only for actual output consumption. MedAI factors an exact,
+materializable common prefix such as `D→P_common→{P_split_a,P_split_b}`; similarity
+or shared code alone does not create an edge. Availability audits only direct
+`D→P` source boundaries, while blockers propagate through subsequent P nodes.
 
 ### Replication workflow
 
@@ -597,7 +602,7 @@ vertex——即使两个预处理流程仅有数据划分不同，或两个训�
 | 节点 | 含义 |
 | --- | --- |
 | `D` | 论文定义的一个源数据集。 |
-| `P` | 一套完整的 cohort、label、split 与预处理定义。 |
+| `P` | 一个可物化的预处理状态；终端 P 的完整语义由祖先路径上的 P.method 依次组合得到。 |
 | `T` | 在上游数据路径上执行的一次训练操作。 |
 | `M` | 唯一的 trained-model artifact，而不只是模型架构名称。 |
 | `V` | 与 claim 对齐的验证块；其中模型、数据和 metric 集合默认组成完整笛卡尔积，稀疏 endpoint 拆成独立的 V。 |
@@ -625,6 +630,11 @@ flowchart LR
 收集函数沿任意节点的真实祖先遍历，返回相关 issue 的来源及传播路径。因此，当某个
 模型不可靠或某条数据路径不可用时，MedAI 可以准确定位受影响的 claims，同时找到
 仍可忠实复现的最大 claim 子图。
+
+`P→P` 仅表示真实的输出消费。MedAI 可以提取
+`D→P_common→{P_split_a,P_split_b}` 这样的完全一致且可物化的公共前缀；仅仅操作
+相似或复用代码不会产生 edge。Availability 只审计直接 `D→P` source boundary，
+阻断状态则继续沿后续 P 节点传播。
 
 ### 复现流程
 

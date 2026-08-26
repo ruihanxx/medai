@@ -30,13 +30,13 @@ def derive_graph_execution_scope(
     paper_graph_sha256: str,
     report_sha256: str,
 ) -> GraphExecutionScope:
-    """Validate P×upstream-D coverage and derive the maximal runnable claim subgraph."""
+    """Validate direct D→P source boundaries and derive the runnable claim subgraph."""
     category = graph.category_map
     expected_pairs = {
-        (node.id, ancestor_id)
+        (node.id, input_id)
         for node in graph.preprocessing
-        for ancestor_id in graph_ancestors(graph, node.id, include_self=False)
-        if category[ancestor_id] == "datasets"
+        for input_id in node.inputs
+        if category[input_id] == "datasets"
     }
     actual_pairs = [
         (item.preprocessing_id, item.dataset_id) for item in report.requirements

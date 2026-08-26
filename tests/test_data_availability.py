@@ -98,3 +98,91 @@ def test_availability_rejects_missing_p_by_d_requirement() -> None:
     report.requirements.pop()
     with pytest.raises(ValueError, match="coverage mismatch"):
         _derive(report)
+
+
+def test_shared_preprocessing_prefix_has_one_direct_source_requirement() -> None:
+    graph = PaperGraph.model_validate(
+        {
+            "version": 1,
+            "datasets": [_node("D1", [])],
+            "preprocessing": [
+                _node("P_common", ["D1"]),
+                _node("P_random", ["P_common"]),
+                _node("P_temporal", ["P_common"]),
+            ],
+            "training": [],
+            "models": [],
+            "validations": [
+                _node("V_random", ["P_random"]),
+                _node("V_temporal", ["P_temporal"]),
+            ],
+            "claims": [
+                _node("C_random", ["V_random"]),
+                _node("C_temporal", ["V_temporal"]),
+            ],
+        }
+    )
+    report = GraphDataAvailabilityReport.model_validate(
+        {
+            "capacity_decision": {"execution_location": "local", "rationale": "test"},
+            "requirements": [
+                {
+                    "preprocessing_id": "P_common",
+                    "dataset_id": "D1",
+                    "source_kind": "local",
+                    "source_name": "data.csv",
+                    "required_content": "shared cohort source fields",
+                    "status": "available",
+                    "evidence": "columns inspected",
+                }
+            ],
+        }
+    )
+
+    scope = derive_graph_execution_scope(
+        graph,
+        report,
+        paper_graph_sha256="1" * 64,
+        report_sha256="2" * 64,
+    )
+
+    assert scope.verdict == "FULL"
+    assert scope.runnable_node_ids == [node.id for node in graph.nodes]
+
+    blocked = report.model_copy(deep=True)
+    blocked.requirements[0] = blocked.requirements[0].model_copy(
+        update={
+            "source_kind": None,
+            "source_name": None,
+            "status": "source_blocked",
+            "evidence": "required source fields absent",
+        }
+    )
+    blocked_scope = derive_graph_execution_scope(
+        graph,
+        blocked,
+        paper_graph_sha256="1" * 64,
+        report_sha256="3" * 64,
+    )
+    assert blocked_scope.verdict == "NONE"
+    assert {item.node_id for item in blocked_scope.blocked_nodes} == {
+        "P_common",
+        "P_random",
+        "P_temporal",
+        "V_random",
+        "V_temporal",
+        "C_random",
+        "C_temporal",
+    }
+
+    extra = report.model_copy(deep=True)
+    extra.requirements.append(
+        extra.requirements[0].model_copy(update={"preprocessing_id": "P_random"})
+    )
+    with pytest.raises(ValueError, match="coverage mismatch"):
+        derive_graph_execution_scope(
+            graph,
+            extra,
+            paper_graph_sha256="1" * 64,
+            report_sha256="2" * 64,
+        )

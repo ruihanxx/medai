@@ -12,7 +12,7 @@ Read:
 - codebase: `{{ codebase_dir }}`
 - resources: `{{ resources_path }}`
 
-Audit every runnable P node and every upstream D requirement, plus any T/M/V
+Audit every runnable P node and every direct D→P source requirement, plus any T/M/V
 implementation whose correctness depends on those outputs. Distinct P nodes
 must be checked separately even when they share a D. Check exact source mapping,
 cohort construction, exclusions, linkage, label semantics, split leakage,
@@ -40,7 +40,7 @@ be either:
 - `preprocessing_fix` when generated preprocessing/cohort logic should be
   refined;
 - `source_unavailable` only when concrete evidence proves an approved source
-  cannot supply a required P×D input.
+  cannot supply a required direct D→P input.
 
 Write `{{ report_path }}`:
 

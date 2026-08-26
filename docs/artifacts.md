@@ -59,8 +59,11 @@ limited to globally unique IDs, existing non-duplicate inputs, acyclicity, a
 non-empty input list for every C, and reachability of every node to at least one
 C. It deliberately does not close scientific method or result shapes.
 
-P nodes contain the complete cohort, labels, split, preprocessing, and related
-data semantics. Any path-affecting difference requires a new P. M identifies
+Each P is a materializable preprocessing state whose method describes the local
+transformation from its inputs. A terminal P's complete cohort, labels, split,
+and preprocessing semantics are composed along its ancestor P path. An exact,
+materializable common prefix may be shared through P→P edges; similarity or code
+reuse alone is insufficient. Any path-affecting difference requires a new P. M identifies
 one trained-model artifact; changes in seed, parameterization, training data,
 fine-tuning, or implementation require a new M. A V is claim-aligned: its model,
 data, and metric sets mean their full Cartesian product. Sparse endpoints are
@@ -100,7 +103,8 @@ their origin. `collect_lineage_issues(node_id)` follows only actual ancestors,
 deduplicates equal content from the same origin, and returns its sources and
 origin-to-target paths.
 
-`execution_scope.json` binds both paper-graph and availability-report hashes.
+Availability covers each direct D→P source boundary; inherited P dependencies
+are handled by graph propagation. `execution_scope.json` binds both paper-graph and availability-report hashes.
 It records `runnable_node_ids`, `blocked_nodes`, blocker paths,
 `active_sources`, execution location, and one orchestration lifecycle verdict:
 `FULL`, `PARTIAL`, or `NONE`. Blocked nodes retain `source_blocked` versus

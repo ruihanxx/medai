@@ -7,10 +7,11 @@ Read:
 - resources: `{{ resources_path }}`
 - any later source-revision reports: {{ scope_revision_reports }}
 
-Audit every requirement formed by one P node and each upstream D node feeding
-that P. Two P nodes using the same D are separate requirements, even when they
-differ only by cohort construction, label, split, or preprocessing detail.
-Do not invent dependencies: all dependencies already come from graph inputs.
+Audit every direct `D -> P` source boundary. Do not emit a requirement for a D
+that reaches P only through another P: the upstream requirement and graph
+propagation already cover it. If a downstream P also reads a raw D directly,
+that D must appear explicitly in the downstream P's inputs and receives its own
+requirement. Do not invent dependencies: all boundaries come from graph inputs.
 
 Available local sources:
 {% for dataset, path in local_datasets %}- {{ dataset }}: `{{ path }}`
@@ -60,7 +61,7 @@ Write `{{ report_path }}`:
 }
 ```
 
-The requirements list must cover every P×upstream-D pair exactly once and must
-contain no extra pair. Do not write execution scope yourself; the orchestrator
+The requirements list must cover every direct D→P pair exactly once and contain
+no extra pair. Do not write execution scope yourself; the orchestrator
 validates coverage, propagates blockers through the graph, and writes the
 hash-bound scope.

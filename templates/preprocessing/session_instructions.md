@@ -49,8 +49,11 @@ is `null` when none is reported.
 ## Node meaning and granularity
 
 - `D`: a paper dataset or source cohort.
-- `P`: complete cohort construction, inclusion/exclusion, linkage, labels,
-  transforms, feature construction, and train/validation/test splitting.
+- `P`: one materializable preprocessing state produced from its declared
+  inputs. Its local method may perform cohort construction, inclusion/exclusion,
+  linkage, labels, transforms, feature construction, or splitting. The complete
+  semantics of a terminal P are the ordered composition of P methods on its
+  ancestor path.
 - `T`: a training or fitting operation.
 - `M`: one unique trained-model artifact, not an architecture class. A
   different seed, parameter, training input, fine-tuning route, or model
@@ -66,6 +69,16 @@ that can alter execution, results, provenance, or downstream risk propagation
 creates a new node. In particular, different cohort filters, labels, split,
 preprocessing order, seed, parameters, training data, or fine-tuning route are
 different P/T/M nodes even when the difference is small.
+
+P-to-P edges are valid only when the downstream P actually consumes the
+materialized output of the upstream P. Factor a shared P prefix when its input,
+operations, order, and parameters are exactly identical across branches, its
+output can be concretely described and evidenced, and an issue there should
+affect every branch. Each child P then records only its local divergent method.
+Do not create a shared P merely for similar text or reused implementation code.
+When semantic identity is uncertain, keep separate branch-specific P nodes.
+Every P must be executable enough for replication to record an actual result
+and evidence.
 
 `inputs` are AND dependencies. Do not encode OR inputs; represent each
 alternative path with a separate node. IDs must be globally unique. Use

@@ -53,7 +53,7 @@ same session after orchestration completes the command.
 
 ## Source revisions
 
-If concrete inspection proves a currently runnable P×D requirement unavailable,
+If concrete inspection proves a currently runnable direct D→P requirement unavailable,
 do not substitute another source. Write `{{ scope_revision_path }}` and stop:
 
 ```json

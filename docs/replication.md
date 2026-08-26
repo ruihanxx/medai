@@ -8,7 +8,7 @@ grouping. One run executes these stages:
 3. Preprocessing extracts one immutable D/P/T/M/V/C paper graph. It creates a
    new node for every path-, result-, or risk-affecting difference and never
    groups nodes into a separate canonical unit.
-4. Data availability covers every P×upstream-D requirement exactly once.
+4. Data availability covers every direct D→P source boundary exactly once.
    Orchestration propagates unavailable or unknown requirements forward and
    writes the hash-bound maximal claim scope.
 5. The PARTIAL gate records a scope-bound decision and proceeds by default.
