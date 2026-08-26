@@ -1711,6 +1711,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
         paper_markdown=state["paper_markdown"],
         paper_graph_path=state["paper_graph_path"],
         execution_scope_path=state["execution_scope_path"],
+        resources_path=state["resources_path"],
         data_dir=config.data,
         datasets=config.dataset_names,
         data_paths=config.dataset_paths,
