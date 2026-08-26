@@ -9,11 +9,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from medai.computation_providers import migrate_legacy_provider_inputs
 from medai.config import AutoResearchConfig, RunConfig
 
-MANIFEST_VERSION = 5
-SUPPORTED_MANIFEST_VERSIONS = {1, 2, 3, 4, MANIFEST_VERSION}
+MANIFEST_VERSION = 6
+SUPPORTED_MANIFEST_VERSIONS = {1, 2, 3, 4, 5, MANIFEST_VERSION}
 
 
 def build_run_inputs(config: RunConfig) -> dict[str, Any]:
@@ -125,18 +124,11 @@ class PipelineState:
         ):
             raise RuntimeError(f"Pipeline state has an invalid structure: {self.path}")
         if version != MANIFEST_VERSION:
-            if (
-                self.state.get("status") == "completed"
-                and self.state.get("stages", {}).get("report_agents", {}).get("status")
-                == "completed"
-                and "data_availability_agent" not in self.state.get("stages", {})
-            ):
-                self.state["legacy_full_scope"] = True
-            self.state["inputs"] = _migrate_dataset_inputs(
-                migrate_legacy_provider_inputs(self.state["inputs"])
+            raise RuntimeError(
+                f"Legacy manifest version {version} at {self.path} is read-only and cannot "
+                "be resumed or used as a new Auto Research base. Use a new output "
+                "directory and rerun the paper; no files were changed."
             )
-            self.state["version"] = MANIFEST_VERSION
-            self._save()
 
     @classmethod
     def create(cls, output: Path, inputs: dict[str, Any]) -> "PipelineState":
@@ -399,8 +391,9 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         "manifest.json",
         "preflight/resources.json",
         "preprocessing/paper.md",
-        "preprocessing/claims.json",
-        "preprocessing/experiment_todo.json",
+        "preprocessing/paper_graph.json",
+        "preprocessing/execution_scope.json",
+        "graph/node_state.json",
         "codegen/codebase/codegen_plan.json",
         "plan/replicate_plan.json",
         "replication/replication_log.json",
@@ -413,14 +406,13 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         )
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"Base run manifest is invalid: {base_run / 'manifest.json'}") from exc
-    legacy_full_scope = manifest_preview.get("legacy_full_scope") is True or (
-        isinstance(manifest_preview.get("version"), int)
-        and manifest_preview["version"] < 5
-        and manifest_preview.get("status") == "completed"
-        and "data_availability_agent" not in manifest_preview.get("stages", {})
-    )
-    if not legacy_full_scope:
-        required_files.append("preprocessing/execution_scope.json")
+    version = manifest_preview.get("version")
+    if version != MANIFEST_VERSION:
+        raise ValueError(
+            f"Legacy manifest version {version!r} at {base_run / 'manifest.json'} is "
+            "read-only and cannot be used as a new Auto Research base. Use a new output "
+            "directory and rerun the paper; no files were changed."
+        )
     digest = hashlib.sha256()
     for relative in required_files:
         path = base_run / relative

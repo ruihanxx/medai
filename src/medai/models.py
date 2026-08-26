@@ -11,6 +11,208 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class OpenModel(BaseModel):
+    """Small validated envelope whose scientific payload remains extensible."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class GraphNode(OpenModel):
+    id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    inputs: list[str]
+    method: Any
+    paper_result: Any = None
+    provenance: list[dict[str, Any]]
+
+    @model_validator(mode="after")
+    def unique_inputs(self) -> "GraphNode":
+        if len(self.inputs) != len(set(self.inputs)):
+            raise ValueError(f"Graph node {self.id} contains duplicate inputs")
+        if self.id in self.inputs:
+            raise ValueError(f"Graph node {self.id} cannot depend on itself")
+        return self
+
+
+class PaperGraph(OpenModel):
+    version: Literal[1] = 1
+    datasets: list[GraphNode]
+    preprocessing: list[GraphNode]
+    training: list[GraphNode]
+    models: list[GraphNode]
+    validations: list[GraphNode]
+    claims: list[GraphNode] = Field(min_length=1)
+
+    @property
+    def collections(self) -> tuple[tuple[str, list[GraphNode]], ...]:
+        return (
+            ("datasets", self.datasets),
+            ("preprocessing", self.preprocessing),
+            ("training", self.training),
+            ("models", self.models),
+            ("validations", self.validations),
+            ("claims", self.claims),
+        )
+
+    @property
+    def nodes(self) -> list[GraphNode]:
+        return [node for _, collection in self.collections for node in collection]
+
+    @property
+    def node_map(self) -> dict[str, GraphNode]:
+        return {node.id: node for node in self.nodes}
+
+    @property
+    def category_map(self) -> dict[str, str]:
+        return {
+            node.id: category
+            for category, collection in self.collections
+            for node in collection
+        }
+
+    @model_validator(mode="after")
+    def validate_graph(self) -> "PaperGraph":
+        nodes = self.nodes
+        node_ids = [node.id for node in nodes]
+        if len(node_ids) != len(set(node_ids)):
+            duplicates = sorted({node_id for node_id in node_ids if node_ids.count(node_id) > 1})
+            raise ValueError(f"Paper graph node IDs must be globally unique: {duplicates}")
+        known = set(node_ids)
+        unknown = sorted(
+            {input_id for node in nodes for input_id in node.inputs if input_id not in known}
+        )
+        if unknown:
+            raise ValueError(f"Paper graph inputs reference unknown node IDs: {unknown}")
+        for claim in self.claims:
+            if not claim.inputs:
+                raise ValueError(f"Claim node {claim.id} must have at least one input")
+
+        visiting: set[str] = set()
+        visited: set[str] = set()
+        node_map = self.node_map
+
+        def visit(node_id: str) -> None:
+            if node_id in visiting:
+                raise ValueError(f"Paper graph contains a cycle at {node_id}")
+            if node_id in visited:
+                return
+            visiting.add(node_id)
+            for input_id in node_map[node_id].inputs:
+                visit(input_id)
+            visiting.remove(node_id)
+            visited.add(node_id)
+
+        for node_id in node_ids:
+            visit(node_id)
+
+        consumers: dict[str, list[str]] = {node_id: [] for node_id in node_ids}
+        for node in nodes:
+            for input_id in node.inputs:
+                consumers[input_id].append(node.id)
+        claim_ids = {claim.id for claim in self.claims}
+        reaches_claim: dict[str, bool] = {}
+
+        def reaches(node_id: str) -> bool:
+            if node_id in reaches_claim:
+                return reaches_claim[node_id]
+            value = node_id in claim_ids or any(reaches(child) for child in consumers[node_id])
+            reaches_claim[node_id] = value
+            return value
+
+        orphaned = [node_id for node_id in node_ids if not reaches(node_id)]
+        if orphaned:
+            raise ValueError(f"Every paper graph node must reach a claim: {orphaned}")
+        return self
+
+
+class NodeIssue(OpenModel):
+    description: str = Field(min_length=1)
+
+    @field_validator("description")
+    @classmethod
+    def nonblank_description(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Issue description must not be blank")
+        return value
+
+
+class NodeUpdate(OpenModel):
+    source: str = Field(min_length=1)
+    node_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    issues: list[NodeIssue] = Field(default_factory=list)
+
+
+class PendingNodeUpdate(OpenModel):
+    """Agent-authored update before the orchestrator assigns its source."""
+
+    node_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    issues: list[NodeIssue] = Field(default_factory=list)
+
+
+class NodeState(OpenModel):
+    paper_graph_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    updates: list[NodeUpdate]
+
+    @model_validator(mode="after")
+    def unique_source_node_pairs(self) -> "NodeState":
+        pairs = [(update.source, update.node_id) for update in self.updates]
+        if len(pairs) != len(set(pairs)):
+            raise ValueError("Node-state updates must be unique by (source, node_id)")
+        return self
+
+
+class GraphDataRequirementAvailability(StrictModel):
+    preprocessing_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    dataset_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    source_kind: Literal["local", "cloud"] | None
+    source_name: str | None
+    required_content: str = Field(min_length=1)
+    status: Literal["available", "source_blocked", "unknown"]
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def source_fields_match(self) -> "GraphDataRequirementAvailability":
+        if (self.source_kind is None) != (self.source_name is None):
+            raise ValueError("source_kind and source_name must both be set or both be null")
+        if self.source_name is not None and not self.source_name.strip():
+            raise ValueError("source_name must not be blank")
+        return self
+
+
+class GraphDataAvailabilityReport(StrictModel):
+    capacity_decision: "CapacityDecision"
+    requirements: list[GraphDataRequirementAvailability]
+
+
+class BlockedNode(StrictModel):
+    node_id: str
+    status: Literal["source_blocked", "unknown"]
+    direct_data_blockers: list[str]
+    dependency_paths: list[list[str]]
+
+
+class GraphExecutionScope(StrictModel):
+    paper_graph_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    availability_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verdict: Literal["FULL", "PARTIAL", "NONE", "UNKNOWN"]
+    runnable_node_ids: list[str]
+    blocked_nodes: list[BlockedNode]
+    active_sources: list[str]
+    execution_location: Literal["local", "remote"] | None
+
+
+class GraphScopeRevisionIssue(StrictModel):
+    node_ids: list[str] = Field(min_length=1)
+    dataset_ids: list[str] = Field(min_length=1)
+    required_content: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
+class GraphScopeRevisionIssues(StrictModel):
+    scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    issues: list[GraphScopeRevisionIssue] = Field(min_length=1)
+
+
 class Provenance(StrictModel):
     page: int = Field(ge=1)
     section: str = Field(min_length=1)
