@@ -36,12 +36,14 @@ needed columns/aggregates and never substitute a missing paper-required input.
 
 Codegen edits only the copied codebase, plan, and allowed maintenance artifacts.
 It consumes only the runnable subgraph, inventories configured sources with
-bounded reads, follows the persisted execution location, and stops on absent
-required content. It resolves internal paper contradictions by implementing the
-best-supported interpretation that preserves overall methodological consistency
-and records the conflict, alternatives, rationale, evidence, and implementation
-location on the exact origin node; a contradiction alone is not a blocker. Its
-`node_updates` are open and aligned to graph node IDs.
+bounded reads and follows the persisted execution location. It stops only for
+concrete unavailable direct D→P content or a measured resource constraint. It
+resolves internal paper contradictions by implementing the best-supported
+interpretation that preserves overall methodological consistency and records the
+conflict, alternatives, rationale, evidence, and implementation location on the
+exact origin node. Paper inconsistencies, unsupported mappings, and unpublished
+manifests or parameters are resolved and recorded the same way, not treated as
+blockers. Its `node_updates` are open and aligned to graph node IDs.
 
 Audit treats source data and the codebase as read-only and writes only in its
 attempt directory. It covers all runnable P paths and accumulates every

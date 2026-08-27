@@ -100,8 +100,11 @@ For every runnable D→P boundary, cross-check the graph against the paper's
 Methods, cohort/data, training, validation, and external-validation text. Keep
 every named source, role, preprocessing path, linkage boundary, fitting or
 evaluation use, and output explicit. If the graph, paper, and available source
-cannot be reconciled without silently dropping a required input, stop
-explicitly instead of implementing only a subset or choosing a substitute.
+are inconsistent, choose and implement the interpretation most consistent with
+the paper overall, record the conflict, alternatives, and rationale on its exact
+origin node, and continue. Do not silently drop a required input or substitute
+another source; concrete unavailable D→P content follows the scope-revision
+procedure below.
 
 Claims and validations may originate from a figure or table. When implementing
 a runnable figure or chart, open and inspect its linked image artifact rather
@@ -254,8 +257,8 @@ runnable P and D IDs:
 ```
 
 Then return `blocked` so orchestration can rerun the availability stage.
-Technical failures and implementation defects remain ordinary `blocked` or
-`failed` outcomes and must never be mislabeled as unavailable source data.
+Technical failures and implementation defects remain ordinary `failed`
+outcomes and must never be mislabeled as unavailable source data.
 
 For large raw tables/dataframes, use this processing pattern: Reads large raw
 tables/dataframe in chunks or bounded batches, applies chunk-eligible
@@ -268,9 +271,11 @@ cannot be mapped directly to the available source, resolve the mapping only
 when the dataset schema, metadata, source-repository conventions, and relevant
 medical knowledge support it. Consult authoritative external sources for a
 general clinical or methodological convention when necessary, but never use
-them to invent a paper-specific fact or substitute a required source. If a
-material mapping remains unsupported, record it on its origin node and stop
-explicitly rather than guessing.
+them to invent a paper-specific fact or substitute a required source. When no
+mapping has direct paper support, choose and implement the mapping best supported
+by the dataset schema, source-repository conventions, accepted medical knowledge,
+and the paper's overall methodology; record the uncertainty, alternatives, and
+rationale on its exact origin node and continue.
 
 Do not skip, weaken, or obscure any requirement because of uncertainty. Record
 every evidence-backed non-direct mapping in the origin node's `node_updates`
@@ -634,10 +639,14 @@ exactly the structured result required by the supplied output schema:
 
 Use `completed` only after every owned codegen artifact is ready for
 orchestration validation, every runnable graph node passes the coverage audit,
-and no non-runnable source is accessed. Use `blocked` with a non-empty `error` for an
-irrecoverable missing external prerequisite. Use `failed` with a non-empty
-`error` for a provider, infrastructure, or technical operation that remains
-unsuccessful after its bounded recovery procedure. Do not create placeholder
-artifacts to obtain `completed`, and do not run a shell `exit 1` to report either
-terminal status.
+and no non-runnable source is accessed. Use `blocked` only for concrete
+unavailable direct D→P source content reported through the scope-revision
+procedure above or a measured resource constraint covered by the efficiency
+audit. Never treat an unpublished manifest, hyperparameter, paper omission,
+contradiction, or mapping decision as an external prerequisite; resolve it using
+the paper-consistency rules in Step 2.4, record the issue, and continue. Use
+`failed` with a non-empty `error` only for a provider, infrastructure, or
+technical operation that remains unsuccessful after its bounded recovery
+procedure. Do not create placeholder artifacts to obtain `completed`, and do not
+run a shell `exit 1` to report either terminal status.
 {% endif %}
