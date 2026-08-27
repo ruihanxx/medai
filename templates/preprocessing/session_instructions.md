@@ -1,16 +1,65 @@
-# Paper-graph preprocessing agent
+# Preprocessing agent
 
-Convert the medical paper into one complete, auditable claim-provenance graph.
+You are preprocessing a medical paper for reproduction at a later stage. The preprocessing involves:
+- audit the extracted Markdown, figures, tables, and formulas;
+- extract every structured, verifiable paper claim and its provenance;
+- encode the complete reproducible methodology as one D/P/T/M/V/C claim-provenance graph.
+
 Do not group work into experiments and do not write legacy claim/todo files.
 
-Read and audit `{{ paper_markdown }}`. Linked assets are under
-`{{ artifacts_dir }}`. For each local figure/table image, preserve its path and
-annotate its paper label and caption when supported by the surrounding text.
-Compare LaTeX with its source image when one is available and correct only
-image-supported transcription errors.
+## Available skills
+A catalog of scientific-computing skills is staged at
+`{{ skills_dir }}/`. Each subdirectory has a `SKILL.md` whose
+YAML frontmatter `description:` field summarizes when the skill applies.
+You may browse the catalog and use a skill if its description genuinely
+matches your work; many extractions will not need any skill, and that is fine.
 
-A catalog of optional scientific-computing skills is at `{{ skills_dir }}/`.
-Use a skill only when its description matches the extraction work.
+
+Read and edit the paper Markdown at `{{ paper_markdown }}`. Linked paper assets are under `{{ artifacts_dir }}`.
+
+## First: audit the paper Markdown
+
+Before extracting claims, revise `{{ paper_markdown }}` in place.
+- For every local `artifacts/...` image link, use its surrounding text and the linked image to identify its Figure/Table number and original caption. Annotate the link once as `Figure N. <caption>` or `Table N. <caption>` (use the image alt text; consolidate an adjacent duplicate caption). Preserve the exact asset path and do not invent labels or captions.
+- For each LaTeX formula, infer the corresponding source image from its position in the Markdown, open that exact local image with multimodal understanding, and compare its notation with the LaTeX. Correct only image-supported transcription errors, including symbols, operators, and subscripts/superscripts. If no corresponding image is available, leave the formula unchanged.
+
+Use the audited Markdown, labels, captions, and table content for Figure/Table validation anchors.
+
+## Your task
+
+### Paper-level claim extraction
+
+Read the audited paper Markdown. Create one C node for every claim that:
+- Reports a result, observation, measurement, or behavior of the system under study, AND
+- Could plausibly be checked by inspecting outputs that the paper's code is expected to produce.
+
+DO NOT create C nodes for:
+- Configuration values, hyperparameters, or method choices the authors *prescribe* for their own run. These are graph method inputs, not results to verify.
+- Background, motivation, or related-work claims.
+- Limitations or future-work statements.
+- Citations to other papers.
+- Figures or Tables as claims by themselves. If a Figure/Table contains a validation anchor, encode the anchor's content as a normal C node.
+
+The graph envelope is open. For each C, add these paper-specific fields when they improve auditability:
+
+| Field | Description |
+|---|---|
+| `statement` | One sentence stating the claim in the paper's terminology, with enough context to avoid ambiguity. |
+| `role` | `final` for a final reproducible result or `validation` for a supporting intermediate/cohort/method anchor. |
+| `kind` | `text` or `numeric`, based on the reported content. |
+| `paper_result` | The explicitly reported value or concise observation; use `null` when none is stated. |
+| `provenance` | One or more source objects with section, positive page number when recoverable, and a source-exact quote/caption of at most 200 characters. |
+
+`C.method` must record the comparison, aggregation, or transformation from its direct V inputs to the conclusion; it is not a substitute for `statement` or `paper_result`.
+
+Role definitions:
+
+- **`final`** — the paper's final reproducible results.
+- **`validation`** — byproducts and method reference anchors, including Figure/Table anchors, intermediate measurements, cohort construction statistics, or preprocessing observations that support final outcomes.
+
+For a Figure/Table validation anchor, put the checkable observation in `statement`, any explicit value in `paper_result`, the label and caption in provenance or an open `artifact` field, and connect the C to the V block that reproduces the observation. Extract only information explicitly stated in paper text or tables, not details visible only inside an image. Do not duplicate an anchor also stated in prose.
+
+Extract all final results and every validation anchor needed to interpret or audit them. Setup-level configuration such as model depth belongs in the appropriate P/T/M/V method, not in C.
 
 ## Output
 
@@ -45,6 +94,14 @@ Use any JSON shape needed inside method/result/provenance and add paper-specific
 fields when they materially improve auditability. Do not invent a closed
 taxonomy. `paper_result` is any explicitly reported value or observation and
 is `null` when none is reported.
+
+## Paper-level source and resource inventory
+
+Before completing the graph, make an explicit dataset inventory from the Methods, cohort/data, experiment, external-validation, comparison, pooling, and transfer-learning sections. Create one concrete D node for every paper dataset or source cohort actually consumed by a reproduced path. Use the paper's exact dataset/cohort name rather than phrases such as "the data", "all datasets", or "the external dataset".
+
+For every consumer path, record the dataset-specific role and usage in the local P/T/V method: training, internal validation, external validation, comparison, pooled analysis, the applicable cohort/subset or split, preprocessing/linkage, fitting/evaluation action, and produced comparison. When paths combine datasets, represent and describe each source separately before the merge, transfer, or comparison. A derived cohort must trace through P inputs to its source D. Cross-check every C path against the inventory so no consumed dataset is missing and no unused paper dataset is attached by relevance alone.
+
+Infer full-scale computational demand from the paper and place evidence-bound requirements on the relevant P/T/V node method or an open `computational_demand` field. Search the Markdown case-insensitively for `nvidia`, `memory`, `gpu`, `cpu`, `GB`, and `rtx`. Record paper-stated processor, memory, GPU count/model/VRAM, and workload scale when available, and clearly distinguish paper-stated requirements from inference. For CPU-only work with no stated hardware, record the omission and use eight physical cores as the default sufficient capacity; do not infer a larger requirement from dataset size alone. Leave peak memory, work-disk, and runtime as implementation-dependent estimates when the intended streaming/chunked path and a representative probe are not yet known; do not write `NA`.
 
 ## Node meaning and granularity
 
