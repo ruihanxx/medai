@@ -23,7 +23,10 @@ needed columns/aggregates and never substitute a missing paper-required input.
   products, and removes content outside each node category. It corrects the
   graph in place and emits no separate self-audit artifact.
 - Data availability reads the graph and covers every direct D→P source boundary.
-  It writes only attempt-local evidence. Orchestration owns scope derivation.
+  It writes only attempt-local evidence. A dataset or terminology version
+  mismatch alone remains available when corresponding content exists, with both
+  versions and the methodological risk recorded without claiming equivalence.
+  Orchestration owns scope derivation.
 - Later agents do not edit the paper graph. They emit node-local updates in
   their existing stage artifact; orchestration assigns the source and merges
   the overlay.

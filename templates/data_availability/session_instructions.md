@@ -27,6 +27,11 @@ Use only source-level evidence. A requirement is:
 - `source_blocked` when the required content is demonstrably unavailable;
 - `unknown` when inspection cannot determine availability.
 
+Do not use `source_blocked` solely for a dataset or terminology version
+mismatch: when a configured source contains the corresponding content in
+another version, mark it `available`, record both versions and the
+methodological risk in `evidence`, and do not claim equivalence.
+
 An available entry must set `source_kind` and `source_name` to one of the exact
 configured sources. A non-available entry may use null source fields. Preserve
 the distinction between unavailable and uncertain.
