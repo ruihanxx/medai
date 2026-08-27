@@ -276,19 +276,24 @@ Do not skip, weaken, or obscure any requirement because of uncertainty. Record
 every evidence-backed non-direct mapping in the origin node's `node_updates`
 entry in Step 2.5.
 
-### 2.4. Resolve paper omissions before implementation
+### 2.4. Resolve paper omissions and contradictions before implementation
 
 Before writing `codegen_plan.json` or code, make a complete pass through the
 methodology to identify every implementation decision that the paper does not
-state directly. This includes, where applicable, clinical definitions and
-coding, eligibility and exclusion rules, index time and follow-up windows,
-outcome and censoring rules, missing-data handling, preprocessing, covariate
-selection, split/grouping units, model fitting, and statistical reporting.
+state directly or states inconsistently. This includes, where applicable,
+clinical definitions and coding, eligibility and exclusion rules, index time
+and follow-up windows, outcome and censoring rules, missing-data handling,
+preprocessing, covariate selection, split/grouping units, model fitting, and
+statistical reporting.
 
 For each omission, resolve it before implementation when the evidence supports
 one faithful choice; do not leave a TODO, silently apply a library default, or
-substitute an arbitrary generic default. If no supported choice preserves the
-paper's semantics, record the issue on its exact origin node and stop explicitly.
+substitute an arbitrary generic default. For each internal contradiction, choose
+and implement the interpretation most strongly supported by the paper's explicit
+methods and unambiguous context and most consistent with the study design, the
+rest of the methodology, and the reported tables and figures. Do not stop solely
+because the paper contains conflicting statements; record the contradiction and
+the selected interpretation as an issue on its exact origin node.
 Use this order of precedence:
 
 1. The paper's explicit methods and unambiguous context.
@@ -300,13 +305,15 @@ Use this order of precedence:
    reporting guideline, or methodological reference rather than guessing.
 
 Implement the resulting choice exactly in code and configuration. Add one issue
-to the exact origin node's `node_updates` entry for each paper-underspecified
-decision. Its `description` must state what the paper omitted; its `assumption`,
-`rationale`, `evidence`, and `implementation_location` must state the chosen
-medical or methodological convention, why it is the best fit, what supports it,
-and where it is implemented. Do not copy the issue into descendants. These
-records document the resolution; they are not permission to defer
-implementation or invent paper-specific facts.
+to the exact origin node's `node_updates` entry for each paper-underspecified or
+internally contradictory decision. Its `description` must state what the paper
+omitted or which statements conflict; its `assumption`, `rationale`, `evidence`,
+and `implementation_location` must state the selected interpretation, why it is
+the best fit, what supports it, and where it is implemented. For a contradiction,
+also record the rejected interpretations in `alternatives` and explain why the
+selected interpretation best preserves the paper's overall consistency. Do not
+copy the issue into descendants. These records document the resolution; they are
+not permission to defer implementation or invent paper-specific facts.
 
 Do not directly read large data files. First read the available document to get basic informations.
 
