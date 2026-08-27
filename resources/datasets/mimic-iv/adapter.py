@@ -31,11 +31,11 @@ class UnsupportedFormatError(DatasetAdapterError):
 class DatasetAdapter:
     """Standard access layer for the MIMIC-IV dataset capsule.
 
-    The capsule combines MIMIC-IV with the separately versioned MIMIC-IV-ED
-    Demo component. No official local loader was present in raw/. This adapter
-    therefore uses the generated resource contract and a minimal CSV reader.
-    Pandas is used when available; otherwise load_table falls back to
-    list[dict].
+    The capsule combines MIMIC-IV v3.1 with the separately versioned full
+    MIMIC-IV-ED v2.2 component. No official local loader was present in raw/.
+    This adapter therefore uses the generated resource contract and a minimal
+    CSV reader. Pandas is used when available; otherwise load_table falls back
+    to list[dict].
     """
 
     def __init__(self, root: str | Path):

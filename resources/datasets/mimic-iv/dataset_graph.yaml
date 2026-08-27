@@ -1,5 +1,5 @@
 dataset_id: mimic-iv
-generated_at: '2026-08-20'
+generated_at: '2026-08-27'
 entities:
 - entity_id: patient
   description: individual patient
@@ -15,7 +15,7 @@ entities:
   - subject_id
   - hadm_id
 - entity_id: emergency_department_stay
-  description: one emergency department stay in the MIMIC-IV-ED Demo component
+  description: one emergency department stay in the full MIMIC-IV-ED component
   resource_ids:
   - edstays
   key_fields:
@@ -120,10 +120,11 @@ relationships:
   to_entity: patient
   join_fields:
   - subject_id
-  cardinality: many_to_one
+  cardinality: many_to_zero_or_one
   temporal_rule: null
-  evidence: MIMIC-IV-ED documentation defines subject_id as the patient identifier shared with MIMIC-IV.
-  confidence: high
+  evidence: MIMIC-IV-ED documentation defines subject_id as the patient identifier shared with MIMIC-IV; 39 of
+    205504 distinct local ED subjects are absent from the separately versioned local MIMIC-IV v3.1 patients table.
+  confidence: medium
 - relationship_id: ed_stay_links_to_hospital_admission
   from_entity: emergency_department_stay
   to_entity: hospital_admission
@@ -133,8 +134,9 @@ relationships:
   cardinality: many_to_zero_or_one
   temporal_rule: when hadm_id is populated, ED outtime should be at or near the linked hospital admission interval
   evidence: MIMIC-IV-ED documentation states that hadm_id is populated when an ED stay is followed by hospital
-    admission; every populated local ED hadm_id exists in the local admissions table.
-  confidence: high
+    admission; 26 of 202441 distinct populated local subject_id/hadm_id pairs are absent from the separately versioned
+    MIMIC-IV v3.1 admissions table.
+  confidence: medium
 - relationship_id: ed_event_belongs_to_ed_stay
   from_entity: emergency_department_event
   to_entity: emergency_department_stay
@@ -152,11 +154,12 @@ relationships:
   join_fields:
   - diagnosis.icd_code=d_icd_diagnoses.icd_code
   - diagnosis.icd_version=d_icd_diagnoses.icd_version
-  cardinality: many_to_one
+  cardinality: many_to_zero_or_one
   temporal_rule: null
   evidence: The ED diagnosis table supplies ICD code and version fields compatible with the MIMIC-IV ICD diagnosis
-    dictionary; all 288 observed local ED code/version keys resolve, and diagnosis retains its released icd_title.
-  confidence: high
+    dictionary; 5 of 13210 observed local ED code/version keys are absent from the separately versioned MIMIC-IV v3.1
+    dictionary, while diagnosis retains its released icd_title.
+  confidence: medium
 - relationship_id: transfer_belongs_to_admission
   from_entity: hospital_transfer
   to_entity: hospital_admission
@@ -270,14 +273,14 @@ temporal_structure:
     needs
 alignment_notes:
 - Use subject_id for patient-level linkage.
-- The local ED component is MIMIC-IV-ED Demo v2.2 (222 stays across 64 subjects), not the full MIMIC-IV-ED release;
-  do not infer full-release coverage from its presence.
+- The local ED component is the full MIMIC-IV-ED v2.2 release with 425087 stays across 205504 subjects.
 - Use ED stay_id only within edstays, diagnosis, medrecon, pyxis, triage, and vitalsign. ED stay_id and ICU stay_id
   name different identifier domains and must not be joined directly.
 - Link an admitted ED stay to the hospital module using populated edstays.hadm_id (and subject_id as a consistency
   guard); do not fabricate admission linkage for ED stays with null hadm_id.
-- All ED subject_id values and populated hadm_id values resolve in the local MIMIC-IV v3.1 patient/admission tables,
-  but preserve the separate MIMIC-IV-ED Demo v2.2 component provenance in derived artifacts.
+- Preserve the separate MIMIC-IV-ED v2.2 component provenance in derived artifacts. The local MIMIC-IV v3.1 core
+  tables do not resolve 39 ED subjects, 26 populated subject_id/hadm_id pairs, or 5 ED ICD code/version keys; treat
+  those rows as explicitly unlinked rather than dropping or guessing a match.
 - Use subject_id and hadm_id for admission-level linkage when hadm_id is present.
 - Use subject_id, hadm_id, and stay_id for ICU stay/event linkage when stay_id is present.
 - For hospital events lacking stay_id, align to ICU analyses only after admission linkage and temporal filtering
@@ -285,10 +288,10 @@ alignment_notes:
 - Dates are deidentified and shifted consistently within a patient; do not compare absolute years across patients
   without anchor-year guidance.
 unresolved_relationships:
-- source: MIMIC-IV-ED Demo v2.2 component
+- source: MIMIC-IV-ED v2.2 component
   target: MIMIC-IV v3.1 component
-  issue: the local components are separately versioned releases even though all observed ED patient and admission
-    identifiers resolve in the local core tables
+  issue: the local components are separately versioned releases; 39 ED subjects, 26 populated subject_id/hadm_id
+    pairs, and 5 ED ICD code/version keys do not resolve in the local core tables
   suggested_resolution: bind analyses to the local files and declared component versions; revalidate identifier and
     temporal coverage before substituting a different ED or core release
   confidence: medium
