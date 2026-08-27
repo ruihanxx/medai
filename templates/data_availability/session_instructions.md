@@ -19,6 +19,13 @@ Available local sources:
 Available cloud sources:
 {% for dataset, source in cloud_datasets %}- {{ dataset }}: `{{ source }}`
 {% endfor %}
+{% if dual_source %}
+When local resources are sufficient for faithful execution, inspect only the
+local sources and choose `execution_location: local`. Do not inspect cloud
+sources, search offers, create remote state or instances, or materialize cloud
+data. Use cloud sources only when concrete resource evidence requires remote
+execution.
+{% endif %}
 
 Use only source-level evidence. A requirement is:
 
