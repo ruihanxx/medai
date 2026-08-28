@@ -508,10 +508,10 @@ Assessment: close
 
 ## Claim comparison
 
-| C_i | Type | Paper result | Agent comparison |
-| --- | --- | --- | --- |
-| C1 | validation | 0.8 | close |
-| C2 | final | 0.75 | close |
+| C_i | Type | Paper result | Replication result | Agent comparison |
+| --- | --- | --- | --- | --- |
+| C1 | validation | 0.8 | available | close |
+| C2 | final | 0.75 | available | close |
 
 ## Artifact reproduction
 

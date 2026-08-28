@@ -35,10 +35,13 @@ empty `issues` list means that no issue was recorded for that node.
 
 ## Evidence rules
 
-Read every per-claim report. In the claim table, copy the claim's `Assessment:`
-value exactly; it must remain one of `close`, `not close`, or `not assessable`.
-Use the paper result from the claim index, presenting structured values
-compactly without dropping components.
+Read every per-claim report. In the claim table, copy both the
+`Reproduced result:` content and the `Assessment:` value from that claim's
+fragment. Present the reproduced result compactly but preserve every component
+needed to understand the comparison; use `not produced` when that is the
+fragment's result. The assessment must remain exactly one of `close`,
+`not close`, or `not assessable`. Use the paper result from the claim index,
+presenting structured values compactly without dropping components.
 
 Inventory every explicitly named paper artifact (Figure, Table, Supplementary
 Figure, Supplementary Table, or equivalent named artifact) found in the paper
@@ -79,9 +82,9 @@ detailed evidence.
 
 ## Claim comparison
 
-| C_i | Type | Paper result | Agent comparison |
-| --- | --- | --- | --- |
-| C1 | validation | ... | close |
+| C_i | Type | Paper result | Replication result | Agent comparison |
+| --- | --- | --- | --- | --- |
+| C1 | validation | ... | ... | close |
 
 ## Artifact reproduction
 
@@ -105,7 +108,8 @@ detailed evidence.
 Escape Markdown table pipes inside values and replace embedded newlines with
 `<br>`. Before finishing, reread the report and verify: all four sections occur
 once and in order; every claim occurs once in both claim tables and follows
-graph order; every paper artifact occurs once in paper order; every reproduced
-path exists relative to the run root or is `not produced`; every graph node
-occurs once; every supplied issue appears only on its origin node; and the node
-issues table is the last content in the file.
+graph order; every claim row contains its paper result, reproduced result, and
+unchanged assessment; every paper artifact occurs once in paper order; every
+reproduced path exists relative to the run root or is `not produced`; every
+graph node occurs once; every supplied issue appears only on its origin node;
+and the node issues table is the last content in the file.
