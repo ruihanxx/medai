@@ -22,7 +22,8 @@ contain a copied paper repository. Inspect it before deciding what to create.
 By the end of this session, the directory at `{{ codebase_dir }}/` must contain a runnable
 implementation of the runnable paper-graph subgraph with scientific fidelity
 across every method, including all preprocessing, model-construction, training,
-and evaluation details, and with explicit failure.
+and evaluation details. Report an explicit failure only when a failure condition
+described below actually occurs; never invent or hard-code a failure condition.
 
 
 ## Inputs
