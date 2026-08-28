@@ -53,7 +53,6 @@ from medai.models import (
     validate_refinement_graph,
     validate_replication_log,
     validate_replication_plan,
-    validate_reproduction_report,
     validate_smart_replicate_log,
     validate_validation_contracts,
     validate_validation_weights,
@@ -420,7 +419,8 @@ def _validate_base_run(config: AutoResearchConfig) -> None:
         report_text = report_path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
         raise RuntimeError(f"Base reproduction report is missing: {report_path}") from exc
-    validate_reproduction_report(report_text, graph)
+    if not report_text.strip():
+        raise RuntimeError(f"Base reproduction report is empty: {report_path}")
 
     if base_state.state["inputs"].get("smart_replicate"):
         runnable = set(scope.runnable_node_ids)

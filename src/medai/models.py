@@ -1123,35 +1123,6 @@ def validate_smart_replicate_log(claim: GraphNode, log: SmartReplicateLog) -> No
         raise ValueError(f"Smart-replicate paper result does not match claim {claim.id}")
 
 
-def validate_reproduction_report(
-    report_text: str,
-    graph: PaperGraph,
-) -> None:
-    report_headings = list(
-        re.finditer(r"^# Reproduction Report\r?$", report_text, re.MULTILINE)
-    )
-    if len(report_headings) != 1:
-        raise ValueError("Report must contain exactly one `# Reproduction Report` heading")
-    markers = [f"## Claim {claim.id}" for claim in graph.claims]
-    matches = {
-        marker: list(
-            re.finditer(rf"^{re.escape(marker)}\r?$", report_text, re.MULTILINE)
-        )
-        for marker in markers
-    }
-    missing = [marker for marker in markers if len(matches[marker]) != 1]
-    if missing:
-        raise ValueError(f"Report must contain each claim exactly once: {missing}")
-    positions = [matches[marker][0].start() for marker in markers]
-    if positions != sorted(positions):
-        raise ValueError("Report claim sections are not in paper-graph order")
-    for claim in graph.claims:
-        start = report_text.index(f"## Claim {claim.id}")
-        later = [position for position in positions if position > start]
-        end = min(later) if later else len(report_text)
-        validate_claim_report(report_text[start:end], claim.id, heading_level=2)
-
-
 def validate_claim_report(
     report_text: str,
     claim_id: str,

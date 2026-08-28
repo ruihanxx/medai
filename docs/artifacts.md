@@ -33,6 +33,7 @@ runs/<run_id>/
 │   └── claims/<claim_id>/smart_replicate_log.json
 ├── report/
 │   ├── reproduction_report.md
+│   ├── report_transcript.jsonl
 │   └── claims/<claim_id>{.md,_transcript.jsonl}
 ├── prompts/
 ├── resume_history/resume_<NNN>/
@@ -133,10 +134,16 @@ paper-graph order, and its `verifies` list equals that layer exactly. The
 verified node, its step description identifies every direct
 predecessor node artifact consumed, the local operation, and the concrete
 artifact/result produced; `expected_outcome` identifies the persistent output
-available to downstream steps. The final report contains each C exactly once in graph order. Every claim
-fragment contains the paper result, reproduced result, upstream results, direct
-comparison, scope blockers, exact lineage issues/paths, and exactly one of
-`close`, `not close`, or `not assessable`.
+available to downstream steps. Every claim fragment contains the paper result,
+reproduced result, upstream results, direct comparison, scope blockers, exact
+lineage issues/paths, and exactly one of `close`, `not close`, or
+`not assessable`. After all fragments complete, a final report agent writes four
+ordered Markdown tables: every C in graph order with its `final`/`validation`
+role, paper result, and unchanged assessment; every named paper Figure/Table
+artifact with its real reproduced path and artifact-level assessment; every C
+with its fragment path; and every graph node with only its origin-local issues.
+The final report is checked for existence and non-empty content but is not
+governed by a static Markdown schema.
 
 ## Auto Research
 

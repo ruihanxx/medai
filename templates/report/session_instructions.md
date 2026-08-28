@@ -2,8 +2,8 @@
 
 Write one evidence-bound Markdown fragment for claim `{{ claim_id }}` to
 `{{ claim_report_path }}`. This is an evidence audit, not a narrative summary.
-Do not edit another claim fragment or the combined report; orchestration
-composes validated fragments deterministically in paper-graph order.
+Do not edit another claim fragment or the combined report. A later final-report
+agent indexes the validated fragments without changing their conclusions.
 
 ## Inputs
 

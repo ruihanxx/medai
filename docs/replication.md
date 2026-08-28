@@ -27,8 +27,10 @@ grouping. One run executes these stages:
     for every runnable node.
 11. Smart Replicate, when enabled, checkpoints only runnable claims having a
     paper result under `replication/claims/<claim_id>/`.
-12. Reporting checkpoints each C independently, collects only its actual
-    ancestors' issues, and composes the final report in paper-graph order.
+12. Reporting checkpoints each C independently and collects only its actual
+    ancestors' issues. A final report agent then indexes the completed fragments,
+    named paper artifacts, claim paths, and origin-local node issues into the
+    four-table report defined in `artifacts.md`.
 
 All graph inputs are AND dependencies. Availability blocking therefore flows
 through every downstream consumer. The final scope verdict is claim-based:

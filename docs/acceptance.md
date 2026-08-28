@@ -34,7 +34,7 @@ codegen/audit/refinement/planning, exact setup-plus-topological-layer plan
 structure and coverage of all active nodes, failure on
 missing actual result or evidence, node-level resume with predecessor
 invalidation and preserved snapshots, per-claim report checkpoints/resume,
-claim-keyed Smart Replicate logs, deterministic report composition, and
+claim-keyed Smart Replicate logs, final report agent handoff, and
 path-relevant issues only. Plan prompt coverage pins per-node predecessor
 artifact descriptions and the mandatory reverse C-to-D artifact-flow audit.
 Direct-Codex tests also cover structured terminal

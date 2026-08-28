@@ -38,7 +38,6 @@ from medai.models import (
     validate_claim_report,
     validate_replication_log,
     validate_replication_plan,
-    validate_reproduction_report,
     validate_smart_replicate_log,
 )
 from medai.pipeline_state import PipelineState
@@ -602,19 +601,6 @@ def _run_agent_command(
     }
     write_json(result_path, result)
     return result
-
-
-def _compose_reproduction_report(graph: PaperGraph, claims_dir: Path, report_path: Path) -> None:
-    sections = ["# Reproduction Report"]
-    for claim in graph.claims:
-        fragment_path = claims_dir / f"{claim.id}.md"
-        fragment = fragment_path.read_text(encoding="utf-8").strip()
-        validate_claim_report(fragment, claim.id)
-        sections.append(fragment.replace(f"# Claim {claim.id}", f"## Claim {claim.id}", 1))
-    temporary = report_path.with_name(f".{report_path.name}.tmp")
-    temporary.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
-    temporary.replace(report_path)
-    validate_reproduction_report(report_path.read_text(encoding="utf-8"), graph)
 
 
 def read_audit_verdict(report_path: Path) -> str:
@@ -2816,11 +2802,11 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     node_state = load_node_state(Path(state["node_state_path"]))
     report_path = config.output / "report" / "reproduction_report.md"
     claims_dir = config.output / "report" / "claims"
+    final_transcript_path = config.output / "report" / "report_transcript.jsonl"
     claims_dir.mkdir(parents=True, exist_ok=True)
     if pipeline_state.is_stage_completed("report_agents"):
-        if not report_path.is_file():
+        if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"Completed reproduction report is missing: {report_path}")
-        validate_reproduction_report(report_path.read_text(encoding="utf-8"), graph)
         for claim in graph.claims:
             fragment_path = claims_dir / f"{claim.id}.md"
             validate_claim_report(fragment_path.read_text(encoding="utf-8"), claim.id)
@@ -2935,13 +2921,80 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
                 "completed_claims": [item.id for item in graph.claims if item.id in completed_claims]
             },
         )
-    _compose_reproduction_report(graph, claims_dir, report_path)
+
+    claim_index = [
+        {
+            "claim_id": claim.id,
+            "type": claim.model_dump(mode="json").get("role"),
+            "paper_result": claim.paper_result,
+            "claim_report_path": str(Path("report") / "claims" / f"{claim.id}.md"),
+        }
+        for claim in graph.claims
+    ]
+    node_issue_index = []
+    for node in graph.nodes:
+        issues = []
+        for update in node_state.updates:
+            if update.node_id != node.id:
+                continue
+            issues.extend(
+                {
+                    "source": update.source,
+                    "description": issue.description,
+                }
+                for issue in update.issues
+            )
+        node_issue_index.append({"node_id": node.id, "issues": issues})
+
+    final_prompt_path = render_prompt(
+        "report/final_session_instructions.md",
+        config.output / "prompts" / "report_final.md",
+        report_path=report_path,
+        run_dir=config.output,
+        paper_markdown=state["paper_markdown"],
+        paper_artifacts=config.output / "preprocessing" / "artifacts",
+        paper_graph_path=state["paper_graph_path"],
+        node_state_path=state["node_state_path"],
+        execution_scope_path=state["execution_scope_path"],
+        replication_log_path=config.output / "replication" / "replication_log.json",
+        claims_dir=claims_dir,
+        claim_index_json=json.dumps(claim_index, ensure_ascii=False, indent=2),
+        node_issue_index_json=json.dumps(
+            node_issue_index,
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+
+    def validate_final_report_output() -> None:
+        if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
+            raise RuntimeError(f"Final report agent did not write report: {report_path}")
+
+    session_id = run_agent(
+        provider=config.provider,
+        prompt_path=final_prompt_path,
+        working_dir=config.output,
+        transcript_path=final_transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+    )
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name="report_final",
+        session_id=session_id,
+        working_dir=config.output,
+        transcript_path=final_transcript_path,
+        artifact_paths=[report_path],
+        validate=validate_final_report_output,
+    )
     pipeline_state.complete_stage(
         "report_agents",
         [
             str(report_path),
             *(str(claims_dir / f"{claim.id}.md") for claim in graph.claims),
             *transcript_paths,
+            str(final_transcript_path),
         ],
     )
     scope_path = Path(state["execution_scope_path"])

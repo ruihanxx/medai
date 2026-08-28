@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from medai.artifacts import write_json
 from medai.config import RunConfig
 from medai.data_availability import sha256_file
@@ -15,13 +14,11 @@ from medai.models import (
     ReplicationPlan,
     replication_topological_layers,
     validate_replication_plan,
-    validate_reproduction_report,
 )
 from medai.pipeline_state import PipelineState, build_run_inputs
 from medai.prompts import render_prompt
 from medai.study_graph import write_empty_node_state
 from medai.workflow import (
-    _compose_reproduction_report,
     _inspect_completed_replication_nodes,
     prepare_replication_resume,
     report_agents_node,
@@ -427,76 +424,6 @@ def test_explicit_resume_preserves_log_and_recovers_archived_nodes(tmp_path: Pat
     assert PipelineState(output).get_stage_status("plan_agent") == "invalidated"
 
 
-def test_claim_fragments_are_composed_in_graph_order(tmp_path: Path) -> None:
-    graph = _graph()
-    claims_dir = tmp_path / "claims"
-    claims_dir.mkdir()
-    fragment = """# Claim C1
-
-Paper result: 0.8
-
-Reproduced result: 0.79
-
-Upstream node results: D1 -> P1 -> V1
-
-Direct comparison: relative error 1.25%
-
-Scope blockers: none
-
-Lineage issues: none
-
-Assessment: close
-"""
-    (claims_dir / "C1.md").write_text(fragment, encoding="utf-8")
-    report_path = tmp_path / "reproduction_report.md"
-
-    _compose_reproduction_report(graph, claims_dir, report_path)
-
-    report = report_path.read_text(encoding="utf-8")
-    assert report.startswith("# Reproduction Report\n\n## Claim C1")
-
-
-def test_reproduction_report_distinguishes_prefix_claim_ids() -> None:
-    graph = PaperGraph.model_validate(
-        {
-            "version": 1,
-            "datasets": [_node("D1", [])],
-            "preprocessing": [_node("P1", ["D1"])],
-            "training": [],
-            "models": [],
-            "validations": [_node("V1", ["P1"])],
-            "claims": [
-                _node("C1", ["V1"], result=0.8),
-                _node("C10", ["V1"], result=0.7),
-            ],
-        }
-    )
-    report = """# Reproduction Report
-
-## Claim C1
-
-Paper result: 0.8
-Reproduced result: 0.79
-Upstream node results: D1 -> P1 -> V1
-Direct comparison: relative error 1.25%
-Scope blockers: none
-Lineage issues: none
-Assessment: close
-
-## Claim C10
-
-Paper result: 0.7
-Reproduced result: 0.69
-Upstream node results: D1 -> P1 -> V1
-Direct comparison: relative error 1.43%
-Scope blockers: none
-Lineage issues: none
-Assessment: close
-"""
-
-    validate_reproduction_report(report, graph)
-
-
 def test_legacy_manifest_is_rejected_without_writeback(tmp_path: Path) -> None:
     output = tmp_path / "legacy"
     output.mkdir()
@@ -567,9 +494,49 @@ Assessment: close
 
     def fake_run_agent(**kwargs):
         prompt = Path(kwargs["prompt_path"]).read_text(encoding="utf-8")
-        assert "C2" in prompt
-        invoked.append("C2")
-        (claims_dir / "C2.md").write_text(fragment("C2", "0.75"), encoding="utf-8")
+        if "# Claim report agent" in prompt:
+            assert "C2" in prompt
+            invoked.append("C2")
+            (claims_dir / "C2.md").write_text(
+                fragment("C2", "0.75"), encoding="utf-8"
+            )
+        else:
+            assert "# Final reproduction report agent" in prompt
+            invoked.append("final")
+            (output / "report" / "reproduction_report.md").write_text(
+                """# Reproduction Report
+
+## Claim comparison
+
+| C_i | Type | Paper result | Agent comparison |
+| --- | --- | --- | --- |
+| C1 | validation | 0.8 | close |
+| C2 | final | 0.75 | close |
+
+## Artifact reproduction
+
+| Paper artifact | Reproduced artifact path | Assessment |
+| --- | --- | --- |
+
+## Claim report paths
+
+| C_i | Path |
+| --- | --- |
+| C1 | report/claims/C1.md |
+| C2 | report/claims/C2.md |
+
+## Node issues
+
+| Node | Issues |
+| --- | --- |
+| D1 | none |
+| P1 | none |
+| V1 | none |
+| C1 | none |
+| C2 | none |
+""",
+                encoding="utf-8",
+            )
         Path(kwargs["transcript_path"]).write_text("{}\n", encoding="utf-8")
         return "session"
 
@@ -592,8 +559,9 @@ Assessment: close
 
     report_agents_node(state)  # type: ignore[arg-type]
 
-    assert invoked == ["C2"]
+    assert invoked == ["C2", "final"]
     checkpoint = PipelineState(output).get_stage_checkpoints("report_agents")
     assert checkpoint["completed_claims"] == ["C1", "C2"]
     report = (output / "report" / "reproduction_report.md").read_text(encoding="utf-8")
-    assert report.index("## Claim C1") < report.index("## Claim C2")
+    assert report.index("## Claim comparison") < report.index("## Artifact reproduction")
+    assert report.index("## Claim report paths") < report.index("## Node issues")

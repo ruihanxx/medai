@@ -304,7 +304,7 @@ flowchart LR
 | <code>cohort_refine_agent</code> | After audit failure, changes only cohort construction, loading, preprocessing, and affected P-local updates. | Numbered attempt directories and overlay updates |
 | <code>plan_agent</code> | Covers every runnable node, prepares dependencies, smoke-tests, and writes the plan. | <code>plan/replicate_plan.json</code> |
 | <code>replicate_agent</code> | Executes the runnable graph at paper full scale and saves a result/evidence update for every active node. | <code>replication_log.json</code>, <code>evidence_summary.json</code> |
-| <code>report_agents</code> | Writes one fragment per C with upstream results, direct comparison, blockers, and exact lineage issues. | <code>report/claims/</code>, <code>reproduction_report.md</code> |
+| <code>report_agents</code> | Writes one evidence fragment per C, then indexes claims, paper artifacts, claim paths, and origin-local node issues into four final tables. | <code>report/claims/</code>, <code>reproduction_report.md</code> |
 
 ### Auto Research workflow
 
@@ -661,7 +661,7 @@ flowchart LR
 | <code>cohort_refine_agent</code> | 审计失败后仅调整队列构建、加载、预处理及受影响 P 的局部更新。 | 编号尝试目录与 overlay 更新 |
 | <code>plan_agent</code> | 覆盖全部可运行节点、准备依赖、烟雾测试并写计划。 | <code>plan/replicate_plan.json</code> |
 | <code>replicate_agent</code> | 按论文完整规模执行可运行图，为每个活跃节点保存真实结果和证据。 | <code>replication_log.json</code>、<code>evidence_summary.json</code> |
-| <code>report_agents</code> | 每个 C 独立报告上游结果、直接比较、阻断和精确 lineage issue。 | <code>report/claims/</code>、<code>reproduction_report.md</code> |
+| <code>report_agents</code> | 每个 C 独立生成证据片段，再将 claim、论文 artifact、claim 路径与节点原位 issue 汇总为四张最终表格。 | <code>report/claims/</code>、<code>reproduction_report.md</code> |
 
 ### Auto Research 改进流程
 

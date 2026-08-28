@@ -75,10 +75,15 @@ actual results and real evidence for every runnable node, and never modifies
 source data. On resume it consumes the host-validated completed/pending node
 partition, rechecks completed artifact shape before use, skips completed nodes,
 and executes pending nodes in plan-layer order. The graph node, not an internal
-phase of a long command, is the orchestration resume boundary. Smart Replicate receives only assigned claim anchors and writes
-claim-specific round logs. Reporting receives one C, its real ancestors,
-relevant updates/blockers, and `collect_lineage_issues(C)`; it writes one claim
-fragment.
+phase of a long command, is the orchestration resume boundary. Smart Replicate
+receives only assigned claim anchors and writes claim-specific round logs.
+Per-claim reporting receives one C, its real ancestors, relevant
+updates/blockers, and `collect_lineage_issues(C)`; it writes one claim fragment.
+After all fragments complete, the final report agent reads the paper,
+graph-ordered claim index, complete node issue index, fragments, and real
+replication outputs. It copies claim assessments unchanged and writes only the
+four report index tables defined in `artifacts.md`; it does not redo a claim's
+scientific judgment or propagate issues to descendants.
 
 ## Auto Research boundaries
 
