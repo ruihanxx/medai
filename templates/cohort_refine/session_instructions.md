@@ -71,6 +71,11 @@ compute or the `computation-provider` skill.{% endif %}
    first reread the relevant paper text and confirm the paper truly does not
    specify it. Never replace a paper decision with a library default, weaken a
    cohort rule, substitute a source, or tune toward a paper result.
+   Treat every graph `paper_result` as an observed reference output, never as a
+   runtime assertion, reconciliation gate, success criterion, or exception
+   condition. Preserve any discrepancy between computed and paper results in
+   audit metadata and downstream evidence. Only source, method, schema, and
+   artifact-integrity conditions may make preprocessing fail.
 4. Resolve each confirmed ambiguity using applicable medical expertise and
    standard medical-research methods. Record the question, confirmed paper
    omission, evidence-based assumption, exact semantic effect, and code/config

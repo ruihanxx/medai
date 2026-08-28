@@ -55,6 +55,11 @@ open evidence/fix fields, and the orchestration route `preprocessing_fix` or
 `source_unavailable`. Cohort refinement may change only cohort construction,
 loading, preprocessing, directly related configuration, and affected P-local
 updates. Model, training, validation semantics, and results remain read-only.
+Cohort refinement treats graph `paper_result` values only as observed reference
+outputs: they cannot become runtime assertions, reconciliation gates, success
+criteria, or exception conditions. Computed discrepancies remain explicit in
+audit metadata and downstream evidence; only source, method, schema, and
+artifact-integrity conditions may fail preprocessing.
 
 Planning may add setup/smoke-test code but not scientific fallback semantics.
 Its steps collectively verify all runnable nodes. For every verified node, the

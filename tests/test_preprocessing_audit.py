@@ -4,6 +4,7 @@ import json
 
 import pytest
 
+from medai.prompts import TEMPLATES_DIR
 from medai.workflow import read_audit_report
 
 
@@ -43,3 +44,13 @@ def test_audit_report_rejects_inconsistent_or_empty_issues(tmp_path, payload) ->
     path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(RuntimeError):
         read_audit_report(path)
+
+
+def test_cohort_refinement_forbids_paper_result_gates() -> None:
+    prompt = (TEMPLATES_DIR / "cohort_refine" / "session_instructions.md").read_text(
+        encoding="utf-8"
+    )
+    prompt = " ".join(prompt.split())
+    assert "graph `paper_result` as an observed reference output" in prompt
+    assert "runtime assertion, reconciliation gate" in prompt
+    assert "Only source, method, schema, and artifact-integrity conditions" in prompt
