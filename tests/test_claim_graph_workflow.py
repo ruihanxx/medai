@@ -13,6 +13,7 @@ from medai.models import (
     PaperGraph,
     ReplicationPlan,
     validate_replication_plan,
+    validate_reproduction_report,
 )
 from medai.pipeline_state import PipelineState
 from medai.prompts import render_prompt
@@ -243,6 +244,47 @@ Assessment: close
 
     report = report_path.read_text(encoding="utf-8")
     assert report.startswith("# Reproduction Report\n\n## Claim C1")
+
+
+def test_reproduction_report_distinguishes_prefix_claim_ids() -> None:
+    graph = PaperGraph.model_validate(
+        {
+            "version": 1,
+            "datasets": [_node("D1", [])],
+            "preprocessing": [_node("P1", ["D1"])],
+            "training": [],
+            "models": [],
+            "validations": [_node("V1", ["P1"])],
+            "claims": [
+                _node("C1", ["V1"], result=0.8),
+                _node("C10", ["V1"], result=0.7),
+            ],
+        }
+    )
+    report = """# Reproduction Report
+
+## Claim C1
+
+Paper result: 0.8
+Reproduced result: 0.79
+Upstream node results: D1 -> P1 -> V1
+Direct comparison: relative error 1.25%
+Scope blockers: none
+Lineage issues: none
+Assessment: close
+
+## Claim C10
+
+Paper result: 0.7
+Reproduced result: 0.69
+Upstream node results: D1 -> P1 -> V1
+Direct comparison: relative error 1.43%
+Scope blockers: none
+Lineage issues: none
+Assessment: close
+"""
+
+    validate_reproduction_report(report, graph)
 
 
 def test_legacy_manifest_is_rejected_without_writeback(tmp_path: Path) -> None:

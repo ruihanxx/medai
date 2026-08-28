@@ -1077,13 +1077,22 @@ def validate_reproduction_report(
     report_text: str,
     graph: PaperGraph,
 ) -> None:
-    if report_text.count("# Reproduction Report") != 1:
+    report_headings = list(
+        re.finditer(r"^# Reproduction Report\r?$", report_text, re.MULTILINE)
+    )
+    if len(report_headings) != 1:
         raise ValueError("Report must contain exactly one `# Reproduction Report` heading")
     markers = [f"## Claim {claim.id}" for claim in graph.claims]
-    missing = [marker for marker in markers if report_text.count(marker) != 1]
+    matches = {
+        marker: list(
+            re.finditer(rf"^{re.escape(marker)}\r?$", report_text, re.MULTILINE)
+        )
+        for marker in markers
+    }
+    missing = [marker for marker in markers if len(matches[marker]) != 1]
     if missing:
         raise ValueError(f"Report must contain each claim exactly once: {missing}")
-    positions = [report_text.index(marker) for marker in markers]
+    positions = [matches[marker][0].start() for marker in markers]
     if positions != sorted(positions):
         raise ValueError("Report claim sections are not in paper-graph order")
     for claim in graph.claims:
@@ -1100,7 +1109,10 @@ def validate_claim_report(
     heading_level: int = 1,
 ) -> None:
     heading = f"{'#' * heading_level} Claim {claim_id}"
-    if report_text.count(heading) != 1:
+    heading_matches = list(
+        re.finditer(rf"^{re.escape(heading)}\r?$", report_text, re.MULTILINE)
+    )
+    if len(heading_matches) != 1:
         raise ValueError(f"Claim report must contain exactly one {heading!r} heading")
     required_labels = [
         "Paper result:",
