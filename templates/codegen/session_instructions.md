@@ -488,6 +488,9 @@ Treat every graph `paper_result` as an observed output, never as an
 implementation input, tuning target, seed-selection signal, fallback value, or
 criterion for choosing between plausible code paths. Never substitute synthetic
 data for a required source.
+Actual computed results may differ from `paper_result`; preserve and report the
+discrepancy. Never encode agreement with `paper_result` as an assertion,
+reconciliation gate, success criterion, or exception condition.
 
 Test for each numerical constant: *would this number change if the
 experiment were re-run? If yes, it is an output and must be computed.
