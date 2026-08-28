@@ -10,7 +10,7 @@ the contract files whose routing conditions match the change:
 | Auto Research eligibility, validation setup, idea graphs, audit, assessment, routing, or campaign state | `autoresearch.md` |
 | Canonical run paths, artifact fields, validation rules, evidence, or report structure | `artifacts.md` |
 | Prompt locations, agent information/mutation boundaries, transcripts, invocation handoffs, or the runtime-skill interface | `agents.md` |
-| Revising an artifact after feedback | `proportional_revision.md` |
+| Revising project files after feedback | `proportional_revision.md` |
 | Required local checks or mocked external boundaries | `acceptance.md` |
 
 For a cross-cutting change, read each matching row. Do not load unrelated
@@ -25,7 +25,7 @@ contract files by default.
 - `autoresearch.md`: Auto Research workflow contract.
 - `artifacts.md`: persistent path and artifact-validation contract.
 - `agents.md`: agent, prompt, invocation, and runtime-skill interface boundaries.
-- `proportional_revision.md`: proportional artifact-revision rules after feedback.
+- `proportional_revision.md`: proportional revision rules for project files after feedback.
 - `acceptance.md`: repository acceptance checks.
 - `../scripts/`: operator-maintained API guides and helpers for external
   services; these are not runtime skills or agent instructions.

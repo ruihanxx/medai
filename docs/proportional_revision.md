@@ -2,9 +2,9 @@
 
 ## Goal
 
-When revising an artifact after feedback, make changes proportional to the actual scope and severity of the issue.
+When revising project files after feedback, make changes proportional to the actual scope and severity of the issue.
 
-The revised artifact should normally read as if it had been written correctly from the beginning.
+The revised project files should normally read as if they had been written correctly from the beginning.
 
 ## Core Rules
 
@@ -16,7 +16,7 @@ If the user points out a local problem X:
 * fix anything that logically depends on X;
 * preserve unrelated correct content.
 
-Do not make X the new theme of the artifact merely because it was mentioned recently.
+Do not make X the new theme of the project files merely because it was mentioned recently.
 
 ### 2. Prefer the smallest complete revision
 
@@ -51,6 +51,6 @@ Before finishing:
 * Are all logically affected consequences fixed?
 * Did I change anything unrelated?
 * Did the latest feedback become disproportionately prominent?
-* Does the artifact read naturally without knowledge of the previous mistake?
+* Do the project files read naturally without knowledge of the previous mistake?
 
-If so, return the clean revised artifact.
+If so, return the clean revised project files.
