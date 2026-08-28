@@ -88,6 +88,7 @@ an actual replication result and evidence.
     {
       "source": "replicate_agent",
       "node_id": "V1",
+      "completion_status": "completed",
       "result": {},
       "evidence": ["replication/results/v1.json"],
       "issues": [{"description": "..."}]
@@ -109,6 +110,14 @@ structured, textual observations, or artifact descriptions. Issues remain at
 their origin. `collect_lineage_issues(node_id)` follows only actual ancestors,
 deduplicates equal content from the same origin, and returns its sources and
 origin-to-target paths.
+
+Replication updates use the open `completion_status` field to drive resume:
+`completed` is reusable after evidence and dependency validation; `incomplete`
+must execute again and is rejected from a final log. Older updates without the
+field are reusable only when they have a non-text structured result and valid
+evidence, which conservatively excludes legacy interruption/blocker prose.
+Resume snapshots remain under `resume_history/`; they do not replace or clear
+the canonical replication directory.
 
 Availability covers each direct D→P source boundary; inherited P dependencies
 are handled by graph propagation. `execution_scope.json` binds both paper-graph and availability-report hashes.

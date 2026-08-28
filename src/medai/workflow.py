@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import shutil
@@ -28,6 +29,7 @@ from medai.models import (
     GraphExecutionScope,
     GraphScopeRevisionIssues,
     PaperGraph,
+    PendingNodeUpdate,
     ReplicationLog,
     ReplicationPlan,
     SkillCorrectionsFile,
@@ -49,7 +51,6 @@ from medai.study_graph import (
     graph_ancestors,
     load_node_state,
     merge_node_updates,
-    remove_node_updates,
     write_empty_node_state,
 )
 
@@ -257,11 +258,11 @@ def _validate_agent_artifacts_with_resume(
             prompt_index += 1
 
 
-def resolve_replication_output(
+def _replication_output_candidates(
     value: str,
     codebase_dir: Path,
     replication_dir: Path,
-) -> Path:
+) -> list[Path]:
     raw_path = Path(value).expanduser()
     if raw_path.is_absolute():
         candidates = [raw_path]
@@ -277,6 +278,15 @@ def resolve_replication_output(
         candidates = [codebase_dir / raw_path, replication_dir / raw_path]
         if raw_path.parts and raw_path.parts[0] == "replication":
             candidates.append(replication_dir.parent / raw_path)
+    return candidates
+
+
+def resolve_replication_output(
+    value: str,
+    codebase_dir: Path,
+    replication_dir: Path,
+) -> Path:
+    candidates = _replication_output_candidates(value, codebase_dir, replication_dir)
 
     allowed_roots = [codebase_dir.resolve(), replication_dir.resolve()]
     for candidate in candidates:
@@ -289,6 +299,170 @@ def resolve_replication_output(
         "Replication output must be a file or directory inside the copied codebase or "
         f"replication directory: {value}"
     )
+
+
+def _replication_artifact_error(path: Path) -> str | None:
+    try:
+        if path.is_dir():
+            if not any(path.iterdir()):
+                return f"artifact directory is empty: {path}"
+            return None
+        if not path.is_file():
+            return f"artifact is missing: {path}"
+        if path.stat().st_size == 0:
+            return f"artifact file is empty: {path}"
+        if path.suffix == ".json":
+            json.loads(path.read_text(encoding="utf-8"))
+        elif path.suffix == ".gz":
+            with gzip.open(path, "rb") as stream:
+                for _ in iter(lambda: stream.read(1024 * 1024), b""):
+                    pass
+    except (EOFError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return f"artifact integrity check failed for {path}: {exc}"
+    return None
+
+
+def _canonical_replication_output(
+    value: str,
+    codebase_dir: Path,
+    replication_dir: Path,
+) -> Path | None:
+    allowed_roots = [codebase_dir.resolve(), replication_dir.resolve()]
+    for candidate in _replication_output_candidates(value, codebase_dir, replication_dir):
+        resolved = candidate.resolve()
+        if any(resolved.is_relative_to(root) for root in allowed_roots):
+            return resolved
+    return None
+
+
+def _archived_replication_output(archive_root: Path, value: str) -> Path | None:
+    raw_path = Path(value)
+    candidates: list[Path] = []
+    for marker, destination in (
+        (("codegen", "codebase"), archive_root / "referenced_codebase_outputs"),
+        (("replication",), archive_root / "replication"),
+    ):
+        for index in range(len(raw_path.parts) - len(marker) + 1):
+            if tuple(raw_path.parts[index : index + len(marker)]) == marker:
+                candidates.append(destination.joinpath(*raw_path.parts[index + len(marker) :]))
+                break
+    if not raw_path.is_absolute():
+        candidates.extend(
+            [
+                archive_root / "referenced_codebase_outputs" / raw_path,
+                archive_root / "replication" / raw_path,
+            ]
+        )
+    archive_resolved = archive_root.resolve()
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_relative_to(archive_resolved) and (
+            resolved.is_file() or resolved.is_dir()
+        ):
+            return resolved
+    return None
+
+
+def _load_replication_updates(log_path: Path) -> list[PendingNodeUpdate]:
+    try:
+        payload = json.loads(log_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return []
+    raw_updates = payload.get("node_updates") if isinstance(payload, dict) else None
+    if not isinstance(raw_updates, list):
+        return []
+    updates: list[PendingNodeUpdate] = []
+    for raw_update in raw_updates:
+        try:
+            updates.append(PendingNodeUpdate.model_validate(raw_update))
+        except ValueError:
+            continue
+    return updates
+
+
+def _inspect_completed_replication_nodes(state: WorkflowState) -> dict[str, Any]:
+    graph = _paper_graph(state)
+    scope = _execution_scope(state)
+    codebase_dir = Path(state["codebase_dir"])
+    replication_dir = state["config"].output / "replication"
+    updates = _load_replication_updates(replication_dir / "replication_log.json")
+    update_counts: dict[str, int] = {}
+    for update in updates:
+        update_counts[update.node_id] = update_counts.get(update.node_id, 0) + 1
+    updates_by_id = {
+        update.node_id: update for update in updates if update_counts[update.node_id] == 1
+    }
+    artifact_errors: dict[Path, str | None] = {}
+    reusable: set[str] = set()
+    pending_reasons: dict[str, str] = {}
+    runnable = set(scope.runnable_node_ids)
+
+    for layer in replication_topological_layers(graph, scope):
+        for node_id in layer:
+            node = graph.node_map[node_id]
+            missing_predecessors = [input_id for input_id in node.inputs if input_id not in reusable]
+            if missing_predecessors:
+                pending_reasons[node_id] = (
+                    "incomplete direct predecessors: " + ", ".join(missing_predecessors)
+                )
+                continue
+            if update_counts.get(node_id, 0) > 1:
+                pending_reasons[node_id] = "duplicate node updates"
+                continue
+            update = updates_by_id.get(node_id)
+            if update is None:
+                pending_reasons[node_id] = "missing node update"
+                continue
+            completion_status = getattr(update, "completion_status", None)
+            result = getattr(update, "result", None)
+            if completion_status is not None and completion_status != "completed":
+                pending_reasons[node_id] = (
+                    f"node update has non-completed status: {completion_status}"
+                )
+                continue
+            if completion_status is None and isinstance(result, str):
+                pending_reasons[node_id] = (
+                    "legacy textual result has no explicit completed status"
+                )
+                continue
+            if result is None or result == "" or result == [] or result == {}:
+                pending_reasons[node_id] = "node update has no result"
+                continue
+            evidence = getattr(update, "evidence", None)
+            if (
+                not isinstance(evidence, list)
+                or not evidence
+                or not all(isinstance(value, str) and value.strip() for value in evidence)
+            ):
+                pending_reasons[node_id] = "node update has no evidence paths"
+                continue
+            evidence_error = None
+            for value in evidence:
+                try:
+                    path = resolve_replication_output(value, codebase_dir, replication_dir)
+                except RuntimeError as exc:
+                    evidence_error = str(exc)
+                    break
+                if path not in artifact_errors:
+                    artifact_errors[path] = _replication_artifact_error(path)
+                if artifact_errors[path] is not None:
+                    evidence_error = artifact_errors[path]
+                    break
+            if evidence_error is not None:
+                pending_reasons[node_id] = evidence_error
+                continue
+            reusable.add(node_id)
+
+    ordered_ids = [node.id for node in graph.nodes if node.id in runnable]
+    return {
+        "completed_node_ids": [node_id for node_id in ordered_ids if node_id in reusable],
+        "pending_node_ids": [node_id for node_id in ordered_ids if node_id not in reusable],
+        "pending_reasons": {
+            node_id: pending_reasons[node_id]
+            for node_id in ordered_ids
+            if node_id in pending_reasons
+        },
+    }
 
 
 def validate_replication_artifacts(state: WorkflowState) -> list[str]:
@@ -306,6 +480,7 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
         replication_log_path.resolve(),
         evidence_summary_path.resolve(),
     }
+    artifact_errors: dict[Path, str | None] = {}
     for outcome in replication_log.step_outcomes:
         for output_file in outcome.output_files:
             resolved = resolve_replication_output(
@@ -313,6 +488,10 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
                 Path(state["codebase_dir"]),
                 replication_dir,
             )
+            if resolved not in artifact_errors:
+                artifact_errors[resolved] = _replication_artifact_error(resolved)
+            if artifact_errors[resolved] is not None:
+                raise RuntimeError(artifact_errors[resolved])
             if resolved in managed_artifacts:
                 raise RuntimeError(
                     f"Replication step {outcome.step_id} cannot cite a managed log "
@@ -330,6 +509,12 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
             f"extra={sorted(set(update_ids) - expected_ids)!r}"
         )
     for update in replication_log.node_updates:
+        completion_status = getattr(update, "completion_status", None)
+        if completion_status is not None and completion_status != "completed":
+            raise RuntimeError(
+                f"Runnable node {update.node_id} has non-completed status: "
+                f"{completion_status}"
+            )
         result = getattr(update, "result", None)
         if result is None or result == "" or result == [] or result == {}:
             raise RuntimeError(f"Runnable node {update.node_id} has no actual replication result")
@@ -346,6 +531,10 @@ def validate_replication_artifacts(state: WorkflowState) -> list[str]:
                 Path(state["codebase_dir"]),
                 replication_dir,
             )
+            if resolved not in artifact_errors:
+                artifact_errors[resolved] = _replication_artifact_error(resolved)
+            if artifact_errors[resolved] is not None:
+                raise RuntimeError(artifact_errors[resolved])
             if resolved in managed_artifacts:
                 raise RuntimeError(
                     f"Runnable node {update.node_id} cites a managed log as evidence: "
@@ -921,6 +1110,140 @@ def _validate_recorded_remote_state(
     )
 
 
+def _restore_archived_replication_output(source: Path, target: Path) -> None:
+    if source.resolve() == target.resolve():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.resume-restore.tmp")
+    if temporary.exists():
+        raise RuntimeError(f"Replication restore target already exists: {temporary}")
+    if source.is_file():
+        shutil.copy2(source, temporary)
+        temporary.replace(target)
+        return
+    if source.is_dir() and not target.exists():
+        shutil.copytree(source, temporary)
+        temporary.replace(target)
+        return
+    if not target.is_dir() or _replication_artifact_error(target) is not None:
+        raise RuntimeError(f"Cannot safely restore archived directory over: {target}")
+
+
+def _recover_archived_replication_nodes(config: RunConfig) -> list[str]:
+    graph_path = config.output / "preprocessing" / "paper_graph.json"
+    scope_path = config.output / "preprocessing" / "execution_scope.json"
+    node_state_path = config.output / "graph" / "node_state.json"
+    plan_path = config.output / "plan" / "replicate_plan.json"
+    if not all(path.is_file() for path in (graph_path, scope_path, node_state_path, plan_path)):
+        return []
+
+    graph = load_model(graph_path, PaperGraph)
+    scope = load_model(scope_path, GraphExecutionScope)
+    codebase_dir = config.output / "codegen" / "codebase"
+    replication_dir = config.output / "replication"
+    log_path = replication_dir / "replication_log.json"
+    sources: list[tuple[Path | None, list[PendingNodeUpdate]]] = [
+        (None, _load_replication_updates(log_path))
+    ]
+    history_root = config.output / "resume_history"
+    if history_root.is_dir():
+        for archive_root in sorted(history_root.glob("resume_[0-9][0-9][0-9]"), reverse=True):
+            sources.append(
+                (
+                    archive_root,
+                    _load_replication_updates(
+                        archive_root / "replication" / "replication_log.json"
+                    ),
+                )
+            )
+
+    candidates: dict[str, list[tuple[PendingNodeUpdate, list[tuple[Path, Path]]]]] = {}
+    integrity_cache: dict[Path, str | None] = {}
+    runnable = set(scope.runnable_node_ids)
+    for archive_root, updates in sources:
+        counts: dict[str, int] = {}
+        for update in updates:
+            counts[update.node_id] = counts.get(update.node_id, 0) + 1
+        for update in updates:
+            if update.node_id not in runnable or counts[update.node_id] != 1:
+                continue
+            completion_status = getattr(update, "completion_status", None)
+            result = getattr(update, "result", None)
+            if completion_status is not None and completion_status != "completed":
+                continue
+            if completion_status is None and isinstance(result, str):
+                continue
+            if result is None or result == "" or result == [] or result == {}:
+                continue
+            evidence = getattr(update, "evidence", None)
+            if (
+                not isinstance(evidence, list)
+                or not evidence
+                or not all(isinstance(value, str) and value.strip() for value in evidence)
+            ):
+                continue
+            resolved_evidence: list[tuple[Path, Path]] = []
+            for value in evidence:
+                target = _canonical_replication_output(value, codebase_dir, replication_dir)
+                if target is None:
+                    break
+                source = (
+                    _archived_replication_output(archive_root, value)
+                    if archive_root is not None
+                    else None
+                )
+                if source is None:
+                    try:
+                        source = resolve_replication_output(value, codebase_dir, replication_dir)
+                    except RuntimeError:
+                        break
+                if source not in integrity_cache:
+                    integrity_cache[source] = _replication_artifact_error(source)
+                if integrity_cache[source] is not None:
+                    break
+                resolved_evidence.append((source, target))
+            else:
+                candidates.setdefault(update.node_id, []).append(
+                    (update, resolved_evidence)
+                )
+
+    selected: dict[str, tuple[PendingNodeUpdate, list[tuple[Path, Path]]]] = {}
+    for layer in replication_topological_layers(graph, scope):
+        for node_id in layer:
+            node = graph.node_map[node_id]
+            if all(input_id in selected for input_id in node.inputs):
+                node_candidates = candidates.get(node_id, [])
+                if node_candidates:
+                    selected[node_id] = node_candidates[0]
+
+    for update, evidence_paths in selected.values():
+        for source, target in evidence_paths:
+            _restore_archived_replication_output(source, target)
+
+    try:
+        payload = json.loads(log_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    if not isinstance(payload.get("step_outcomes"), list):
+        payload["step_outcomes"] = []
+    current_by_id = {update.node_id: update for update in _load_replication_updates(log_path)}
+    recovered_updates: list[dict[str, Any]] = []
+    for node in graph.nodes:
+        if node.id not in runnable:
+            continue
+        if node.id in selected:
+            recovered = selected[node.id][0].model_dump(mode="json")
+            recovered["completion_status"] = "completed"
+            recovered_updates.append(recovered)
+        elif node.id in current_by_id:
+            recovered_updates.append(current_by_id[node.id].model_dump(mode="json"))
+    payload["node_updates"] = recovered_updates
+    write_json(log_path, payload)
+    return [node.id for node in graph.nodes if node.id in selected]
+
+
 def _replication_attempt_started(pipeline_state: PipelineState) -> bool:
     stages = pipeline_state.state["stages"]
     return "replicate_agent" in stages or "report_agents" in stages
@@ -946,6 +1269,15 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
     mappings: list[dict[str, str]] = []
     unresolved: list[str] = []
     log_reference_error: str | None = None
+    result_step_ids: set[int] | None = None
+    replicate_plan_path = output / "plan" / "replicate_plan.json"
+    if replicate_plan_path.is_file():
+        try:
+            archived_plan = load_model(replicate_plan_path, ReplicationPlan)
+        except (OSError, RuntimeError, ValueError):
+            pass
+        else:
+            result_step_ids = {step.id for step in archived_plan.steps if step.verifies}
     replication_log_path = replication_dir / "replication_log.json"
     if replication_log_path.is_file():
         try:
@@ -959,6 +1291,9 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
             log_reference_error = log_reference_error or "step_outcomes is not a list"
         logged_outputs: list[str] = []
         for outcome in outcomes:
+            step_id = outcome.get("step_id") if isinstance(outcome, dict) else None
+            if result_step_ids is not None and step_id not in result_step_ids:
+                continue
             output_files = outcome.get("output_files") if isinstance(outcome, dict) else None
             if not isinstance(output_files, list) or not all(
                 isinstance(value, str) for value in output_files
@@ -1036,12 +1371,6 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
             shutil.rmtree(temporary_root)
         raise
 
-    for directory in (replication_dir, report_dir):
-        if directory.exists():
-            shutil.rmtree(directory)
-        directory.mkdir(parents=True, exist_ok=True)
-    for prompt_path in prompt_paths:
-        prompt_path.unlink()
     return archive_root
 
 
@@ -1075,18 +1404,62 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
     elif remote_plan:
         raise RuntimeError(f"Remote computation state is missing: {state_path}")
 
+    plan_needs_rebuild = False
+    if pipeline_state.is_stage_completed("plan_agent"):
+        try:
+            graph = load_model(
+                config.output / "preprocessing" / "paper_graph.json",
+                PaperGraph,
+            )
+            scope = load_model(
+                config.output / "preprocessing" / "execution_scope.json",
+                GraphExecutionScope,
+            )
+            plan = load_model(
+                config.output / "plan" / "replicate_plan.json",
+                ReplicationPlan,
+            )
+            validate_replication_plan(graph, scope, plan)
+        except (OSError, RuntimeError, ValueError):
+            plan_needs_rebuild = True
+
     if replicate_started:
         if config.clouddrive and reconciliation["replaced"]:
             _cloud_pull(config, use_cloud=True)
         archive_root = _archive_replicate_attempt(config, resume_count)
-        node_state_path = config.output / "graph" / "node_state.json"
-        if node_state_path.is_file():
-            remove_node_updates(node_state_path, sources=["replicate_agent"])
-        pipeline_state.invalidate_stages(
-            ["replicate_agent", "report_agents"],
-            f"Explicit resume restarted replication from its first step: {archive_root}",
+        recovered_node_ids = _recover_archived_replication_nodes(config)
+
+        if pipeline_state.is_stage_completed("replicate_agent") and not plan_needs_rebuild:
+            return {
+                **reconciliation,
+                "rollback": None,
+                "archive": str(archive_root),
+                "recovered_node_ids": recovered_node_ids,
+            }
+
+        invalidated_stages = ["replicate_agent", "report_agents"]
+        reason = (
+            "Explicit resume will inspect and reuse completed replication nodes: "
+            f"{archive_root}"
         )
-        return {**reconciliation, "rollback": "replicate", "archive": str(archive_root)}
+        rollback = "replicate"
+        if plan_needs_rebuild:
+            invalidated_stages.insert(0, "plan_agent")
+            reason = (
+                "Explicit resume must rebuild the replication plan as exact DAG "
+                f"topological layers; completed node artifacts remain reusable: {archive_root}"
+            )
+            rollback = "plan"
+        pipeline_state.invalidate_stages(
+            invalidated_stages,
+            reason,
+        )
+        return {
+            **reconciliation,
+            "rollback": rollback,
+            "archive": str(archive_root),
+            "recovered_node_ids": recovered_node_ids,
+        }
 
     if reconciliation["replaced"]:
         codebase_dir = config.output / "codegen" / "codebase"
@@ -1107,6 +1480,14 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
             checkpoint_overrides={"codegen_agent": checkpoints},
         )
         return {**reconciliation, "rollback": "codegen"}
+
+    if plan_needs_rebuild:
+        pipeline_state.invalidate_stages(
+            ["plan_agent", "replicate_agent", "report_agents"],
+            "Explicit resume must rebuild the replication plan as exact DAG "
+            "topological layers",
+        )
+        return {**reconciliation, "rollback": "plan"}
 
     return {**reconciliation, "rollback": None}
 
@@ -2296,7 +2677,33 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
     _ensure_stage_scope(pipeline_state, "replicate_agent", scope.scope_sha256)
     transcript_path = config.output / "replication" / "replication_transcript.jsonl"
     plan = load_model(Path(state["replicate_plan_path"]), ReplicationPlan)
+    graph = _paper_graph(state)
+    validate_replication_plan(graph, scope, plan)
     cloud_data = _uses_cloud_data(config, plan)
+    if pipeline_state.is_stage_completed("replicate_agent"):
+        validate_codegen_remote_compute(
+            plan,
+            config.output / "remote_compute" / "instance.json",
+            cloud_datasets=_active_cloud_datasets(state) if cloud_data else (),
+            drive_provider=config.drive_provider,
+            computation_provider=config.computation_provider,
+            require_active=not pipeline_state.is_stage_completed("report_agents"),
+        )
+        try:
+            validate_replication_artifacts(state)
+            if not transcript_path.is_file():
+                raise RuntimeError(
+                    f"Completed replication transcript is missing: {transcript_path}"
+                )
+        except (OSError, RuntimeError, ValueError) as exc:
+            pipeline_state.invalidate_stages(
+                ["replicate_agent", "report_agents"],
+                f"Completed replication artifacts failed resume validation: {exc}",
+            )
+        else:
+            print("resume replicate_agent stage: skipped (already completed)")
+            return {}
+
     if not pipeline_state.is_stage_completed("replicate_agent"):
         _cloud_pull(
             config,
@@ -2311,17 +2718,20 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         computation_provider=config.computation_provider,
         require_active=not pipeline_state.is_stage_completed("report_agents"),
     )
-    if pipeline_state.is_stage_completed("replicate_agent"):
-        validate_replication_artifacts(state)
-        if not transcript_path.is_file():
-            raise RuntimeError(f"Completed replication transcript is missing: {transcript_path}")
-        print("resume replicate_agent stage: skipped (already completed)")
-        return {}
 
+    resume_state = _inspect_completed_replication_nodes(state)
+    print(
+        "replication node inspection: "
+        f"completed={resume_state['completed_node_ids']}, "
+        f"pending={resume_state['pending_node_ids']}"
+    )
     print("enter replicate stage")
     pipeline_state.start_stage("replicate_agent")
     _checkpoint_stage_scope(pipeline_state, "replicate_agent", scope.scope_sha256)
-    graph = _paper_graph(state)
+    pipeline_state.update_stage_checkpoints(
+        "replicate_agent",
+        {"completed_node_ids": resume_state["completed_node_ids"]},
+    )
     runnable = set(scope.runnable_node_ids)
     prompt_path = render_prompt(
         "replication/session_instructions.md",
@@ -2343,6 +2753,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         execution_scope_path=state["execution_scope_path"],
         paper_graph_path=state["paper_graph_path"],
         node_state_path=state["node_state_path"],
+        resume_state_json=json.dumps(resume_state, ensure_ascii=False, indent=2),
         smart_anchors=json.dumps(
             [
                 {

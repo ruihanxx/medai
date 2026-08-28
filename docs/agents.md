@@ -72,7 +72,10 @@ execution order, and outcome materialization for every visited node; it corrects
 the plan in place and writes no separate self-audit artifact. Replication reads
 paper text as a scientific reference, executes at full required scale, records
 actual results and real evidence for every runnable node, and never modifies
-source data. Smart Replicate receives only assigned claim anchors and writes
+source data. On resume it consumes the host-validated completed/pending node
+partition, rechecks completed artifact shape before use, skips completed nodes,
+and executes pending nodes in plan-layer order. The graph node, not an internal
+phase of a long command, is the orchestration resume boundary. Smart Replicate receives only assigned claim anchors and writes
 claim-specific round logs. Reporting receives one C, its real ancestors,
 relevant updates/blockers, and `collect_lineage_issues(C)`; it writes one claim
 fragment.

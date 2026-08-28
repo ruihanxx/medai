@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 
@@ -16,11 +17,13 @@ from medai.models import (
     validate_replication_plan,
     validate_reproduction_report,
 )
-from medai.pipeline_state import PipelineState
+from medai.pipeline_state import PipelineState, build_run_inputs
 from medai.prompts import render_prompt
 from medai.study_graph import write_empty_node_state
 from medai.workflow import (
     _compose_reproduction_report,
+    _inspect_completed_replication_nodes,
+    prepare_replication_resume,
     report_agents_node,
     validate_replication_artifacts,
 )
@@ -235,6 +238,193 @@ def test_replication_requires_result_and_real_evidence(tmp_path: Path, bad_field
 
     with pytest.raises(RuntimeError, match="no actual"):
         validate_replication_artifacts(state)  # type: ignore[arg-type]
+
+
+def test_replication_resume_inspection_invalidates_descendants(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"paper")
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+    graph = _graph()
+    graph_path = output / "preprocessing" / "paper_graph.json"
+    write_json(graph_path, graph.model_dump(mode="json"))
+    node_state_path = output / "graph" / "node_state.json"
+    write_empty_node_state(node_state_path, sha256_file(graph_path))
+    scope = _scope(graph_path, graph)
+    scope_path = output / "preprocessing" / "execution_scope.json"
+    write_json(scope_path, scope.model_dump(mode="json"))
+    codebase = output / "codegen" / "codebase"
+    replication = output / "replication"
+    codebase.mkdir(parents=True)
+    replication.mkdir(parents=True)
+    evidence_paths = {
+        node.id: codebase / f"{node.id}.json" for node in graph.nodes
+    }
+    for path in evidence_paths.values():
+        path.write_text("{}\n", encoding="utf-8")
+    broken_p1 = codebase / "P1.csv.gz"
+    broken_p1.write_bytes(b"\x1f\x8b\x08\x00truncated")
+    evidence_paths["P1"] = broken_p1
+    write_json(
+        replication / "replication_log.json",
+        {
+            "step_outcomes": [],
+            "node_updates": [
+                {
+                    "node_id": node.id,
+                    "completion_status": "completed",
+                    "result": {"node": node.id},
+                    "evidence": [str(evidence_paths[node.id])],
+                    "issues": [],
+                }
+                for node in graph.nodes
+            ],
+        },
+    )
+    state = {
+        "config": config,
+        "paper_graph_path": str(graph_path),
+        "node_state_path": str(node_state_path),
+        "execution_scope_path": str(scope_path),
+        "codebase_dir": str(codebase),
+    }
+
+    resume_state = _inspect_completed_replication_nodes(state)  # type: ignore[arg-type]
+
+    assert resume_state["completed_node_ids"] == ["D1"]
+    assert resume_state["pending_node_ids"] == ["P1", "V1", "C1"]
+    assert "integrity check failed" in resume_state["pending_reasons"]["P1"]
+    assert resume_state["pending_reasons"]["V1"] == "incomplete direct predecessors: P1"
+
+    with gzip.open(broken_p1, "wb") as stream:
+        stream.write(b"valid\n")
+    assert _inspect_completed_replication_nodes(state)["completed_node_ids"] == [  # type: ignore[arg-type]
+        "D1",
+        "P1",
+        "V1",
+        "C1",
+    ]
+
+
+def test_explicit_resume_preserves_log_and_recovers_archived_nodes(tmp_path: Path) -> None:
+    output = tmp_path / "run"
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"paper")
+    config = RunConfig.create(
+        paper=paper,
+        output=output,
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+    )
+    graph = _graph()
+    graph_path = output / "preprocessing" / "paper_graph.json"
+    write_json(graph_path, graph.model_dump(mode="json"))
+    node_state_path = output / "graph" / "node_state.json"
+    write_empty_node_state(node_state_path, sha256_file(graph_path))
+    scope = _scope(graph_path, graph)
+    write_json(
+        output / "preprocessing" / "execution_scope.json",
+        scope.model_dump(mode="json"),
+    )
+    codebase = output / "codegen" / "codebase"
+    replication = output / "replication"
+    codebase.mkdir(parents=True)
+    replication.mkdir(parents=True)
+    d1_evidence = codebase / "artifacts" / "D1" / "result.json"
+    d1_evidence.parent.mkdir(parents=True)
+    d1_evidence.write_text("{}\n", encoding="utf-8")
+    p1_evidence = codebase / "artifacts" / "P1" / "result.json"
+    plan_path = output / "plan" / "replicate_plan.json"
+    write_json(
+        plan_path,
+        _plan([[], ["D1", "P1"], ["V1"], ["C1"]]).model_dump(mode="json"),
+    )
+    write_json(
+        replication / "replication_log.json",
+        {
+            "step_outcomes": [
+                {
+                    "step_id": 1,
+                    "description": "setup",
+                    "command_executed": "true",
+                    "exit_code": 0,
+                    "stdout": "",
+                    "stderr": "",
+                    "output_files": [str(d1_evidence)],
+                    "duration_seconds": 0,
+                    "fixes_applied": [],
+                    "code_modified": False,
+                    "notes": "",
+                }
+            ],
+            "node_updates": [
+                {
+                    "node_id": "D1",
+                    "result": {"node": "D1"},
+                    "evidence": [str(d1_evidence)],
+                    "issues": [],
+                }
+            ],
+        },
+    )
+    archived = output / "resume_history" / "resume_000"
+    archived_p1 = (
+        archived
+        / "referenced_codebase_outputs"
+        / "artifacts"
+        / "P1"
+        / "result.json"
+    )
+    archived_p1.parent.mkdir(parents=True)
+    archived_p1.write_text('{"rows": 10}\n', encoding="utf-8")
+    write_json(
+        archived / "replication" / "replication_log.json",
+        {
+            "step_outcomes": [],
+            "node_updates": [
+                {
+                    "node_id": "P1",
+                    "result": {"rows": 10},
+                    "evidence": [str(p1_evidence)],
+                    "issues": [],
+                }
+            ],
+        },
+    )
+    pipeline = PipelineState.create(output, build_run_inputs(config))
+    pipeline.start_stage("plan_agent")
+    pipeline.complete_stage("plan_agent", [str(plan_path)])
+    pipeline.start_stage("replicate_agent")
+    pipeline.resume(build_run_inputs(config))
+
+    result = prepare_replication_resume(config)
+
+    assert result["rollback"] == "plan"
+    assert result["recovered_node_ids"] == ["D1", "P1"]
+    assert (output / "resume_history" / "resume_001").is_dir()
+    assert (replication / "replication_log.json").is_file()
+    assert json.loads(p1_evidence.read_text(encoding="utf-8")) == {"rows": 10}
+    recovered_log = json.loads(
+        (replication / "replication_log.json").read_text(encoding="utf-8")
+    )
+    assert [update["node_id"] for update in recovered_log["node_updates"]] == [
+        "D1",
+        "P1",
+    ]
+    assert all(
+        update["completion_status"] == "completed"
+        for update in recovered_log["node_updates"]
+    )
+    assert PipelineState(output).get_stage_status("plan_agent") == "invalidated"
 
 
 def test_claim_fragments_are_composed_in_graph_order(tmp_path: Path) -> None:

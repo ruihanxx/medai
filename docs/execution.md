@@ -179,10 +179,11 @@ before entering LangGraph: it reuses a reachable instance or creates one bounded
 replacement from recorded actual specifications. Ambiguous provider failures or
 an unsuccessful old-instance release prevent a second rental. A replacement
 before replication invalidates codegen and downstream work as an infrastructure
-resume. Once replication has begun, every explicit resume restarts the whole
-replication attempt whether the instance was reused or replaced. Cloud data is
-materialized idempotently before every replication
-attempt. Normal release occurs only after the report is validated and the run is
+resume. Once replication has begun, explicit resume snapshots the attempt,
+recovers valid node artifacts, and reruns only nodes that fail result, evidence,
+generic integrity, or predecessor-closure checks. Cloud data is materialized
+idempotently before resumed replication execution. Normal release occurs only
+after the report is validated and the run is
 completed. A release failure is a persistent `cleanup_warning`, not a pipeline
 failure, and reopening that completed run does not retry it.
 

@@ -63,6 +63,26 @@ downstream node.
 - **Output directory:** `{{ replication_dir }}/` — write each pipeline-managed result here.
 Write only under the working directory and the output directory above. Other subdirectories of the run output belong to other pipeline stages — do not write into them.
 
+## Node resume state
+
+Before this turn, host orchestration inspected every runnable node's canonical
+or recovered update, evidence existence and generic file integrity, and direct
+predecessor closure. Its decision is:
+
+```json
+{{ resume_state_json }}
+```
+
+Treat `completed_node_ids` as node-level completed work and do not rerun their
+scientific commands. Reopen their update and evidence to confirm the
+node-method-specific shape before a consumer uses them; if that inspection
+finds a concrete semantic or shape mismatch that generic host checks could not
+detect, move that node and its descendants back to pending and record why.
+Execute every ID in `pending_node_ids`, in plan-layer order. Within a partially
+completed layer, run only its pending nodes and reuse completed nodes' exact
+artifacts. This contract deliberately has no long-node internal checkpoint:
+the graph node is the smallest resumable scientific unit.
+
 ## Other useful directory
 
 - **Skills directory:** `{{ skills_dir }}/` (read-only) — consult applicable runtime skills here.
@@ -194,9 +214,10 @@ aggregate evidence, and logs; never download raw or row-level dataset content.
 
 ## Execution and completion
 
-Use your tools inside this session to execute, monitor, and debug every
-command required by the replication plan. Work through the entire plan in
-order; do not end the turn after a single setup, experiment, or remote command.
+Use your tools inside this session to execute, monitor, and debug every command
+still required by the replication plan. Walk every plan layer in order, but
+skip host-validated completed nodes; do not end the turn after a single setup,
+experiment, or remote command.
 Keep foreground work attached until it reaches a terminal state, and do not use
 `nohup`, `&`, or another detached launcher.
 
@@ -226,7 +247,11 @@ When something fails, actively resolve it:
   and record the limitation at its origin D/P node.
 - **Configuration issues** → adjust paths, environment variables, config files
 - **Version incompatibilities** → pin compatible versions, patch import paths
-- **Memory/resource issues** → set resource limits, stream or chunk the data, checkpoint and resume. Reducing the scale of the computation itself is a last resort governed by "Run at the methodology's intended scale" below — never swap in a smaller model or dataset as a convenience.
+- **Memory/resource issues** → set resource limits and stream or chunk the data
+  within the current node execution. This workflow does not recognize
+  node-internal checkpoints. Reducing the scale of the computation itself is a
+  last resort governed by "Run at the methodology's intended scale" below —
+  never swap in a smaller model or dataset as a convenience.
 
 **Every fix you apply is valuable evidence.** A paper that needed 4 minor patches to run is still reproducible — the fixes document what a human would have to do. Report each fix in your evidence (see Evidence Collection below).
 
@@ -236,7 +261,7 @@ When something fails, actively resolve it:
 
 Run each step at the **scale the plan/methodology specifies** — the full grid, the full epoch count, the full dataset or sample size. Do **not** quietly substitute a toy or downsized run (1 epoch, a handful of samples, a tiny grid) to finish faster.
 
-There is **no hidden time budget**. A heavy step may legitimately take hours or multiple days if that is what the methodology needs — a full-scale run that takes days beats a fast toy run at the wrong scale. When a step looks expensive, make it *efficient at full scale* first — use the compiled/vectorized code path, run on the GPU if one is available, split the work into resumable chunks — rather than shrinking the problem.
+There is **no hidden time budget**. A heavy step may legitimately take hours or multiple days if that is what the methodology needs — a full-scale run that takes days beats a fast toy run at the wrong scale. When a step looks expensive, make it *efficient at full scale* first — use the compiled/vectorized code path and run on the GPU if one is available — rather than shrinking the problem.
 
 - Only downsize if a genuine resource limit forces it (out of memory, required hardware absent) — a long runtime by itself is not such a limit; let a heavy step run as long as it needs. Downsize only after trying to make the full-scale run work.
 - Before concluding a resource limit forces a downsize, run the `get-available-resources` skill (`{{ skills_dir }}/get-available-resources/scripts/detect_resources.py`) and cite its actual numbers in your notes — a downsize justified by a guessed constraint is not genuine.
@@ -273,21 +298,25 @@ GPU is available. Use it when present. If GPU is unavailable:
 
 ## Replication Plan
 
-Read `{{ replicate_plan_path }}` and complete every step in listed order during
-this session. If a command fails, inspect its result directly, fix the issue,
-and continue until the complete attempt is ready for final artifact validation.
+Read `{{ replicate_plan_path }}` and visit every step in listed order during
+this session. Verify the setup step idempotently and install only what is
+missing. For each DAG-layer step, execute only nodes absent from
+`completed_node_ids`. If a command fails, inspect its result directly, fix the
+issue, and continue until the complete attempt is ready for final artifact validation.
 For every node in each step's `verifies`, confirm that the command consumed the
 declared direct predecessor artifacts and that the cited output is the real
 node-local product. Do not satisfy graph coverage by mentioning only a node ID.
 
 ### Resume an interrupted attempt
 
-Every invocation of this stage is a complete replication attempt. Begin with
-the first plan step and execute the entire plan even when the writable codebase
-still contains outputs from an older attempt. Orchestration has archived and
-cleared the prior canonical replication/report artifacts; do not treat any
-remaining codebase output as a checkpoint or skip work because a filename
-already exists.
+Orchestration snapshots prior artifacts without clearing the canonical attempt,
+recovers valid node artifacts when available, and supplies the node decision
+above. Do not infer completion from a filename alone, and do not rerun a listed
+completed node merely because the plan starts at an earlier layer. For a fully
+completed layer, retain a matching valid outcome when present; otherwise add a
+zero-duration outcome that explicitly says the layer was not rerun and cites
+the reused node evidence. For a partially completed layer, record only commands
+actually executed now and list the reused node IDs in `notes`.
 
 ## Evidence Collection
 
@@ -322,12 +351,14 @@ Maintain two files. Update `replication_log.json` after **each completed step** 
     "node_updates": [
         {
             "node_id": "P1",
+            "completion_status": "completed",
             "result": {"rows": 1234, "artifact": "outputs/p1.parquet"},
             "evidence": ["outputs/p1_summary.json"],
             "issues": []
         },
         {
             "node_id": "C1",
+            "completion_status": "completed",
             "result": "actual claim conclusion derived from supporting V artifacts",
             "evidence": ["outputs/claim_c1.json"],
             "issues": [
@@ -341,7 +372,11 @@ Maintain two files. Update `replication_log.json` after **each completed step** 
 }
 ```
 
-The `node_updates` list MUST cover every ID in the execution scope's
+Set `completion_status` to `completed` only after the node has a terminal actual
+result and valid evidence. A partial in-progress log may use `incomplete`, which
+forces that node to run on resume; the final log cannot retain `incomplete`.
+
+The final `node_updates` list MUST cover every ID in the execution scope's
 `runnable_node_ids` exactly once and no inactive node. Every update needs a
 non-empty actual `result` and at least one existing local `evidence` path under
 the working or replication directory. A result may be numeric, structured,

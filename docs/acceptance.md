@@ -32,7 +32,8 @@ queries at intermediate nodes.
 Base replication coverage includes graph extraction prompts, runnable-only
 codegen/audit/refinement/planning, exact setup-plus-topological-layer plan
 structure and coverage of all active nodes, failure on
-missing actual result or evidence, per-claim report checkpoints/resume,
+missing actual result or evidence, node-level resume with predecessor
+invalidation and preserved snapshots, per-claim report checkpoints/resume,
 claim-keyed Smart Replicate logs, deterministic report composition, and
 path-relevant issues only. Plan prompt coverage pins per-node predecessor
 artifact descriptions and the mandatory reverse C-to-D artifact-flow audit.

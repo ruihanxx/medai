@@ -71,11 +71,18 @@ verdict is deterministically rederived from its unchanged availability report
 as `PARTIAL` or `NONE` and its checkpoint is migrated before execution.
 
 If explicit resume occurs after replication starts but before the final report,
-replication/report artifacts and cited outputs are archived under
-`resume_history/resume_<NNN>/`; old `replicate_agent` overlay updates are
-removed; replication restarts from plan step 1. Infrastructure replacement
-before replication invalidates codegen and downstream stages while retaining
-the prepared codebase. Remote lifecycle and partial exit codes are defined in
+replication/report artifacts and cited outputs are snapshotted under
+`resume_history/resume_<NNN>/` without clearing the canonical attempt. The host
+checks every current or archived node update, its real evidence and generic
+JSON/gzip integrity, and predecessor closure. Valid archived evidence is
+restored atomically when needed. Replication then follows the plan from the
+first layer while executing only pending nodes; completed nodes are reused, not
+rerun. The `replicate_agent` manifest checkpoint records the inspected
+`completed_node_ids` for that attempt. A legacy non-layered plan is regenerated while recovered node results
+remain eligible. Node completion is the resume boundary; this contract does not
+define long-node internal checkpoints. Infrastructure replacement before
+replication invalidates codegen and downstream stages while retaining the
+prepared codebase. Remote lifecycle and partial exit codes are defined in
 `execution.md`.
 
 Manifest v1–v5 is historical and disk-read-only. Loading it for resume or as an
