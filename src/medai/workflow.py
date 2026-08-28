@@ -2813,9 +2813,11 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             transcript_path = claims_dir / f"{claim.id}_transcript.jsonl"
             if not transcript_path.is_file():
                 raise RuntimeError(f"Completed report transcript is missing: {transcript_path}")
-        pipeline_state.mark_completed(partial=scope.verdict == "PARTIAL")
-        print("resume report_agents stage: skipped (already completed)")
-        return {"report_path": str(report_path)}
+        if final_transcript_path.is_file():
+            pipeline_state.mark_completed(partial=scope.verdict == "PARTIAL")
+            print("resume report_agents stage: skipped (already completed)")
+            return {"report_path": str(report_path)}
+        print("resume report_agents stage: reindexing legacy final report")
 
     print("enter report stage")
     pipeline_state.start_stage("report_agents")

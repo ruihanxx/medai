@@ -67,7 +67,9 @@ its change. Hard-coding anchors or editing computed output is prohibited.
 `manifest.json` v6 owns stages, attempts, outputs, checkpoints, and the immutable
 input fingerprint. A skipped completed stage first reloads and validates its
 artifacts. Reporting stores `completed_claims` in graph order. Reopening a fully
-completed run is a validation-only no-op.
+completed run is a validation-only no-op, except that a report completed before
+the final report transcript was introduced reuses all validated claim fragments
+and runs only the final four-table indexing agent once.
 On resume, a v6 scope checkpoint written with the removed global `UNKNOWN`
 verdict is deterministically rederived from its unchanged availability report
 as `PARTIAL` or `NONE` and its checkpoint is migrated before execution.
