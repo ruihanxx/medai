@@ -20,7 +20,9 @@ grouping. One run executes these stages:
    node and routes either to preprocessing refinement or source availability.
 8. At most three cohort-refinement rounds may change only P-related code and
    node updates; M, training, evaluation, and results remain read-only.
-9. Planning covers every runnable node via `verifies` without fallback scale.
+9. Planning writes one node-free environment/setup step followed by one step
+   per earliest runnable-DAG topological layer. Each runnable node appears in
+   exactly one layer step via `verifies`, without fallback scale.
 10. Replication executes the plan and supplies actual result/evidence updates
     for every runnable node.
 11. Smart Replicate, when enabled, checkpoints only runnable claims having a

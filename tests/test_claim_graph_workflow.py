@@ -12,6 +12,7 @@ from medai.models import (
     GraphExecutionScope,
     PaperGraph,
     ReplicationPlan,
+    replication_topological_layers,
     validate_replication_plan,
     validate_reproduction_report,
 )
@@ -98,10 +99,27 @@ def test_replication_plan_covers_all_runnable_nodes() -> None:
         active_sources=[],
         execution_location="local",
     )
-    validate_replication_plan(graph, scope, _plan([["D1"], ["P1"], ["V1", "C1"]]))
+    assert replication_topological_layers(graph, scope) == [
+        ["D1"],
+        ["P1"],
+        ["V1"],
+        ["C1"],
+    ]
+    validate_replication_plan(
+        graph,
+        scope,
+        _plan([[], ["D1"], ["P1"], ["V1"], ["C1"]]),
+    )
 
     with pytest.raises(ValueError, match="does not cover"):
-        validate_replication_plan(graph, scope, _plan([["D1"], ["P1"], ["V1"]]))
+        validate_replication_plan(graph, scope, _plan([[], ["D1"], ["P1"], ["V1"]]))
+
+    with pytest.raises(ValueError, match="topological layers exactly"):
+        validate_replication_plan(
+            graph,
+            scope,
+            _plan([[], ["D1", "P1"], ["V1"], ["C1"]]),
+        )
 
 
 def test_plan_prompt_requires_predecessor_artifacts_and_reverse_audit(
@@ -119,6 +137,7 @@ def test_plan_prompt_requires_predecessor_artifacts_and_reverse_audit(
         gpu_info=[],
         paper_graph=graph.model_dump(mode="json"),
         runnable_node_ids=[node.id for node in graph.nodes],
+        topological_layers=[["D1"], ["P1"], ["V1"], ["C1"]],
         cloud_drive_enabled=False,
         replicate_plan_path=tmp_path / "replicate_plan.json",
     ).read_text(encoding="utf-8")
@@ -127,7 +146,8 @@ def test_plan_prompt_requires_predecessor_artifacts_and_reverse_audit(
     assert "A node ID appearing only in `verifies`" in prompt
     assert "Mandatory reverse plan self-audit" in prompt
     assert "start separately from every runnable terminal C" in prompt
-    assert "producer and consumer share a step" in prompt
+    assert "one execution step for each listed layer" in prompt
+    assert "Nodes in one topological layer cannot consume one another" in prompt
 
 
 @pytest.mark.parametrize("bad_field", ["result", "evidence"])
@@ -158,7 +178,7 @@ def test_replication_requires_result_and_real_evidence(tmp_path: Path, bad_field
     replication.mkdir(parents=True)
     evidence_path = codebase / "result.json"
     evidence_path.write_text("{}\n", encoding="utf-8")
-    plan = _plan([["D1"], ["P1"], ["V1", "C1"]])
+    plan = _plan([[], ["D1"], ["P1"], ["V1"], ["C1"]])
     plan_path = output / "plan" / "replicate_plan.json"
     write_json(plan_path, plan.model_dump(mode="json"))
     updates = [

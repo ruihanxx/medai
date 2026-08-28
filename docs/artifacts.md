@@ -117,8 +117,11 @@ It records `runnable_node_ids`, `blocked_nodes`, blocker paths,
 `FULL`, `PARTIAL`, or `NONE`. Blocked nodes retain `source_blocked` versus
 `unknown` evidence. A partial decision is valid for one scope hash only.
 
-The replication plan's `verifies` fields collectively equal all runnable node
-IDs. For every verified node, its step description identifies every direct
+The replication plan starts with exactly one node-free environment/setup step.
+Each later step equals one earliest topological layer of the runnable DAG in
+paper-graph order, and its `verifies` list equals that layer exactly. The
+`verifies` fields therefore cover every runnable node exactly once. For every
+verified node, its step description identifies every direct
 predecessor node artifact consumed, the local operation, and the concrete
 artifact/result produced; `expected_outcome` identifies the persistent output
 available to downstream steps. The final report contains each C exactly once in graph order. Every claim

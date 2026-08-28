@@ -278,7 +278,7 @@ class ReplicationStep(StrictModel):
 
 class ReplicationPlan(StrictModel):
     environment: PlanEnvironment
-    steps: list[ReplicationStep] = Field(min_length=3, max_length=10)
+    steps: list[ReplicationStep] = Field(min_length=2)
     remote_compute: RemoteComputePlan | None = None
 
     @model_validator(mode="after")
@@ -286,6 +286,8 @@ class ReplicationPlan(StrictModel):
         step_ids = [step.id for step in self.steps]
         if len(step_ids) != len(set(step_ids)):
             raise ValueError("Replication-plan step IDs must be unique")
+        if step_ids != list(range(1, len(step_ids) + 1)):
+            raise ValueError("Replication-plan step IDs must be sequential from 1")
         return self
 
 
@@ -830,22 +832,70 @@ class RoundSummary(StrictModel):
         return self
 
 
+def replication_topological_layers(
+    graph: PaperGraph,
+    scope: GraphExecutionScope,
+) -> list[list[str]]:
+    runnable = set(scope.runnable_node_ids)
+    unknown_scope = runnable - set(graph.node_map)
+    if unknown_scope:
+        raise ValueError(f"Execution scope contains unknown graph nodes: {sorted(unknown_scope)}")
+    missing_inputs = {
+        input_id
+        for node in graph.nodes
+        if node.id in runnable
+        for input_id in node.inputs
+        if input_id not in runnable
+    }
+    if missing_inputs:
+        raise ValueError(
+            "Execution scope is not closed over graph inputs: "
+            f"{sorted(missing_inputs)}"
+        )
+
+    remaining = set(runnable)
+    completed: set[str] = set()
+    layers: list[list[str]] = []
+    while remaining:
+        layer = [
+            node.id
+            for node in graph.nodes
+            if node.id in remaining and set(node.inputs).issubset(completed)
+        ]
+        if not layer:
+            raise ValueError("Runnable graph cannot be arranged into topological layers")
+        layers.append(layer)
+        completed.update(layer)
+        remaining.difference_update(layer)
+    return layers
+
+
 def validate_replication_plan(
     graph: PaperGraph,
     scope: GraphExecutionScope,
     plan: ReplicationPlan,
 ) -> None:
     expected = set(scope.runnable_node_ids)
-    unknown_scope = expected - set(graph.node_map)
-    if unknown_scope:
-        raise ValueError(f"Execution scope contains unknown graph nodes: {sorted(unknown_scope)}")
-    actual = {reference for step in plan.steps for reference in step.verifies}
+    actual_ids = [reference for step in plan.steps for reference in step.verifies]
+    actual = set(actual_ids)
     unknown = actual - expected
     missing = expected - actual
     if unknown:
         raise ValueError(f"Replication plan verifies inactive node IDs: {sorted(unknown)}")
     if missing:
         raise ValueError(f"Replication plan does not cover runnable node IDs: {sorted(missing)}")
+    if len(actual_ids) != len(actual):
+        raise ValueError("Replication plan must verify every runnable node exactly once")
+
+    expected_layers = replication_topological_layers(graph, scope)
+    if plan.steps[0].verifies:
+        raise ValueError("Replication plan step 1 must be the node-free environment setup")
+    actual_layers = [step.verifies for step in plan.steps[1:]]
+    if actual_layers != expected_layers:
+        raise ValueError(
+            "Replication plan execution steps must match the runnable DAG topological "
+            f"layers exactly: expected={expected_layers!r}, actual={actual_layers!r}"
+        )
 
 
 def validate_replication_log(plan: ReplicationPlan, log: ReplicationLog) -> None:

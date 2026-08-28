@@ -62,7 +62,9 @@ audit metadata and downstream evidence; only source, method, schema, and
 artifact-integrity conditions may fail preprocessing.
 
 Planning may add setup/smoke-test code but not scientific fallback semantics.
-Its steps collectively verify all runnable nodes. For every verified node, the
+It emits one node-free setup step, then one step per host-supplied earliest DAG
+topological layer; layers cannot be merged, split, or reordered. Its steps
+collectively verify every runnable node exactly once. For every verified node, the
 step description names each direct predecessor node artifact it consumes and
 the concrete artifact/result it produces. Before completion the planner starts
 from every runnable C, traverses to D, and checks description, artifact flow,

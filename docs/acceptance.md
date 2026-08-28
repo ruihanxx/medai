@@ -30,7 +30,8 @@ collection, shared issue deduplication, multiple origin-to-target paths, and
 queries at intermediate nodes.
 
 Base replication coverage includes graph extraction prompts, runnable-only
-codegen/audit/refinement/planning, plan coverage of all active nodes, failure on
+codegen/audit/refinement/planning, exact setup-plus-topological-layer plan
+structure and coverage of all active nodes, failure on
 missing actual result or evidence, per-claim report checkpoints/resume,
 claim-keyed Smart Replicate logs, deterministic report composition, and
 path-relevant issues only. Plan prompt coverage pins per-node predecessor

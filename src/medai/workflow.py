@@ -32,6 +32,7 @@ from medai.models import (
     ReplicationPlan,
     SkillCorrectionsFile,
     SmartReplicateLog,
+    replication_topological_layers,
     validate_claim_report,
     validate_replication_log,
     validate_replication_plan,
@@ -2260,6 +2261,7 @@ def plan_agent_node(state: WorkflowState) -> dict[str, str]:
         replicate_plan_path=replicate_plan_path,
         paper_graph=graph.model_dump(mode="json"),
         runnable_node_ids=scope.runnable_node_ids,
+        topological_layers=replication_topological_layers(graph, scope),
         gpu_info=resources["gpus"],
     )
     session_id = run_agent(

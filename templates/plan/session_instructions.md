@@ -55,6 +55,21 @@ Plan only the following runnable node IDs. The union of all plan-step
 {{ runnable_node_ids | tojson(indent=2) }}
 ```
 
+Host orchestration derived these exact earliest topological layers from the
+runnable DAG, preserving paper-graph order within each layer:
+
+```json
+{{ topological_layers | tojson(indent=2) }}
+```
+
+Write exactly one node-free environment/setup step first. Then write exactly
+one execution step for each listed layer, in this order, whose `verifies` list
+equals that layer exactly. Do not merge adjacent layers, split one layer across
+steps, move a node to a later layer, or add a later setup/collection-only step.
+Independent nodes in one layer share a step but remain separate node clauses
+and commands. A remote operation must retrieve each node's local evidence in
+the same layer step that produces it.
+
 The graph is the scientific execution contract. Its categories are dataset
 sources (D), preprocessing/cohort products (P), training procedures (T),
 trained model artifacts (M), validation or statistical results (V), and claims
@@ -63,8 +78,8 @@ P→T→M, (M,P_eval)→V, and V→C; statistical paths may resolve as P→V→C
 with multiple model, data, or metric inputs represents the complete Cartesian
 evaluation block described by the graph.
 
-Each plan step should produce evidence for one or more runnable graph nodes,
-except for pure setup steps. For every node named in a step's `verifies`, add a
+Every step after the first produces evidence for one topological layer. For
+every node named in a step's `verifies`, add a
 separate, concrete clause to that step's `description` in this form:
 
 ```text
@@ -111,9 +126,9 @@ setup-only steps that do not touch data are exempt.
 
 Explore the repository and generate a replication plan — a sequence of concrete steps that an agent should execute to produce evidence for the runnable graph above. The plan should cover:
 
-1. **Remote server setup** (if required) — how to reuse the selected run-owned
-   instance and its already staged inputs, connect, and upload code only
-2. **Environment setup** — what to install, any system requirements
+1. **Environment and remote setup** — what to install, any system requirements,
+   and, if required, how to reuse the selected run-owned instance, connect, and
+   upload code only; keep all of this in the first node-free step
 3. **Running the code** — every runnable D/P/T/M/V/C operation in dependency order
 4. **Collecting outputs** — what node artifacts, records, and metrics each step produces
 5. **Remote result retrieval** (if required) — download and locally validate
@@ -157,7 +172,12 @@ This is a setup value, not a result.
 
 Plan every result-producing step at the full scale the methodology prescribes — problem size, resolution, iteration count, dataset, and seed count. Do NOT write reduced-scale fallbacks into the plan — no "if intractable, shrink the problem" clauses, no `--quick`/`--fast`-style shortcut flags, no downsized parameter grids. There is no hidden time budget to plan around: a heavy step may legitimately run for hours or multiple days if that is what the methodology needs — runtime alone is never a reason to plan a smaller step. If the plan offers a reduced-scale escape hatch, the executing agent will take it and the run will produce numbers at the wrong scale.
 
-When a step is genuinely expensive, plan for *efficiency at full scale* instead: prefer the repo's compiled/vectorized code paths, use the GPU when one is available and the method supports it, or split the computation into resumable chunks. Whether to reduce scale is the executing agent's runtime decision, made only under a genuine resource limit and recorded explicitly — never a plan provision.
+When a step is genuinely expensive, plan for *efficiency at full scale* instead:
+prefer the repo's compiled/vectorized code paths and use the GPU when one is
+available and the method supports it. This plan has no node-internal checkpoint
+contract; each graph node is the smallest resumable scientific unit. Whether to
+reduce scale is the executing agent's runtime decision, made only under a
+genuine resource limit and recorded explicitly — never a plan provision.
 {% if gpu_info %}
 
 **Hardware available for this plan:** a GPU is present in this environment: {{ gpu_info }}. Steps whose method benefits from GPU acceleration should plan to use it, and `setup_hints` should say so, rather than assuming a CPU-only path.
@@ -171,8 +191,8 @@ appendix-only, or lower priority, and do not add unrelated available nodes.
 
 ## Rules
 
-- Order steps logically: setup first, then execution, then verification
-- Include 3-10 steps with unique sequential IDs, enough to cover the complete runnable graph
+- Use sequential IDs starting at 1. Step 1 is the only node-free setup step;
+  every later step is exactly one supplied topological layer.
 - The agent executing this plan will work on a writable copy of the repo at `{{ codebase_dir }}/`
 - The agent may fix issues in the code to keep replication going (deprecated APIs, missing imports, configuration problems)
 - Every result-producing step MUST have at least one runnable graph node ID in
@@ -201,10 +221,17 @@ Save the plan to `{{ replicate_plan_path }}` with this format:
     "steps": [
         {
             "id": 1,
-            "description": "What this step does",
-            "command_hint": "the command to run",
-            "expected_outcome": "Shape of expected output (NOT the paper's reported values)",
-            "verifies": ["D1", "P1"]
+            "description": "Set up the environment without executing graph nodes",
+            "command_hint": "the setup command",
+            "expected_outcome": "Import and smoke-test records",
+            "verifies": []
+        },
+        {
+            "id": 2,
+            "description": "Execute every node in the first supplied DAG layer",
+            "command_hint": "the foreground layer command",
+            "expected_outcome": "Persistent outputs for every node in this layer",
+            "verifies": ["D1"]
         }
     ],
     "remote_compute": null
@@ -234,8 +261,8 @@ If replication requires remote compute, add this top-level object alongside
 Only `state_path`, `remote_working_dir`, and `remote_dataset_dir` are required
 and statically validated. Additional provider and execution fields are allowed.
 Copy these fields from the existing validated codegen plan and provider state;
-never invent another instance or another raw-data location. Make the final
-result-retrieval step download and validate all required local outputs. Do not
+never invent another instance or another raw-data location. Download and
+validate each node's required local output within its own layer step. Do not
 power off or release the instance; orchestration does so after canonical
 replication artifact validation and, for release, final report completion.
 
@@ -252,9 +279,8 @@ the following:
    predecessor artifact consumed. For C this includes every supporting V result;
    for V every evaluated M and P_eval artifact; for M its producing T record;
    for T every P and prior-M artifact; and for P every direct D/P artifact.
-3. Every predecessor artifact is produced or identified by an earlier clause or
-   earlier step. When producer and consumer share a step, their clauses and
-   command behavior are ordered producer first.
+3. Every predecessor artifact is produced or identified by an earlier step.
+   Nodes in one topological layer cannot consume one another.
 4. The planned command actually consumes those artifacts rather than merely
    mentioning their node IDs, and its expected outcome materializes what every
    downstream consumer needs.
