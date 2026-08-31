@@ -27,6 +27,28 @@ Use the audited Markdown, labels, captions, and table content for Figure/Table v
 
 ## Your task
 
+### Reconstruct the executable state flow first
+
+Before assigning node IDs or edges, reconstruct the complete executable analysis
+from the paper's Methods, cohort, experiment, and statistical prose, using tables,
+captions, and reported intermediate quantities as supporting evidence. Do not
+directly transcribe section order or figure boxes/arrows into the graph. Figures
+help identify and confirm intermediate states, but the full methodological
+context determines the final graph.
+
+First inventory every concrete state, operation, artifact, result block, and
+conclusion required by the analysis, including each state's population scope,
+unit, keys, version, and filters. Then establish identity, subset, intersection,
+union, split, linkage, and transformation relations among the states. Introduce
+a shared or intersection P only when the paper's procedure actually produces a
+materializable state consumed downstream: for example, `P5 = P1 ∩ P2` takes
+`P1` and `P2` as direct inputs, and `P6 = P5 ∩ P3` takes `P5` and `P3`, if
+those intersections are real analysis operations. Only after this analysis,
+assign D/P/T/M/V/C nodes and connect actual producer-consumer dependencies. Set
+membership alone does not justify an edge. If a node combines raw records with
+an earlier cohort or key set, declare both as direct inputs. Use reported counts
+to check population/state scope, not to override the paper's method.
+
 ### Paper-level claim extraction
 
 Read the audited paper Markdown. Create one C node for every claim that:
@@ -276,7 +298,12 @@ evaluation logic stored in P, claim-level comparison stored in V, and upstream
 methods duplicated into downstream nodes. Check that provenance supports the
 local content rather than only the overall path.
 
-Finally, reload the corrected JSON and verify global ID uniqueness, no repeated
-or unknown inputs, acyclicity, complete C coverage, and that every node reaches
-a C. Finish only after all five semantic passes and the structural validation
-pass succeed.
+Finally, perform a short dependency lint: every local operation and output state
+must be supported by its declared direct inputs; no node may silently reconstruct
+a cohort, key set, or transformation when an existing P is its exact reusable
+producer; every multi-input node must declare all consumed branches; and every
+multi-input P must reconcile the population scope, unit, keys, and versions of
+its inputs. Then reload the corrected JSON and verify global ID uniqueness, no
+repeated or unknown inputs, acyclicity, complete C coverage, and that every node
+reaches a C. Finish only after all five semantic passes and the structural
+validation pass succeed.

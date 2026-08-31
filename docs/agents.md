@@ -17,7 +17,11 @@ needed columns/aggregates and never substitute a missing paper-required input.
 - Preprocessing alone writes the complete immutable paper graph. It creates
   fine-grained D/P/T/M/V/C nodes, treats V sets as Cartesian blocks, separates
   sparse endpoints, supports P→V→C, and does not create a separate grouping
-  concept. Before completion it rereads the paper for omitted study content,
+  concept. It reconstructs the executable analysis from the full paper,
+  inventories concrete states and their set/derivation relations, then creates
+  edges only for actual producer-consumer dependencies; figures are supporting
+  evidence, and set containment alone is not a dependency. Before completion it
+  rereads the paper for omitted study content,
   reverse-audits every dependency from C to its sources, verifies that every
   node denotes a concrete product, separates non-identical same-category
   products, and removes content outside each node category. It corrects the
