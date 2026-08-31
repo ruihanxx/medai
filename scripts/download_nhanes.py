@@ -8,6 +8,7 @@ import hashlib
 import json
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -167,8 +168,10 @@ def download_file(
                 return item
 
     partial = destination.with_name(f"{destination.name}.part")
+    ca_file = ssl.get_default_verify_paths().cafile
     command = [
         "curl",
+        *(["--cacert", ca_file] if ca_file and Path(ca_file).is_file() else []),
         "--fail",
         "--location",
         "--silent",
