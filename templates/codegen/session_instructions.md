@@ -401,7 +401,7 @@ the plan, verify that every runnable node appears in this narration or has a
 deliberate report-only treatment consistent with its category. Report-only
 treatment is not a way to skip executable P/T/M/V work.
 
-Double check the following places during cohort construction where the paper are highly likely to undrespecifies the methodology and implementations:
+Double-check the following places during cohort construction where the paper is highly likely to underspecify the methodology and implementations:
 - index-time definition, time-window specification, baseline ascertainment
 - window-level aggregation, value selection rule, worst-value selection, cumulative aggregation
 - episode reconstruction, exposure ascertainment, treatment-course construction
