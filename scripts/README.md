@@ -26,4 +26,6 @@ Files are organized beneath `resources/datasets/NHANES/raw/` by release cycle
 and component. The downloader is concurrent and resumable, validates the SAS
 XPORT header, and writes `manifest.json` plus `SHA256SUMS`. It records any
 officially listed cycle that does not yet have public XPT files. Use `--jobs N`
-to change concurrency or `--list-only` to refresh only the official catalog.
+to change normal-file concurrency, `--large-file-jobs N` to change resumable
+HTTP-range concurrency for files larger than 1 GiB, or `--list-only` to refresh
+only the official catalog.

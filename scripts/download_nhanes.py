@@ -27,6 +27,8 @@ CATALOG_URL = (
 LANDING_URL = "https://wwwn.cdc.gov/nchs/nhanes/Default.aspx"
 USER_AGENT = "medai-nhanes-downloader/1.0"
 XPT_HEADER_PREFIX = b"HEADER RECORD*******LIBRARY HEADER RECORD!!!!!!!"
+LARGE_FILE_THRESHOLD = 1024**3
+RANGE_CHUNK_BYTES = 4 * 1024**2
 YEAR_RANGE_RE = re.compile(r"^(\d{4})-(\d{4})\b")
 SIZE_RE = re.compile(r"\[XPT\s*-\s*([\d.,]+)\s*(KB|MB|GB)\]", re.IGNORECASE)
 CURRENT_CYCLE_RE = re.compile(r"default\.aspx\?Cycle=(\d{4}-\d{4})", re.IGNORECASE)
@@ -154,8 +156,122 @@ def valid_xpt(path: Path) -> bool:
         return stream.read(len(XPT_HEADER_PREFIX)) == XPT_HEADER_PREFIX
 
 
+def download_range_part(
+    source_url: str,
+    part_path: Path,
+    start: int,
+    end: int,
+    ca_options: list[str],
+) -> None:
+    expected_bytes = end - start + 1
+    if part_path.is_file() and part_path.stat().st_size == expected_bytes:
+        return
+    if part_path.exists():
+        part_path.unlink()
+    temporary = part_path.with_suffix(".partial")
+    if temporary.exists():
+        temporary.unlink()
+    command = [
+        "curl",
+        *ca_options,
+        "--fail",
+        "--location",
+        "--silent",
+        "--show-error",
+        "--retry",
+        "12",
+        "--retry-all-errors",
+        "--connect-timeout",
+        "30",
+        "--range",
+        f"{start}-{end}",
+        "--output",
+        str(temporary),
+        "--write-out",
+        "%{http_code}",
+        "--user-agent",
+        USER_AGENT,
+        source_url,
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        error = completed.stderr.strip() or f"curl exited {completed.returncode}"
+        raise RuntimeError(f"range {start}-{end}: {error}")
+    if completed.stdout.strip() != "206":
+        raise RuntimeError(f"range {start}-{end}: expected HTTP 206, got {completed.stdout!r}")
+    actual_bytes = temporary.stat().st_size if temporary.exists() else 0
+    if actual_bytes != expected_bytes:
+        raise RuntimeError(
+            f"range {start}-{end}: expected {expected_bytes} bytes, got {actual_bytes}"
+        )
+    temporary.replace(part_path)
+
+
+def download_segmented(
+    source_url: str,
+    destination: Path,
+    ca_options: list[str],
+    range_jobs: int,
+) -> None:
+    head_command = [
+        "curl",
+        *ca_options,
+        "--fail",
+        "--location",
+        "--silent",
+        "--show-error",
+        "--head",
+        "--user-agent",
+        USER_AGENT,
+        source_url,
+    ]
+    completed = subprocess.run(head_command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        error = completed.stderr.strip() or f"curl exited {completed.returncode}"
+        raise RuntimeError(f"could not read large-file headers: {error}")
+    lengths = re.findall(r"^content-length:\s*(\d+)\s*$", completed.stdout, re.MULTILINE | re.I)
+    if not lengths:
+        raise RuntimeError("large-file response did not provide Content-Length")
+    total_bytes = int(lengths[-1])
+    if total_bytes <= LARGE_FILE_THRESHOLD:
+        raise RuntimeError(f"unexpected large-file length: {total_bytes}")
+
+    parts_dir = destination.with_name(f".{destination.name}.parts")
+    parts_dir.mkdir(parents=True, exist_ok=True)
+    ranges = []
+    start = 0
+    while start < total_bytes:
+        end = min(start + RANGE_CHUNK_BYTES - 1, total_bytes - 1)
+        part_path = parts_dir / f"{start:012d}-{end:012d}.part"
+        ranges.append((part_path, start, end))
+        start = end + 1
+
+    with ThreadPoolExecutor(max_workers=range_jobs) as executor:
+        futures = [
+            executor.submit(download_range_part, source_url, part_path, start, end, ca_options)
+            for part_path, start, end in ranges
+        ]
+        for future in as_completed(futures):
+            future.result()
+
+    staged = destination.with_name(f"{destination.name}.assembled")
+    with staged.open("wb") as output:
+        for part_path, _, _ in ranges:
+            with part_path.open("rb") as source:
+                shutil.copyfileobj(source, output, length=8 * 1024 * 1024)
+    if staged.stat().st_size != total_bytes or not valid_xpt(staged):
+        raise RuntimeError("assembled large file failed length or SAS XPORT validation")
+    staged.replace(destination)
+    for part_path, _, _ in ranges:
+        part_path.unlink()
+    parts_dir.rmdir()
+
+
 def download_file(
-    item: dict[str, object], output_dir: Path, prior: dict[str, object] | None
+    item: dict[str, object],
+    output_dir: Path,
+    prior: dict[str, object] | None,
+    large_file_jobs: int,
 ) -> dict[str, object]:
     destination = output_dir / str(item["relative_path"])
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -169,9 +285,19 @@ def download_file(
 
     partial = destination.with_name(f"{destination.name}.part")
     ca_file = ssl.get_default_verify_paths().cafile
+    ca_options = ["--cacert", ca_file] if ca_file and Path(ca_file).is_file() else []
+    if int(item.get("advertised_bytes") or 0) > LARGE_FILE_THRESHOLD:
+        if partial.exists():
+            partial.unlink()
+        download_segmented(str(item["source_url"]), destination, ca_options, large_file_jobs)
+        size_bytes = destination.stat().st_size
+        checksum = sha256_file(destination)
+        item.update(status="complete", size_bytes=size_bytes, sha256=checksum)
+        return item
+
     command = [
         "curl",
-        *(["--cacert", ca_file] if ca_file and Path(ca_file).is_file() else []),
+        *ca_options,
         "--fail",
         "--location",
         "--silent",
@@ -247,6 +373,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument(
+        "--large-file-jobs",
+        type=int,
+        default=64,
+        help="Concurrent HTTP ranges per file larger than 1 GiB",
+    )
+    parser.add_argument(
         "--list-only",
         action="store_true",
         help="Refresh the catalog manifest without downloading files",
@@ -260,6 +392,8 @@ def main() -> int:
         raise SystemExit("--start-year must not be greater than --end-year")
     if args.jobs < 1:
         raise SystemExit("--jobs must be at least 1")
+    if args.large_file_jobs < 1:
+        raise SystemExit("--large-file-jobs must be at least 1")
     if not args.list_only and shutil.which("curl") is None:
         raise SystemExit("curl is required for resumable downloads")
 
@@ -314,6 +448,7 @@ def main() -> int:
                 dict(item),
                 output_dir,
                 prior_by_url.get(str(item["source_url"])),
+                args.large_file_jobs,
             ): item
             for item in ordered
         }
