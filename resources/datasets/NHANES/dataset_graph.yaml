@@ -1,0 +1,196 @@
+dataset_id: nhanes
+generated_at: '2026-08-31'
+
+partition_contract:
+  physical_partition_keys:
+  - cycle
+  - component
+  row_provenance_fields:
+  - _cycle
+  - _source_file
+  repeated_graph_rule: >-
+    This graph applies to all manifest files selected by schema properties. The
+    adapter resolves physical files at runtime; entities and relationships are
+    not duplicated for 1,598 XPT files.
+  ordinary_cycle_join_guard: _cycle
+  special_cycle_rule: >-
+    Directories 1988-2020, 1999-2004, 1999-2023, and 2007-2012 contain reference
+    or pooled releases. Their directory label is not an ordinary participant
+    cycle and cannot be used as a demographics join guard without file-specific
+    documentation.
+  overlap_rule: >-
+    The 2017-2020 combined pre-pandemic release includes 2017-2018 data. Never
+    treat 2017-2018 and 2017-2020 as disjoint partitions.
+
+schema_sets:
+- schema_set_id: participant_linked
+  selector: XPT schema contains SEQN
+  observed_file_count: 1545
+  resource_ids:
+  - demographics
+  - dietary
+  - examination
+  - laboratory
+  - questionnaire
+  key_semantics: >-
+    SEQN links a row to a survey participant, but is not guaranteed to be a row
+    key outside demographics. File-specific keys and cardinality come from the
+    official codebook.
+- schema_set_id: non_participant_or_pooled
+  selector: XPT schema does not contain SEQN
+  observed_file_count: 53
+  resource_ids:
+  - dietary
+  - laboratory
+  - questionnaire
+  key_semantics: >-
+    These files include lookup dictionaries and pooled-specimen tables. Resolve
+    their file-specific keys from documentation; do not infer a participant
+    relationship.
+
+entities:
+- entity_id: survey_participant_cycle
+  description: One public-use participant record within one ordinary analytic release.
+  resource_ids:
+  - demographics
+  key_fields:
+  - _cycle
+  - SEQN
+  survey_design_fields:
+  - cycle-appropriate sample weight
+  - SDMVSTRA
+  - SDMVPSU
+
+- entity_id: dietary_record
+  description: A participant-linked dietary total, recall item, supplement, or related response row from a file containing SEQN.
+  resource_ids:
+  - dietary
+  key_fields:
+  - _cycle
+  - _source_file
+  - SEQN
+  - file-specific day/item/product fields
+
+- entity_id: examination_record
+  description: A participant-linked examination result or repeated instrument measurement.
+  resource_ids:
+  - examination
+  key_fields:
+  - _cycle
+  - _source_file
+  - SEQN
+  - file-specific measurement fields
+
+- entity_id: laboratory_record
+  description: A participant-linked laboratory result from a file containing SEQN.
+  resource_ids:
+  - laboratory
+  key_fields:
+  - _cycle
+  - _source_file
+  - SEQN
+  - file-specific analyte/specimen fields
+
+- entity_id: questionnaire_record
+  description: A participant-linked questionnaire response row from a file containing SEQN.
+  resource_ids:
+  - questionnaire
+  key_fields:
+  - _cycle
+  - _source_file
+  - SEQN
+  - file-specific response fields
+
+- entity_id: reference_or_pooled_record
+  description: A lookup, food/supplement dictionary, or pooled-specimen row from a file without SEQN.
+  resource_ids:
+  - dietary
+  - laboratory
+  - questionnaire
+  key_fields:
+  - _source_file
+  - file-specific documented key
+
+relationships:
+- relationship_id: dietary_record_belongs_to_participant
+  from_entity: dietary_record
+  to_entity: survey_participant_cycle
+  join_fields:
+  - SEQN
+  partition_guard: _cycle
+  cardinality: file_specific_one_or_many_to_one
+  applies_when: Both files belong to the same ordinary analytic release and the dietary schema contains SEQN.
+  evidence: NHANES component files use respondent sequence number SEQN for participant linkage.
+  confidence: high
+
+- relationship_id: examination_record_belongs_to_participant
+  from_entity: examination_record
+  to_entity: survey_participant_cycle
+  join_fields:
+  - SEQN
+  partition_guard: _cycle
+  cardinality: file_specific_one_or_many_to_one
+  applies_when: Both files belong to the same ordinary analytic release.
+  evidence: Every locally profiled examination XPT contains SEQN.
+  confidence: high
+
+- relationship_id: laboratory_record_belongs_to_participant
+  from_entity: laboratory_record
+  to_entity: survey_participant_cycle
+  join_fields:
+  - SEQN
+  partition_guard: _cycle
+  cardinality: file_specific_one_or_many_to_one
+  applies_when: Both files belong to the same ordinary analytic release and the laboratory schema contains SEQN.
+  evidence: Participant-level NHANES laboratory files use SEQN; pooled-specimen files without SEQN are explicitly excluded.
+  confidence: high
+
+- relationship_id: questionnaire_record_belongs_to_participant
+  from_entity: questionnaire_record
+  to_entity: survey_participant_cycle
+  join_fields:
+  - SEQN
+  partition_guard: _cycle
+  cardinality: file_specific_one_or_many_to_one
+  applies_when: Both files belong to the same ordinary analytic release and the questionnaire schema contains SEQN.
+  evidence: Participant-level NHANES questionnaire files use SEQN; the RXQ_DRUG reference file is excluded.
+  confidence: high
+
+survey_design:
+  target_population: >-
+    Cycle-specific nationally representative target populations are defined by
+    NCHS documentation; do not generalize a release beyond its stated target.
+  weights: >-
+    Use the weight for the most restrictive component/subsample in the analytic
+    cohort. Weight names and represented duration vary by release and file.
+  variance: Use the cycle-appropriate masked strata and PSU variables and a survey-aware variance estimator.
+  cross_cycle: Recalculate combined-cycle weights according to official guidance for the selected releases and component.
+  pre_pandemic: Use the 2017-2020 supplied pre-pandemic weights; do not estimate the incomplete 2019-2020 portion separately.
+  post_pandemic: Apply the dedicated 2021-2023 analytic guidance and account for its changed design and collection procedures.
+
+temporal_structure:
+  survey_cycle: Release/collection interval, not an event timestamp.
+  participant_measurement_time: File-specific; many public files provide only cycle-level timing or masked/derived timing.
+  dietary_day: Day 1 and Day 2 recalls are distinct repeated observations when both are present.
+  repeated_measurement: Instrument and item-level files can contain multiple rows or columns per participant; use documented sequence/time fields.
+
+alignment_notes:
+- Resolve files through manifest.json and adapter.py; filenames and suffixes are not a sufficient schema contract.
+- Call read_schema() before selecting variables, and use group_shared_schemas() to reuse an exact structure across files without repeating its columns.
+- Join participant-linked files on SEQN plus the ordinary analytic cycle, then validate the expected merge cardinality for each source file.
+- Keep _source_file after concatenation because identical variable names can have different eligibility, methods, limits of detection, units, or coding across releases.
+- Select the analytic weight after the final cohort and component set are known; demographics weights are not universally valid for laboratory subsamples, fasting samples, or dietary analyses.
+- Treat missing-by-design, below-detection-limit, refused, and unknown codes according to the file-specific codebook rather than as one generic missing category.
+- Do not join files lacking SEQN to demographics unless an official, file-specific key relationship is documented.
+
+unresolved_relationships:
+- source: reference_or_pooled_record
+  target: participant-linked entities
+  issue: The 53 XPT files without SEQN use heterogeneous lookup or pooled-sample keys.
+  suggested_resolution: Inspect the official file documentation and declare the exact lookup or pooled-analysis relationship for the selected file only.
+  confidence: high
+- source: special multi-cycle participant identifiers
+  target: survey_participant_cycle
+  issue: Special pooled directories do not identify one ordinary cycle through their path label.
+  suggested_resolution: Use file documentation and explicit constituent-cycle evidence; do not infer cycle membership from the directory name.
+  confidence: high

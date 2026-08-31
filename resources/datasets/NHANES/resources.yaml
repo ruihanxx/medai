@@ -1,0 +1,218 @@
+dataset_id: nhanes
+dataset_name: Continuous National Health and Nutrition Examination Survey public-use data
+version: 1999-2026 catalog snapshot
+generated_at: '2026-08-31'
+raw_root: raw
+local_snapshot:
+  manifest: manifest.json
+  checksums: SHA256SUMS
+  requested_year_range: 1999-2026
+  file_count: 1598
+  size_bytes: 22541856640
+  complete: true
+  note: >-
+    The snapshot contains every public XPT found in the five official component
+    catalogs on 2026-08-31. The 2025-2026 cycle was listed but had no public XPT
+    in those catalogs at snapshot time.
+
+official_sources:
+- title: Continuous NHANES questionnaires, datasets, and documentation
+  url: https://wwwn.cdc.gov/nchs/nhanes/Default.aspx
+  accessed: '2026-08-31'
+- title: NHANES survey methods and analytic guidelines
+  url: https://wwwn.cdc.gov/nchs/nhanes/analyticguidelines.aspx
+  accessed: '2026-08-31'
+- title: Analytic guidance for the 2017-March 2020 pre-pandemic files
+  url: https://wwwn.cdc.gov/nchs/nhanes/continuousnhanes/overviewBrief.aspx?Cycle=2017-2020
+  accessed: '2026-08-31'
+- title: Analytic guidance for the August 2021-August 2023 files
+  url: https://wwwn.cdc.gov/nchs/NHANES/continuousnhanes/overviewbrief.aspx?cycle=2021-2023
+  accessed: '2026-08-31'
+
+cycle_groups:
+  standard_biennial:
+    cycles:
+    - 1999-2000
+    - 2001-2002
+    - 2003-2004
+    - 2005-2006
+    - 2007-2008
+    - 2009-2010
+    - 2011-2012
+    - 2013-2014
+    - 2015-2016
+    - 2017-2018
+  pre_pandemic_combined:
+    cycles:
+    - 2017-2020
+    note: >-
+      This 3.2-year release combines 2017-2018 and the incomplete 2019-March
+      2020 collection. Use its special weights and do not combine it with the
+      separate 2017-2018 release in one pooled sample.
+  interrupted_not_independently_weighted:
+    cycles:
+    - 2019-2020
+    represented_by: 2017-2020
+  post_pandemic:
+    cycles:
+    - 2021-2023
+    note: Uses a new sample design and cycle-specific analytic guidance.
+  special_reference_or_pooled:
+    cycles:
+    - 1988-2020
+    - 1999-2004
+    - 1999-2023
+    - 2007-2012
+    note: >-
+      These directories contain reference or special pooled files, not ordinary
+      independent survey-cycle partitions. Inspect each file's official
+      documentation before aligning it to participant records.
+  catalog_only_without_public_xpt:
+    cycles:
+    - 2025-2026
+
+partition_contract:
+  partition_keys:
+  - cycle
+  - component
+  path_pattern: raw/{cycle}/{component}/{filename}.xpt
+  manifest_rule: >-
+    manifest.json is the sole per-file index and records component, cycle,
+    filename, official URL, byte size, status, and SHA-256. Do not copy those
+    1,598 records into this file.
+  provenance_columns_added_by_adapter:
+  - _cycle
+  - _source_file
+  join_guard: >-
+    Retain both provenance columns. SEQN joins are valid only when the source
+    file contains SEQN and the release documentation supports participant-level
+    alignment.
+
+schema_reuse_contract:
+  schema_is_file_specific: true
+  shared_structure_definition: >-
+    Files share one structure only when their ordered column names, SAS types,
+    and field widths are identical. Variable labels are descriptive metadata
+    and are not part of this structural identity.
+  adapter_method: group_shared_schemas
+  representation:
+    schema_id: SHA-256 prefix of the structural signature
+    columns: stored once per shared structure
+    column_types: stored once per shared structure
+    files: list of all manifest paths sharing that structure
+  reason: >-
+    Local profiling found extensive cross-cycle reuse but also many genuine
+    schema changes. Runtime grouping avoids both duplicated declarations and
+    unsafe assumptions based only on filename suffixes.
+
+participant_key_contract:
+  key: SEQN
+  participant_linked_file_count: 1545
+  non_participant_file_count: 53
+  rule: >-
+    SEQN identifies participant-linked rows. Absence of SEQN marks a lookup,
+    pooled-specimen, or other non-participant layout; never force such a file
+    into a demographics join.
+  uniqueness: >-
+    SEQN is not necessarily unique within dietary, examination, laboratory, or
+    questionnaire files. Use file-specific row keys from the official codebook
+    and validate merge cardinality.
+
+analysis_caveats:
+- NHANES is a complex probability survey; select the correct examination, interview, fasting, dietary, subsample, or other component weight for the most restrictive analytic sample.
+- Account for masked variance strata and primary sampling units when estimating variances; do not treat observations as a simple random sample.
+- When combining compatible cycles, derive weights using the official cycle-specific guidance rather than concatenating the released weights unchanged.
+- The 2017-2020 pre-pandemic files overlap the separately released 2017-2018 files and must not be pooled with them as independent participants.
+- The incomplete 2019-March 2020 sample is not independently nationally representative; use the combined 2017-2020 release and its supplied weights.
+- The 2021-2023 release uses a changed sample design and data-collection procedures; consult its analytic guidance before trend or cross-cycle analyses.
+- Component files can represent one row per participant, repeated measures, item-level records, day-level recalls, pooled samples, or reference dictionaries. SEQN alone does not establish row uniqueness.
+- Public-use files omit restricted variables; absence from this capsule does not imply that a measure was never collected.
+
+resources:
+- resource_id: demographics
+  kind: component_xpt_collection
+  component: demographics
+  path_spec: raw/{cycle}/demographics/*.xpt
+  modality: tabular
+  file_format: sas_xport
+  role: participant_demographics_and_survey_design
+  count_summary:
+    file_count: 12
+    cycle_count: 12
+    size_bytes: 49993200
+  reader_hint: adapter.py read_schema/load_table/iter_batches; pandas.read_sas(format='xport')
+  notes: Standard release files contain one participant row keyed by SEQN plus cycle-specific weights, masked strata, and PSU fields.
+- resource_id: dietary
+  kind: component_xpt_collection
+  component: dietary
+  path_spec: raw/{cycle}/dietary/*.xpt
+  modality: tabular
+  file_format: sas_xport
+  role: dietary_interviews_supplements_and_reference_tables
+  count_summary:
+    file_count: 125
+    cycle_count: 13
+    size_bytes: 2474211760
+  reader_hint: adapter.py read_schema/load_table/iter_batches; inspect SEQN and the file codebook before joining
+  notes: Includes participant-, recall-day-, food/item-, supplement-, and reference-level layouts.
+- resource_id: examination
+  kind: component_xpt_collection
+  component: examination
+  path_spec: raw/{cycle}/examination/*.xpt
+  modality: tabular
+  file_format: sas_xport
+  role: physical_examination_and_instrument_measurements
+  count_summary:
+    file_count: 182
+    cycle_count: 12
+    size_bytes: 18868733440
+  reader_hint: Use iter_batches for large repeated-measure instrument files; adapter blocks unbounded loads above 512 MiB by default.
+  notes: All local examination files contain SEQN, but row cardinality remains file-specific.
+- resource_id: laboratory
+  kind: component_xpt_collection
+  component: laboratory
+  path_spec: raw/{cycle}/laboratory/*.xpt
+  modality: tabular
+  file_format: sas_xport
+  role: laboratory_results_subsamples_and_pooled_specimens
+  count_summary:
+    file_count: 773
+    cycle_count: 14
+    size_bytes: 371060960
+  reader_hint: Inspect SEQN, analyte-specific weights, detection-limit fields, units, and method notes before analysis.
+  notes: Contains participant-result files as well as pooled-specimen layouts without SEQN.
+- resource_id: questionnaire
+  kind: component_xpt_collection
+  component: questionnaire
+  path_spec: raw/{cycle}/questionnaire/*.xpt
+  modality: tabular
+  file_format: sas_xport
+  role: interview_questionnaire_responses_and_reference_tables
+  count_summary:
+    file_count: 506
+    cycle_count: 13
+    size_bytes: 777857280
+  reader_hint: Inspect the file-specific codebook, eligibility universe, and SEQN presence before joining.
+  notes: Most files are participant-linked; RXQ_DRUG is a multi-cycle drug reference table without SEQN.
+- resource_id: manifest
+  kind: acquisition_support
+  paths:
+  - manifest.json
+  modality: metadata
+  file_format: json
+  role: authoritative_local_file_index
+  count_summary:
+    file_count: 1
+    indexed_xpt_count: 1598
+  notes: Contains the only per-XPT path, source URL, size, completion status, and SHA-256 declarations.
+- resource_id: checksums
+  kind: acquisition_support
+  paths:
+  - SHA256SUMS
+  modality: metadata
+  file_format: sha256sum
+  role: integrity_index
+  count_summary:
+    file_count: 1
+    checksum_count: 1598
+  notes: One SHA-256 entry for every manifest XPT path.
