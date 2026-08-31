@@ -2504,6 +2504,7 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
         paper_graph_path=state["paper_graph_path"],
         execution_scope_path=state["execution_scope_path"],
         codebase_dir=codebase_dir,
+        refinement_workspace=attempt_dir,
         codegen_plan_path=codegen_plan_path,
         audit_report_path=audit_report_path,
         data_dir=config.data,

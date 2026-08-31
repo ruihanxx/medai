@@ -19,7 +19,9 @@ grouping. One run executes these stages:
 7. Audit checks all runnable preprocessing paths. Each issue has one origin
    node and routes either to preprocessing refinement or source availability.
 8. At most three cohort-refinement rounds may change only P-related code and
-   node updates; M, training, evaluation, and results remain read-only.
+   node updates. Each round follows the
+   [candidate-copy semantic-delta review](agents.md#replication-boundaries)
+   before promotion; M, training, evaluation, and results remain read-only.
 9. Planning writes one node-free environment/setup step followed by one step
    per earliest runnable-DAG topological layer. Each runnable node appears in
    exactly one layer step via `verifies`, without fallback scale.

@@ -58,7 +58,13 @@ supported root cause. Each issue records one `node_id`, description, optional
 open evidence/fix fields, and the orchestration route `preprocessing_fix` or
 `source_unavailable`. Cohort refinement may change only cohort construction,
 loading, preprocessing, directly related configuration, and affected P-local
-updates. Model, training, validation semantics, and results remain read-only.
+updates. It creates attempt-local baseline and candidate copies while retaining
+the authoritative code unchanged, develops each fix only in the candidate,
+compares candidate and baseline cohort semantics across affected and shared P
+paths, and promotes only a patch whose every delta is required by a reported
+root cause or is an unavoidable paper-consistent consequence. Unrelated or
+paper-contradictory deltas require another candidate revision. Model, training,
+validation semantics, and results remain read-only.
 Cohort refinement treats graph `paper_result` values only as observed reference
 outputs: they cannot become runtime assertions, reconciliation gates, success
 criteria, or exception conditions. Computed discrepancies remain explicit in

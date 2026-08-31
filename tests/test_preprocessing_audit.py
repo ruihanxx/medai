@@ -54,3 +54,14 @@ def test_cohort_refinement_forbids_paper_result_gates() -> None:
     assert "graph `paper_result` as an observed reference output" in prompt
     assert "runtime assertion, reconciliation gate" in prompt
     assert "Only source, method, schema, and artifact-integrity conditions" in prompt
+
+
+def test_cohort_refinement_requires_candidate_semantic_delta_review() -> None:
+    prompt = (TEMPLATES_DIR / "cohort_refine" / "session_instructions.md").read_text(
+        encoding="utf-8"
+    )
+    prompt = " ".join(prompt.split())
+    assert "`baseline_codebase` and `candidate_codebase` copies" in prompt
+    assert "self-audit the complete candidate delta against the untouched baseline" in prompt
+    assert "Revert every unrelated delta" in prompt
+    assert "If any extra effect contradicts the paper" in prompt
