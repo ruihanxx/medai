@@ -1,7 +1,8 @@
 # Documentation Router
 
-Before changing the repository, always read `coding_style.md`, then read only
-the contract files whose routing conditions match the change:
+Before changing the repository, always read `coding_style.md` and
+`change_scope.md`, then read only the contract files whose routing conditions
+match the change:
 
 | Change area | Read |
 | --- | --- |
@@ -20,6 +21,8 @@ contract files by default.
 
 - `../AGENTS.md`: repository-wide operating rules.
 - `coding_style.md`: coding style maintained by the project owner; do not duplicate it elsewhere.
+- `change_scope.md`: target-state minimality, complete removal, minimal
+  additions, and proportional recurrence prevention.
 - `execution.md`: public host execution, isolation, and orchestration-owned remote-lifecycle contract.
 - `replication.md`: base replication workflow contract.
 - `autoresearch.md`: Auto Research workflow contract.

@@ -8,7 +8,7 @@ The revised project files should normally read as if they had been written corre
 
 ## Core Rules
 
-### 1. small fix for small issues
+### 1. Keep local feedback local
 
 If the user points out a local problem X:
 
@@ -16,23 +16,15 @@ If the user points out a local problem X:
 * fix anything that logically depends on X;
 * preserve unrelated correct content.
 
-Do not make X the new theme of the project files merely because it was mentioned recently.
+Do not make X a recurring warning, example, organizing principle, or theme of
+the affected file, module, workflow, or project merely because it was mentioned
+recently.
 
-### 2. Prefer the smallest complete revision
+“Local” limits the thematic prominence and unrelated scope of the feedback. It
+does not require retaining obsolete constructs or minimizing the number of
+files touched. Change completeness follows `change_scope.md`.
 
-For a minor/local problem, make a local patch,
-make sure the patch is of the same scale as original content.
-
-Do not unnecessarily:
-
-* add new warnings or explanations in document;
-* add a more detailed and expanded content
-
-
-Revision scope should follow the **logical dependency of the defect**, not its conversational salience.
-
-
-### 3. Counterfactual Reader Test
+### 2. Counterfactual Reader Test
 
 After revising, imagine a reader who never saw the previous mistake.
 
