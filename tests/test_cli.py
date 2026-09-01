@@ -345,8 +345,8 @@ def test_replicate_without_data_reaches_paper_preprocessing(tmp_path: Path, monk
     assert "Host MinerU output is not configured" in result.stderr
     manifest = PipelineState(output).state
     assert manifest["status"] == "failed"
-    assert manifest["stages"]["preflight"]["status"] == "completed"
     assert manifest["stages"]["preprocess_pdf"]["status"] == "failed"
+    assert "preflight" not in manifest["stages"]
 
 
 def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, monkeypatch):

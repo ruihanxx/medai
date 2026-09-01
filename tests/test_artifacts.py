@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
+
 from medai.models import (
     AgentStageResult,
     CodegenPlan,
     EvidenceSummary,
 )
-from pydantic import ValidationError
 
 
 def test_codegen_node_updates_are_open_but_plan_shape_is_small() -> None:

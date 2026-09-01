@@ -376,7 +376,11 @@ def _run_parser() -> argparse.ArgumentParser:
     mode.add_argument("--replicate", action="store_true")
     mode.add_argument("--autoresearch", action="store_true")
     parser.add_argument("--paper", type=Path)
-    parser.add_argument("--repo", type=Path)
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        help="Optional local repository used only for post-codegen calibration",
+    )
     parser.add_argument(
         "--data",
         action="append",

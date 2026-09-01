@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -47,6 +48,7 @@ def run_agent(
     output_schema_path: Path | None = None,
     output_last_message_path: Path | None = None,
     resume_session_id: str | None = None,
+    environment_remove: Sequence[str] = (),
 ) -> str | None:
     """Run an agent and stream its provider JSONL transcript to disk."""
     if (
@@ -89,6 +91,8 @@ def run_agent(
         if output_last_message_path is not None:
             command.extend(["--output-last-message", str(output_last_message_path)])
         environment = os.environ.copy()
+        for name in environment_remove:
+            environment.pop(name, None)
         if adapter is not None:
             command.extend(adapter.codex_args())
             environment = adapter.child_environment(environment)

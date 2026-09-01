@@ -25,7 +25,7 @@ RUN MAKEFLAGS=-j1 R --vanilla --slave -e '\
     install("comorbidity", "1.1.0")'
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssh-client sshpass \
+    && apt-get install -y --no-install-recommends git openssh-client sshpass \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./

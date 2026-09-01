@@ -16,8 +16,8 @@ existing files in `{{ codebase_dir }}/`, preserve valid completed work, repair o
 finish incomplete work, and rerun every self-review check before declaring the
 stage complete.
 {% else %}
-This is the first code-generation attempt. The codebase may be empty or may
-contain a copied paper repository. Inspect it before deciding what to create.
+This is the first code-generation attempt. The codebase is intentionally empty;
+create an independent implementation from the paper and approved data evidence.
 {% endif %}
 By the end of this session, the directory at `{{ codebase_dir }}/` must contain a runnable
 implementation of the runnable paper-graph subgraph with scientific fidelity
@@ -55,6 +55,12 @@ described below actually occurs; never invent or hard-code a failure condition.
 Read the graph and scope before inspecting or modifying code. Implement only
 the scope's `runnable_node_ids` and use only its `active_sources`. The graph is
 immutable: do not edit it, the execution scope, or `graph/node_state.json`.
+
+This is an independence boundary. Do not search for, open, clone, download, or
+inspect any source-code repository disclosed by the paper, supplied through the
+CLI, or stored elsewhere in the run. Do not inspect sibling preflight files,
+the manifest, environment variables, or filesystem locations to discover such
+a repository. A later isolated stage owns repository comparison and calibration.
 ## Available skills
 
 A catalog of scientific-computing skills is staged at
@@ -270,12 +276,12 @@ such as downsampling after chunk-processed compact data is merged.
 
 When the paper uses specialized cohort, clinical, or methodological terms that
 cannot be mapped directly to the available source, resolve the mapping only
-when the dataset schema, metadata, source-repository conventions, and relevant
+when the dataset schema, metadata, paper context, and relevant
 medical knowledge support it. Consult authoritative external sources for a
 general clinical or methodological convention when necessary, but never use
 them to invent a paper-specific fact or substitute a required source. When no
 mapping has direct paper support, choose and implement the mapping best supported
-by the dataset schema, source-repository conventions, accepted medical knowledge,
+by the dataset schema, paper context, accepted medical knowledge,
 and the paper's overall methodology; record the uncertainty, alternatives, and
 rationale on its exact origin node and continue.
 
@@ -304,8 +310,8 @@ the selected interpretation as an issue on its exact origin node.
 Use this order of precedence:
 
 1. The paper's explicit methods and unambiguous context.
-2. The supplied dataset schema, metadata, and source-repository conventions,
-   when they are consistent with the paper.
+2. The supplied dataset schema and metadata, when they are consistent with the
+   paper.
 3. Widely accepted medical knowledge and standard medical-research methods
    that fit the study design, population, outcome, and available data. For a
    material or contested decision, consult an authoritative clinical guideline,
@@ -357,7 +363,7 @@ your decisions so they are inspectable and machine-readable. Schema:
           "description": "Paper says 'we use a small batch size' without naming a value.",
           "assumption": "Use batch_size=32.",
           "rationale": "Evidence-bound reason for this choice.",
-          "evidence": ["paper Methods", "repository configuration"],
+          "evidence": ["paper Methods", "dataset schema"],
           "implementation_location": "project configuration"
         }
       ]
@@ -420,8 +426,8 @@ Write the code, module-by-module. Guidelines:
 
 - Prefer small, focused files. One clear responsibility per file.
 - Use the paper's own variable names where natural.
-- Reuse paper code when it is faithful; patch it when needed and leave the
-  copied source runnable. Preserve an existing auditable configuration system.
+- Preserve an existing auditable configuration system when resuming generated
+  work.
   If none exists, extract every paper-stated hyperparameter into `config.yaml`
   at the codebase root. Use one section per logical group: `training:`
   (learning rate, batch size, epochs, optimizer settings, seeds), `model:`
@@ -435,8 +441,8 @@ Write the code, module-by-module. Guidelines:
 - Keep graph node IDs traceable in entry points, configuration, intermediate
   artifacts, or output metadata. Shared functions are allowed, but they must
   not merge distinct P or M semantics or obscure which V Cartesian cells ran.
-- You may install packages and create directories as needed. Preserve the
-  supplied repository's useful structure and make only necessary changes.
+- You may install packages and create directories as needed. Preserve useful
+  structure already created during an interrupted independent attempt.
 - Do not run the methodology end-to-end. That is a later phase.
   Your job is to produce the codebase; verifying it imports cleanly
   is part of Self-Review, but a full training/inference run is out
@@ -540,7 +546,7 @@ Open the project's configuration. For each paper-stated hyperparameter, confirm:
 - Code that needs the value reads it from configuration, not from an unrelated
   default function argument or hidden module-level constant.
 
-If the repository has no suitable configuration, create `config.yaml` at the
+If the generated codebase has no suitable configuration, create `config.yaml` at the
 codebase root and move the paper-stated inputs there.
 
 #### f. Node-local assumption audit
@@ -625,11 +631,11 @@ reduced-scale fallback.
 - Write into `{{ codebase_dir }}/`, except that dataset-document improvements
   may be written to `{{ dataset_patch_path }}` and provider-skill corrections to
   `{{ skill_corrections_path }}` as described above. Do not modify the source
-  dataset documents, raw data, repository skills, immutable paper graph,
+  dataset documents, raw data, staged skills, immutable paper graph,
   execution scope, or orchestration-owned node state.
 - `codegen_plan.json` lives at the codebase root. Preserve an existing
   configuration system; otherwise create `config.yaml` there.
-- Do not commit. Orchestration owns the copied codebase and stage artifacts.
+- Do not commit. Orchestration owns the generated codebase and stage artifacts.
 - Do not run the methodology end-to-end; that is the next phase.
 
 {% if structured_stage_result|default(false) %}

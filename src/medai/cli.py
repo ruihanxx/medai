@@ -72,7 +72,11 @@ def run(
         "--provider",
         help="Provider (replicate default: codex; Auto Research default: inherit)",
     ),
-    repo: Optional[Path] = typer.Option(None, "--repo", help="Optional code repository"),
+    repo: Optional[Path] = typer.Option(
+        None,
+        "--repo",
+        help="Optional local repository used only for post-codegen calibration",
+    ),
     data: Optional[list[str]] = typer.Option(
         None,
         "--data",

@@ -245,6 +245,169 @@ class SkillCorrectionsFile(RootModel[list[SkillCorrection]]):
     pass
 
 
+class RepositoryCandidate(StrictModel):
+    url: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    revision: str | None = None
+
+    @field_validator("url", "evidence")
+    @classmethod
+    def nonblank_repository_candidate_fields(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Repository candidate fields must not be blank")
+        return value
+
+
+class RepositoryCandidates(StrictModel):
+    repositories: list[RepositoryCandidate]
+
+    @model_validator(mode="after")
+    def unique_repository_urls(self) -> "RepositoryCandidates":
+        urls = [repository.url for repository in self.repositories]
+        if len(urls) != len(set(urls)):
+            raise ValueError("Repository candidate URLs must be unique")
+        return self
+
+
+class PaperRepository(StrictModel):
+    id: str = Field(pattern=r"^R\d{3}$")
+    source_kinds: list[Literal["paper_url", "local"]] = Field(min_length=1)
+    source_locations: list[str] = Field(min_length=1)
+    paper_evidence: list[str]
+    disclosed_url: str | None
+    clone_url: str | None
+    revision: str | None
+    status: Literal["available", "unavailable"]
+    commit_sha: str | None
+    tree_sha256: str | None
+    snapshot_path: str | None
+    acquired_at: str | None
+    error: str | None
+    incomplete: list[str]
+
+    @model_validator(mode="after")
+    def status_matches_repository_artifacts(self) -> "PaperRepository":
+        if len(self.source_kinds) != len(self.source_locations):
+            raise ValueError("Repository source kinds and locations must align")
+        if self.status == "available":
+            if (
+                self.tree_sha256 is None
+                or re.fullmatch(r"[0-9a-f]{64}", self.tree_sha256) is None
+                or not self.snapshot_path
+                or not self.acquired_at
+                or self.error is not None
+            ):
+                raise ValueError("Available repositories require a snapshot and tree hash")
+            if self.commit_sha is not None and re.fullmatch(
+                r"[0-9a-f]{40,64}", self.commit_sha
+            ) is None:
+                raise ValueError("Repository commit SHA is invalid")
+        elif (
+            self.commit_sha is not None
+            or self.tree_sha256 is not None
+            or self.snapshot_path is not None
+            or self.acquired_at is not None
+            or self.error is None
+            or not self.error.strip()
+        ):
+            raise ValueError("Unavailable repositories require only a nonblank error")
+        return self
+
+
+class PaperRepositories(StrictModel):
+    version: Literal[1] = 1
+    repositories: list[PaperRepository]
+
+    @model_validator(mode="after")
+    def unique_repository_ids(self) -> "PaperRepositories":
+        repository_ids = [repository.id for repository in self.repositories]
+        if len(repository_ids) != len(set(repository_ids)):
+            raise ValueError("Paper repository IDs must be unique")
+        return self
+
+    @property
+    def available(self) -> list[PaperRepository]:
+        return [repository for repository in self.repositories if repository.status == "available"]
+
+
+class RepoCalibrationEvidence(StrictModel):
+    source: str = Field(min_length=1)
+    reference: str = Field(min_length=1)
+    detail: str = Field(min_length=1)
+
+
+class PaperRepoAmbiguityEntry(StrictModel):
+    id: str = Field(pattern=r"^PRC-\d{3}$")
+    node_id: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    topic: str = Field(min_length=1)
+    repository_ids: list[str] = Field(min_length=1)
+    repository_behavior: str = Field(min_length=1)
+    paper_behavior: str | None
+    codegen_before: str = Field(min_length=1)
+    codegen_after: str = Field(min_length=1)
+    paper_relation: Literal["supports_repo", "unspecified", "contradicts_repo"]
+    repository_conflict: bool
+    scope_status: Literal["runnable", "inactive"]
+    adopt: bool
+    adoption_rationale: str = Field(min_length=1)
+    suspicion_level: Literal["high", "medium", "low"] | None
+    integrity_flags: list[
+        Literal["hardcoded_result", "outcome_guided_selection", "data_leakage"]
+    ]
+    repository_evidence: list[RepoCalibrationEvidence] = Field(min_length=1)
+    paper_evidence: list[RepoCalibrationEvidence] = Field(min_length=1)
+    codegen_evidence: list[RepoCalibrationEvidence] = Field(min_length=1)
+    changed_files: list[str]
+
+    @model_validator(mode="after")
+    def validate_calibration_decision(self) -> "PaperRepoAmbiguityEntry":
+        if len(self.repository_ids) != len(set(self.repository_ids)):
+            raise ValueError(f"Calibration entry {self.id} repeats a repository ID")
+        if self.paper_relation == "unspecified":
+            if self.suspicion_level is None:
+                raise ValueError("Paper-unspecified entries require a suspicion level")
+            if self.paper_behavior is not None:
+                raise ValueError("Paper-unspecified entries require paper_behavior=null")
+        elif self.suspicion_level is not None:
+            raise ValueError("Only paper-unspecified entries define suspicion level")
+        elif self.paper_behavior is None or not self.paper_behavior.strip():
+            raise ValueError("Paper-supported and contradictory entries require paper behavior")
+        adoption_prohibited = (
+            self.repository_conflict
+            or self.scope_status == "inactive"
+            or self.integrity_flags
+        )
+        if self.adopt and adoption_prohibited:
+            raise ValueError(
+                "Conflicting, inactive, or integrity-violating repository behavior "
+                "cannot be adopted"
+            )
+        if not self.adopt and not adoption_prohibited:
+            raise ValueError(
+                "Runnable repository behavior must be adopted unless conflict or "
+                "integrity rules prohibit it"
+            )
+        if not self.adopt and self.changed_files:
+            raise ValueError("Non-adopted repository behavior cannot declare changed files")
+        return self
+
+
+class PaperRepoAmbiguity(StrictModel):
+    version: Literal[1] = 1
+    repository_inventory_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    paper_graph_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    execution_scope_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    codegen_baseline_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    entries: list[PaperRepoAmbiguityEntry]
+
+    @model_validator(mode="after")
+    def unique_calibration_entry_ids(self) -> "PaperRepoAmbiguity":
+        entry_ids = [entry.id for entry in self.entries]
+        if len(entry_ids) != len(set(entry_ids)):
+            raise ValueError("Paper-repository calibration entry IDs must be unique")
+        return self
+
+
 class RemoteComputePlan(BaseModel):
     model_config = ConfigDict(extra="allow")
 

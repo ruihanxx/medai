@@ -11,8 +11,8 @@ from typing import Any
 
 from medai.config import AutoResearchConfig, RunConfig
 
-MANIFEST_VERSION = 6
-SUPPORTED_MANIFEST_VERSIONS = {1, 2, 3, 4, 5, MANIFEST_VERSION}
+MANIFEST_VERSION = 7
+SUPPORTED_MANIFEST_VERSIONS = {1, 2, 3, 4, 5, 6, MANIFEST_VERSION}
 
 
 def build_run_inputs(config: RunConfig) -> dict[str, Any]:
@@ -266,6 +266,7 @@ class PipelineState:
 
                 prefixes = {
                     "codegen_agent": "codegen:",
+                    "repo_calibration_agent": "repo_calibration:",
                     "audit_agent": "audit:",
                     "cohort_refine_agent": "cohort_refine:",
                 }
@@ -414,6 +415,7 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
     required_files = [
         "manifest.json",
         "preflight/resources.json",
+        "preflight/paper_repositories.json",
         "preprocessing/paper.md",
         "preprocessing/paper_graph.json",
         "preprocessing/execution_scope.json",
@@ -437,6 +439,15 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
             "read-only and cannot be used as a new Auto Research base. Use a new output "
             "directory and rerun the paper; no files were changed."
         )
+    from medai.artifacts import load_model
+    from medai.models import PaperRepositories
+
+    repository_inventory = load_model(
+        base_run / "preflight" / "paper_repositories.json",
+        PaperRepositories,
+    )
+    if repository_inventory.available:
+        required_files.append("codegen/repo_calibration/paper_repo_ambiguity.json")
     digest = hashlib.sha256()
     for relative in required_files:
         path = base_run / relative
@@ -496,6 +507,16 @@ def _base_artifact_fingerprint(base_run: Path) -> str:
         Path("preprocessing/artifacts"),
         set(),
     )
+    if repository_inventory.available:
+        from medai.repositories import validate_repository_snapshots
+
+        validate_repository_snapshots(repository_inventory, base_run)
+        _update_digest_from_directory(
+            digest,
+            base_run,
+            Path("preflight/repositories"),
+            ignored_names,
+        )
     _update_digest_from_directory(
         digest,
         base_run,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -29,9 +30,12 @@ from medai.models import (
     GraphExecutionScope,
     GraphScopeRevisionIssues,
     PaperGraph,
+    PaperRepoAmbiguity,
+    PaperRepositories,
     PendingNodeUpdate,
     ReplicationLog,
     ReplicationPlan,
+    RepositoryCandidates,
     SkillCorrectionsFile,
     SmartReplicateLog,
     replication_topological_layers,
@@ -44,6 +48,13 @@ from medai.pipeline_state import PipelineState
 from medai.preprocessing import convert_pdf_to_markdown
 from medai.prompts import render_prompt
 from medai.providers import run_agent
+from medai.repositories import (
+    acquire_repositories,
+    normalize_public_git_url,
+    repository_tree_manifest,
+    repository_tree_sha256,
+    validate_repository_snapshots,
+)
 from medai.resources import detect_resources
 from medai.study_graph import (
     collect_lineage_issues,
@@ -61,10 +72,12 @@ class WorkflowState(TypedDict, total=False):
     config: RunConfig
     paper_markdown: str
     resources_path: str
+    repository_inventory_path: str
     paper_graph_path: str
     node_state_path: str
     execution_scope_path: str
     codebase_dir: str
+    repo_calibration_path: str
     audit_verdict: str
     audit_report_path: str
     audit_issue_kinds: list[str]
@@ -141,6 +154,27 @@ def _active_node_ids(state: WorkflowState) -> set[str]:
     return set(_execution_scope(state).runnable_node_ids)
 
 
+def _repository_inventory(state: WorkflowState) -> PaperRepositories:
+    path_value = state.get("repository_inventory_path")
+    path = (
+        Path(path_value)
+        if path_value is not None
+        else state["config"].output / "preflight" / "paper_repositories.json"
+    )
+    inventory = load_model(path, PaperRepositories)
+    validate_repository_snapshots(inventory, state["config"].output)
+    return inventory
+
+
+def _repo_calibration_sha256(state: WorkflowState) -> str | None:
+    if not _repository_inventory(state).available:
+        return None
+    path = state["config"].output / "codegen" / "repo_calibration" / "paper_repo_ambiguity.json"
+    if not path.is_file():
+        raise RuntimeError(f"Repository calibration artifact is missing: {path}")
+    return sha256_file(path)
+
+
 def _active_cloud_datasets(state: WorkflowState) -> tuple[str, ...]:
     config = state["config"]
     scope = _execution_scope(state)
@@ -161,6 +195,7 @@ def _active_cloud_datasets(state: WorkflowState) -> tuple[str, ...]:
 
 _SCOPED_STAGES = [
     "codegen_agent",
+    "repo_calibration_agent",
     "audit_agent",
     "cohort_refine_agent",
     "plan_agent",
@@ -200,6 +235,7 @@ def _validate_agent_artifacts_with_resume(
     validate: Callable[[], object],
     result_schema_path: Path | None = None,
     result_path: Path | None = None,
+    environment_remove: Sequence[str] = (),
 ) -> None:
     """Resume a direct Codex stage when its owned artifacts fail validation."""
     repair_turns = 0
@@ -250,6 +286,7 @@ def _validate_agent_artifacts_with_resume(
                 output_schema_path=result_schema_path,
                 output_last_message_path=result_path,
                 resume_session_id=session_id,
+                environment_remove=environment_remove,
             )
             if result_path is not None:
                 _require_agent_stage_completion(result_path, stage_name)
@@ -995,6 +1032,7 @@ def _run_codegen_cloud_pull_handoff(
                 codex_reasoning_effort=config.codex_reasoning_effort,
                 output_schema_path=command_schema_path,
                 output_last_message_path=command_request_path,
+                environment_remove=("MEDAI_HOST_REPO",),
             )
             if session_id is None:
                 raise RuntimeError("Codex cloud-pull preparation turn did not return a session ID")
@@ -1011,6 +1049,7 @@ def _run_codegen_cloud_pull_handoff(
                 output_schema_path=command_schema_path,
                 output_last_message_path=command_request_path,
                 resume_session_id=session_id,
+                environment_remove=("MEDAI_HOST_REPO",),
             )
 
         request = load_model(command_request_path, CodegenCloudPullRequest)
@@ -1067,6 +1106,7 @@ def _run_codegen_cloud_pull_handoff(
         output_schema_path=stage_result_schema_path,
         output_last_message_path=stage_result_path,
         resume_session_id=session_id,
+        environment_remove=("MEDAI_HOST_REPO",),
     )
     return session_id
 
@@ -1456,6 +1496,7 @@ def prepare_replication_resume(config: RunConfig) -> dict[str, Any]:
         pipeline_state.invalidate_stages(
             [
                 "codegen_agent",
+                "repo_calibration_agent",
                 "audit_agent",
                 "cohort_refine_agent",
                 "plan_agent",
@@ -1519,9 +1560,15 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
     config = state["config"]
     pipeline_state = PipelineState(config.output)
     resources_path = config.output / "preflight" / "resources.json"
+    candidates_path = config.output / "preflight" / "repository_candidates.json"
+    inventory_path = config.output / "preflight" / "paper_repositories.json"
+    discovery_transcript_path = (
+        config.output / "preflight" / "repository_discovery_transcript.jsonl"
+    )
     dataset_patch_path = config.output / "system_maintenance" / "dataset" / "patch.json"
     skill_corrections_path = config.output / "system_maintenance" / "skills" / "corrections.json"
-    if pipeline_state.is_stage_completed("preflight"):
+
+    def validate_preflight_artifacts() -> PaperRepositories:
         try:
             resources = json.loads(resources_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
@@ -1531,15 +1578,55 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
         if not isinstance(resources, dict) or not isinstance(resources.get("gpus"), list):
             raise RuntimeError(f"Completed preflight artifact is invalid: {resources_path}")
         load_model(dataset_patch_path, DatasetPatchFile)
-        if not skill_corrections_path.exists():
-            write_json(skill_corrections_path, [])
         load_model(skill_corrections_path, SkillCorrectionsFile)
+        load_model(candidates_path, RepositoryCandidates)
+        inventory = load_model(inventory_path, PaperRepositories)
+        validate_repository_snapshots(inventory, config.output)
+        if not discovery_transcript_path.is_file():
+            raise RuntimeError(
+                "Completed repository discovery transcript is missing: "
+                f"{discovery_transcript_path}"
+            )
+        return inventory
+
+    preflight_outputs = [
+        str(resources_path),
+        str(candidates_path),
+        str(inventory_path),
+        str(discovery_transcript_path),
+        str(dataset_patch_path),
+        str(skill_corrections_path),
+    ]
+    if pipeline_state.is_stage_completed("preflight"):
+        validate_preflight_artifacts()
         print("resume preflight stage: skipped (already completed)")
-        return {"resources_path": str(resources_path)}
+        return {
+            "resources_path": str(resources_path),
+            "repository_inventory_path": str(inventory_path),
+        }
 
     print("enter preflight stage")
     config.validate()
     pipeline_state.start_stage("preflight")
+    frozen_inventory_sha256 = pipeline_state.get_stage_checkpoints("preflight").get(
+        "frozen_repository_inventory_sha256"
+    )
+    if isinstance(frozen_inventory_sha256, str):
+        if sha256_file(inventory_path) != frozen_inventory_sha256:
+            raise RuntimeError("Frozen repository inventory changed during preflight resume")
+        validate_preflight_artifacts()
+        pipeline_state.complete_stage("preflight", preflight_outputs)
+        print("resume preflight repository acquisition: reused frozen snapshots")
+        return {
+            "resources_path": str(resources_path),
+            "repository_inventory_path": str(inventory_path),
+        }
+    repositories_root = config.output / "preflight" / "repositories"
+    if repositories_root.exists():
+        shutil.rmtree(repositories_root)
+    for stale_artifact in (candidates_path, inventory_path):
+        if stale_artifact.exists():
+            stale_artifact.unlink()
     for name in (
         "preflight",
         "preprocessing",
@@ -1557,11 +1644,75 @@ def preflight_node(state: WorkflowState) -> dict[str, str]:
     write_json(resources_path, detect_resources(config.output))
     write_json(dataset_patch_path, [])
     write_json(skill_corrections_path, [])
-    pipeline_state.complete_stage(
-        "preflight",
-        [str(resources_path), str(dataset_patch_path), str(skill_corrections_path)],
+    paper_markdown = Path(state["paper_markdown"])
+    prompt_path = render_prompt(
+        "preflight/repository_discovery.md",
+        config.output / "prompts" / "repository_discovery.md",
+        paper_markdown=paper_markdown,
+        candidates_path=candidates_path,
     )
-    return {"resources_path": str(resources_path)}
+    session_id = run_agent(
+        provider=config.provider,
+        prompt_path=prompt_path,
+        working_dir=config.output / "preflight",
+        transcript_path=discovery_transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+        environment_remove=("MEDAI_HOST_REPO",),
+    )
+
+    def validate_candidates() -> None:
+        candidates = load_model(candidates_path, RepositoryCandidates)
+        paper_text = paper_markdown.read_text(encoding="utf-8")
+        missing = [
+            candidate.url
+            for candidate in candidates.repositories
+            if candidate.url not in paper_text
+        ]
+        if missing:
+            raise RuntimeError(
+                "Repository discovery returned URLs not present verbatim in the paper: "
+                f"{missing}"
+            )
+        for candidate in candidates.repositories:
+            _, url_revision = normalize_public_git_url(
+                candidate.url,
+                resolve_host=False,
+            )
+            if candidate.revision != url_revision:
+                raise RuntimeError(
+                    "Repository discovery revision must come only from its disclosed URL: "
+                    f"{candidate.url}"
+                )
+
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name="repository_discovery",
+        session_id=session_id,
+        working_dir=config.output / "preflight",
+        transcript_path=discovery_transcript_path,
+        artifact_paths=[candidates_path],
+        validate=validate_candidates,
+        environment_remove=("MEDAI_HOST_REPO",),
+    )
+    candidates = load_model(candidates_path, RepositoryCandidates)
+    inventory = acquire_repositories(
+        candidates=candidates.repositories,
+        local_repository=config.repo,
+        run_root=config.output,
+    )
+    write_json(inventory_path, inventory.model_dump(mode="json"))
+    validate_repository_snapshots(inventory, config.output)
+    pipeline_state.update_stage_checkpoints(
+        "preflight",
+        {"frozen_repository_inventory_sha256": sha256_file(inventory_path)},
+    )
+    pipeline_state.complete_stage("preflight", preflight_outputs)
+    return {
+        "resources_path": str(resources_path),
+        "repository_inventory_path": str(inventory_path),
+    }
 
 
 def preprocess_pdf_node(state: WorkflowState) -> dict[str, str]:
@@ -2042,23 +2193,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
     if not source_prepared or not codebase_dir.is_dir():
         if previous_status is None and codebase_dir.is_dir() and any(codebase_dir.iterdir()):
             raise RuntimeError(f"Codebase output is not empty: {codebase_dir}")
-        if config.repo is not None:
-            shutil.copytree(
-                config.repo,
-                codebase_dir,
-                dirs_exist_ok=True,
-                ignore=shutil.ignore_patterns(
-                    ".git",
-                    ".venv",
-                    "__pycache__",
-                    ".pytest_cache",
-                    ".ruff_cache",
-                    "runs",
-                    "replicate",
-                ),
-            )
-        else:
-            codebase_dir.mkdir(parents=True, exist_ok=True)
+        codebase_dir.mkdir(parents=True, exist_ok=True)
         pipeline_state.update_stage_checkpoints(
             "codegen_agent",
             {"source_prepared": True},
@@ -2127,6 +2262,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
             codex_reasoning_effort=config.codex_reasoning_effort,
             output_schema_path=result_schema_path,
             output_last_message_path=result_path,
+            environment_remove=("MEDAI_HOST_REPO",),
         )
     if result_path is not None:
         stage_result = load_model(result_path, AgentStageResult)
@@ -2150,6 +2286,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
                     "data_availability_agent",
                     "partial_data_gate",
                     "codegen_agent",
+                    "repo_calibration_agent",
                     "audit_agent",
                     "cohort_refine_agent",
                     "plan_agent",
@@ -2178,6 +2315,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
         validate=validate_outputs,
         result_schema_path=result_schema_path,
         result_path=result_path,
+        environment_remove=("MEDAI_HOST_REPO",),
     )
     codegen_plan = load_model(codegen_plan_path, CodegenPlan)
     attempt = int(pipeline_state.state["stages"]["codegen_agent"].get("attempts", 1))
@@ -2207,7 +2345,306 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
 def codegen_route(state: WorkflowState) -> str:
     if state.get("scope_revision_requested", False):
         return "data_availability_agent"
+    if _repository_inventory(state).available:
+        return "repo_calibration_agent"
     return "audit_agent"
+
+
+def _merge_repo_calibration_updates(
+    state: WorkflowState,
+    source: str,
+    ambiguity: PaperRepoAmbiguity,
+) -> None:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for entry in ambiguity.entries:
+        if entry.paper_relation == "supports_repo":
+            continue
+        grouped.setdefault(entry.node_id, []).append(
+            {
+                "description": (
+                    f"[{entry.id}] repository behavior is {entry.paper_relation}; "
+                    f"adopt={str(entry.adopt).lower()}: {entry.repository_behavior}"
+                ),
+                "calibration_id": entry.id,
+                "paper_relation": entry.paper_relation,
+                "adopt": entry.adopt,
+                "adoption_rationale": entry.adoption_rationale,
+            }
+        )
+    merge_node_updates(
+        Path(state["node_state_path"]),
+        _paper_graph(state),
+        _execution_scope(state).paper_graph_sha256,
+        source,
+        [
+            {"node_id": node_id, "issues": issues}
+            for node_id, issues in grouped.items()
+        ],
+    )
+
+
+def repo_calibration_agent_node(state: WorkflowState) -> dict[str, str]:
+    config = state["config"]
+    pipeline_state = PipelineState(config.output)
+    scope = _execution_scope(state)
+    _ensure_stage_scope(pipeline_state, "repo_calibration_agent", scope.scope_sha256)
+    inventory = _repository_inventory(state)
+    if not inventory.available:
+        raise RuntimeError("Repository calibration requires an available repository snapshot")
+    inventory_path = Path(state["repository_inventory_path"])
+    calibration_dir = config.output / "codegen" / "repo_calibration"
+    ambiguity_path = calibration_dir / "paper_repo_ambiguity.json"
+    transcript_path = calibration_dir / "repo_calibration_transcript.jsonl"
+    codebase_dir = Path(state["codebase_dir"])
+    codegen_plan_path = codebase_dir / "codegen_plan.json"
+    graph = _paper_graph(state)
+    available_ids = {repository.id for repository in inventory.available}
+    active_ids = set(scope.runnable_node_ids)
+
+    def validate_outputs(
+        expected_baseline_sha256: str | None = None,
+        baseline_codebase: Path | None = None,
+        candidate_codebase: Path | None = None,
+    ) -> PaperRepoAmbiguity:
+        ambiguity = load_model(ambiguity_path, PaperRepoAmbiguity)
+        if ambiguity.repository_inventory_sha256 != sha256_file(inventory_path):
+            raise RuntimeError("Repository calibration is bound to another inventory")
+        if ambiguity.paper_graph_sha256 != scope.paper_graph_sha256:
+            raise RuntimeError("Repository calibration is bound to another paper graph")
+        if ambiguity.execution_scope_sha256 != scope.scope_sha256:
+            raise RuntimeError("Repository calibration is bound to another execution scope")
+        if (
+            expected_baseline_sha256 is not None
+            and ambiguity.codegen_baseline_sha256 != expected_baseline_sha256
+        ):
+            raise RuntimeError("Repository calibration is bound to another codegen baseline")
+        node_ids = set(graph.node_map)
+        for entry in ambiguity.entries:
+            if entry.node_id not in node_ids:
+                raise RuntimeError(
+                    f"Repository calibration references an unknown node: {entry.node_id}"
+                )
+            unknown_repositories = set(entry.repository_ids) - available_ids
+            if unknown_repositories:
+                raise RuntimeError(
+                    "Repository calibration references unavailable repositories: "
+                    f"{sorted(unknown_repositories)}"
+                )
+            expected_scope_status = "runnable" if entry.node_id in active_ids else "inactive"
+            if entry.scope_status != expected_scope_status:
+                raise RuntimeError(
+                    f"Repository calibration scope status is wrong for {entry.id}"
+                )
+            for changed_file in entry.changed_files:
+                relative = Path(changed_file)
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise RuntimeError(
+                        f"Repository calibration has an unsafe changed file: {changed_file}"
+                    )
+        if baseline_codebase is not None and candidate_codebase is not None:
+            if repository_tree_sha256(baseline_codebase) != expected_baseline_sha256:
+                raise RuntimeError("Repository calibration modified its immutable baseline")
+            baseline_manifest = repository_tree_manifest(baseline_codebase)
+            candidate_manifest = repository_tree_manifest(candidate_codebase)
+            authoritative_manifest = repository_tree_manifest(codebase_dir)
+            if candidate_manifest != authoritative_manifest:
+                raise RuntimeError(
+                    "Authoritative codebase is not the verified calibration candidate"
+                )
+            actual_changes = {
+                path
+                for path in baseline_manifest.keys() | candidate_manifest.keys()
+                if baseline_manifest.get(path) != candidate_manifest.get(path)
+            }
+            declared_changes = {
+                Path(path).as_posix()
+                for entry in ambiguity.entries
+                if entry.adopt
+                for path in entry.changed_files
+            }
+            if actual_changes != declared_changes:
+                raise RuntimeError(
+                    "Calibration candidate delta does not exactly match adopted records: "
+                    f"actual={sorted(actual_changes)}, declared={sorted(declared_changes)}"
+                )
+        calibrated_plan = load_model(codegen_plan_path, CodegenPlan)
+        calibrated_cloud_data = _uses_cloud_data(config, calibrated_plan)
+        validate_codegen_remote_compute(
+            calibrated_plan,
+            config.output / "remote_compute" / "instance.json",
+            cloud_datasets=(
+                _active_cloud_datasets(state) if calibrated_cloud_data else ()
+            ),
+            drive_provider=config.drive_provider,
+            computation_provider=config.computation_provider,
+        )
+        validate_repository_snapshots(inventory, config.output)
+        return ambiguity
+
+    if pipeline_state.is_stage_completed("repo_calibration_agent"):
+        completed_checkpoints = pipeline_state.get_stage_checkpoints(
+            "repo_calibration_agent"
+        )
+        attempt = int(completed_checkpoints.get("scientific_attempt", 1))
+        completed_attempt_dir = calibration_dir / f"attempt_{attempt:03d}"
+        completed_baseline = completed_attempt_dir / "baseline_codebase"
+        completed_candidate = completed_attempt_dir / "candidate_codebase"
+        expected_baseline = completed_checkpoints.get("codegen_baseline_sha256")
+        if not isinstance(expected_baseline, str):
+            raise RuntimeError("Completed repository calibration lacks baseline binding")
+        ambiguity = validate_outputs(
+            expected_baseline,
+            completed_baseline,
+            completed_candidate,
+        )
+        _merge_repo_calibration_updates(
+            state,
+            f"repo_calibration:{attempt:03d}",
+            ambiguity,
+        )
+        if not transcript_path.is_file():
+            raise RuntimeError(
+                f"Completed repository calibration transcript is missing: {transcript_path}"
+            )
+        print("resume repo_calibration_agent stage: skipped (already completed)")
+        return {"repo_calibration_path": str(ambiguity_path)}
+
+    print("enter repository calibration stage")
+    pipeline_state.invalidate_stages(
+        ["audit_agent", "cohort_refine_agent", "plan_agent", "replicate_agent", "report_agents"],
+        "Repository calibration is being regenerated",
+    )
+    pipeline_state.start_stage("repo_calibration_agent")
+    _checkpoint_stage_scope(pipeline_state, "repo_calibration_agent", scope.scope_sha256)
+    attempt = int(pipeline_state.state["stages"]["repo_calibration_agent"]["attempts"])
+    attempt_dir = calibration_dir / f"attempt_{attempt:03d}"
+    baseline_codebase = attempt_dir / "baseline_codebase"
+    candidate_codebase = attempt_dir / "candidate_codebase"
+    if attempt_dir.exists():
+        raise RuntimeError(f"Repository calibration attempt already exists: {attempt_dir}")
+    attempt_dir.mkdir(parents=True)
+    ignore = shutil.ignore_patterns(
+        ".git",
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".ruff_cache",
+        "runs",
+        "replicate",
+    )
+    shutil.copytree(codebase_dir, baseline_codebase, ignore=ignore)
+    shutil.copytree(codebase_dir, candidate_codebase, ignore=ignore)
+    baseline_sha256 = repository_tree_sha256(baseline_codebase)
+    pipeline_state.update_stage_checkpoints(
+        "repo_calibration_agent",
+        {
+            "scientific_attempt": attempt,
+            "codegen_baseline_sha256": baseline_sha256,
+        },
+    )
+    resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
+    codegen_plan = load_model(codegen_plan_path, CodegenPlan)
+    cloud_data = _uses_cloud_data(config, codegen_plan)
+    validate_codegen_remote_compute(
+        codegen_plan,
+        config.output / "remote_compute" / "instance.json",
+        cloud_datasets=_active_cloud_datasets(state) if cloud_data else (),
+        drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+    )
+    result_schema_path: Path | None = None
+    result_path: Path | None = None
+    if config.provider == "codex":
+        result_schema_path = config.output / "prompts" / "repo_calibration_result.schema.json"
+        result_path = calibration_dir / "repo_calibration_agent_result.json"
+        write_json(result_schema_path, AgentStageResult.model_json_schema())
+    prompt_path = render_prompt(
+        "repo_calibration/session_instructions.md",
+        config.output / "prompts" / f"repo_calibration_attempt_{attempt:03d}.md",
+        paper_markdown=state["paper_markdown"],
+        paper_graph_path=state["paper_graph_path"],
+        execution_scope_path=state["execution_scope_path"],
+        repository_inventory_path=inventory_path,
+        repository_paths=[
+            config.output / str(repository.snapshot_path)
+            for repository in inventory.available
+        ],
+        authoritative_codebase=codebase_dir,
+        baseline_codebase=baseline_codebase,
+        candidate_codebase=candidate_codebase,
+        codegen_plan_path=codegen_plan_path,
+        candidate_codegen_plan_path=candidate_codebase / "codegen_plan.json",
+        ambiguity_path=ambiguity_path,
+        inventory_sha256=sha256_file(inventory_path),
+        paper_graph_sha256=scope.paper_graph_sha256,
+        execution_scope_sha256=scope.scope_sha256,
+        codegen_baseline_sha256=baseline_sha256,
+        runnable_node_ids=scope.runnable_node_ids,
+        computation_provider_reference=config.computation_provider_reference,
+        computation_provider_state_path=config.output / "remote_compute" / "instance.json",
+        remote_working_dir=(
+            codegen_plan.remote_compute.remote_working_dir
+            if codegen_plan.remote_compute is not None
+            else None
+        ),
+        skills_dir=skills_dir(),
+        local_resources=resources,
+        structured_stage_result=result_schema_path is not None,
+    )
+    session_id = run_agent(
+        provider=config.provider,
+        prompt_path=prompt_path,
+        working_dir=attempt_dir,
+        transcript_path=transcript_path,
+        siliconflow_config_path=config.siliconflow_config,
+        codex_model=config.codex_model,
+        codex_reasoning_effort=config.codex_reasoning_effort,
+        output_schema_path=result_schema_path,
+        output_last_message_path=result_path,
+        environment_remove=("MEDAI_HOST_REPO",),
+    )
+    if result_path is not None:
+        _require_agent_stage_completion(result_path, "repo_calibration_agent")
+    ambiguity: PaperRepoAmbiguity | None = None
+
+    def validate_calibration_outputs() -> None:
+        nonlocal ambiguity
+        ambiguity = validate_outputs(
+            baseline_sha256,
+            baseline_codebase,
+            candidate_codebase,
+        )
+
+    _validate_agent_artifacts_with_resume(
+        config=config,
+        stage_name="repo_calibration_agent",
+        session_id=session_id,
+        working_dir=attempt_dir,
+        transcript_path=transcript_path,
+        artifact_paths=[ambiguity_path, codegen_plan_path, codebase_dir],
+        validate=validate_calibration_outputs,
+        result_schema_path=result_schema_path,
+        result_path=result_path,
+        environment_remove=("MEDAI_HOST_REPO",),
+    )
+    assert ambiguity is not None
+    _merge_repo_calibration_updates(
+        state,
+        f"repo_calibration:{attempt:03d}",
+        ambiguity,
+    )
+    pipeline_state.complete_stage(
+        "repo_calibration_agent",
+        [
+            str(ambiguity_path),
+            str(attempt_dir),
+            str(codebase_dir),
+            str(codegen_plan_path),
+            str(transcript_path),
+            *([str(result_path)] if result_path is not None else []),
+        ],
+    )
+    return {"repo_calibration_path": str(ambiguity_path)}
 
 
 def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
@@ -2219,6 +2656,11 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     codegen_attempt = int(codegen_stage.get("attempts", 0))
     if codegen_stage.get("status") != "completed" or codegen_attempt < 1:
         raise RuntimeError("Preprocessing audit requires a completed codegen attempt")
+    if _repository_inventory(state).available and not pipeline_state.is_stage_completed(
+        "repo_calibration_agent"
+    ):
+        raise RuntimeError("Preprocessing audit requires completed repository calibration")
+    repo_calibration_sha256 = _repo_calibration_sha256(state)
 
     checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
     cohort_refine_checkpoints = pipeline_state.get_stage_checkpoints("cohort_refine_agent")
@@ -2228,6 +2670,8 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     if (
         pipeline_state.is_stage_completed("audit_agent")
         and audited_codegen_attempt == codegen_attempt
+        and checkpoints.get("audited_repo_calibration_sha256")
+        == repo_calibration_sha256
         and audited_refine_round == completed_refine_round
     ):
         report_path = Path(str(checkpoints.get("report_path", "")))
@@ -2379,6 +2823,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     source_revision = "source_unavailable" in issue_kinds
     checkpoint = {
         "audited_codegen_attempt": codegen_attempt,
+        "audited_repo_calibration_sha256": repo_calibration_sha256,
         "audited_refine_round": completed_refine_round,
         "verdict": verdict,
         "report_path": str(report_path),
@@ -2405,6 +2850,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
                 "data_availability_agent",
                 "partial_data_gate",
                 "codegen_agent",
+                "repo_calibration_agent",
                 "audit_agent",
                 "cohort_refine_agent",
                 "plan_agent",
@@ -2804,10 +3250,89 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     report_path = config.output / "report" / "reproduction_report.md"
     claims_dir = config.output / "report" / "claims"
     final_transcript_path = config.output / "report" / "report_transcript.jsonl"
+    repository_inventory = _repository_inventory(state)
+    ambiguity: PaperRepoAmbiguity | None = None
+    if repository_inventory.available:
+        ambiguity_path = (
+            config.output / "codegen" / "repo_calibration" / "paper_repo_ambiguity.json"
+        )
+        ambiguity = load_model(ambiguity_path, PaperRepoAmbiguity)
+    conflicts = (
+        [entry for entry in ambiguity.entries if entry.paper_relation == "contradicts_repo"]
+        if ambiguity is not None
+        else []
+    )
+    suspicion_rank = {"high": 0, "medium": 1, "low": 2}
+    unspecified = (
+        sorted(
+            [entry for entry in ambiguity.entries if entry.paper_relation == "unspecified"],
+            key=lambda entry: suspicion_rank[str(entry.suspicion_level)],
+        )
+        if ambiguity is not None
+        else []
+    )
+
+    def validate_repository_report_section(report_text: str) -> None:
+        section = "## Paper–repository calibration"
+        conflict_heading = "### Repository–paper contradictions"
+        unspecified_heading = "### Paper-unspecified repository details"
+        for heading in (section, conflict_heading, unspecified_heading):
+            if report_text.count(heading) != 1:
+                raise RuntimeError(f"Final report must contain exactly one {heading!r}")
+        if not (
+            report_text.index(section)
+            < report_text.index(conflict_heading)
+            < report_text.index(unspecified_heading)
+        ):
+            raise RuntimeError("Repository calibration report headings are out of order")
+        section_text = report_text.split(section, 1)[1]
+        conflict_text, unspecified_text = section_text.split(unspecified_heading, 1)
+        if "Repository acquisition:" not in conflict_text:
+            raise RuntimeError("Repository calibration report lacks acquisition coverage")
+        coverage_line = next(
+            line
+            for line in conflict_text.splitlines()
+            if line.startswith("Repository acquisition:")
+        )
+        for repository in repository_inventory.repositories:
+            if repository.id not in coverage_line or repository.status not in coverage_line:
+                raise RuntimeError(
+                    f"Repository acquisition coverage omits {repository.id} status"
+                )
+        for entry in conflicts:
+            lines = [line for line in conflict_text.splitlines() if entry.id in line]
+            if len(lines) != 1 or f"adopt={str(entry.adopt).lower()}" not in lines[0]:
+                raise RuntimeError(
+                    f"Repository contradiction {entry.id} is missing or lacks adopt"
+                )
+            if entry.id in unspecified_text:
+                raise RuntimeError(f"Repository contradiction {entry.id} is misclassified")
+        positions: list[int] = []
+        for entry in unspecified:
+            lines = [line for line in unspecified_text.splitlines() if entry.id in line]
+            if len(lines) != 1 or f"adopt={str(entry.adopt).lower()}" not in lines[0]:
+                raise RuntimeError(
+                    f"Paper-unspecified entry {entry.id} is missing or lacks adopt"
+                )
+            if entry.id in conflict_text:
+                raise RuntimeError(f"Paper-unspecified entry {entry.id} is misclassified")
+            positions.append(unspecified_text.index(entry.id))
+        if positions != sorted(positions):
+            raise RuntimeError("Paper-unspecified repository details are not suspicion-sorted")
+        expected_ids = {entry.id for entry in [*conflicts, *unspecified]}
+        reported_ids = re.findall(r"\bPRC-\d{3}\b", section_text)
+        if set(reported_ids) != expected_ids or any(
+            reported_ids.count(entry_id) != 1 for entry_id in expected_ids
+        ):
+            raise RuntimeError(
+                "Repository calibration report IDs must match the ambiguity artifact exactly"
+            )
+
     claims_dir.mkdir(parents=True, exist_ok=True)
     if pipeline_state.is_stage_completed("report_agents"):
         if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"Completed reproduction report is missing: {report_path}")
+        validate_repository_report_section(report_path.read_text(encoding="utf-8"))
         for claim in graph.claims:
             fragment_path = claims_dir / f"{claim.id}.md"
             validate_claim_report(fragment_path.read_text(encoding="utf-8"), claim.id)
@@ -2967,11 +3492,36 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
             ensure_ascii=False,
             indent=2,
         ),
+        repository_coverage_json=json.dumps(
+            [
+                {
+                    "id": repository.id,
+                    "status": repository.status,
+                    "commit_sha": repository.commit_sha,
+                    "incomplete": repository.incomplete,
+                    "error": repository.error,
+                }
+                for repository in repository_inventory.repositories
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        repository_conflicts_json=json.dumps(
+            [entry.model_dump(mode="json") for entry in conflicts],
+            ensure_ascii=False,
+            indent=2,
+        ),
+        repository_unspecified_json=json.dumps(
+            [entry.model_dump(mode="json") for entry in unspecified],
+            ensure_ascii=False,
+            indent=2,
+        ),
     )
 
     def validate_final_report_output() -> None:
         if not report_path.is_file() or not report_path.read_text(encoding="utf-8").strip():
             raise RuntimeError(f"Final report agent did not write report: {report_path}")
+        validate_repository_report_section(report_path.read_text(encoding="utf-8"))
 
     session_id = run_agent(
         provider=config.provider,
@@ -3017,14 +3567,15 @@ def create_workflow():
     builder.add_node("data_availability_agent", data_availability_agent_node)
     builder.add_node("partial_data_gate", partial_data_gate_node)
     builder.add_node("codegen_agent", codegen_agent_node)
+    builder.add_node("repo_calibration_agent", repo_calibration_agent_node)
     builder.add_node("audit_agent", audit_agent_node)
     builder.add_node("cohort_refine_agent", cohort_refine_agent_node)
     builder.add_node("plan_agent", plan_agent_node)
     builder.add_node("replicate_agent", replicate_agent_node)
     builder.add_node("report_agents", report_agents_node)
-    builder.add_edge(START, "preflight")
-    builder.add_edge("preflight", "preprocess_pdf")
-    builder.add_edge("preprocess_pdf", "preprocessing_agent")
+    builder.add_edge(START, "preprocess_pdf")
+    builder.add_edge("preprocess_pdf", "preflight")
+    builder.add_edge("preflight", "preprocessing_agent")
     builder.add_edge("preprocessing_agent", "data_availability_agent")
     builder.add_edge("data_availability_agent", "partial_data_gate")
     builder.add_edge("partial_data_gate", "codegen_agent")
@@ -3033,9 +3584,11 @@ def create_workflow():
         codegen_route,
         {
             "audit_agent": "audit_agent",
+            "repo_calibration_agent": "repo_calibration_agent",
             "data_availability_agent": "data_availability_agent",
         },
     )
+    builder.add_edge("repo_calibration_agent", "audit_agent")
     builder.add_conditional_edges(
         "audit_agent",
         audit_route,

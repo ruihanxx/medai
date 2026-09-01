@@ -17,6 +17,24 @@ weaken, strengthen, or reconcile their assessments.
 - Replication outputs: paths in `replication_log.json["step_outcomes"]`
 - Per-claim reports: `{{ claims_dir }}`
 
+Repository acquisition coverage, including unavailable and incomplete sources:
+
+```json
+{{ repository_coverage_json }}
+```
+
+Repository behaviors that contradict explicit paper text:
+
+```json
+{{ repository_conflicts_json }}
+```
+
+Paper-unspecified repository details, already sorted high to low suspicion:
+
+```json
+{{ repository_unspecified_json }}
+```
+
 The claim index below fixes graph order, claim type, paper result, and the
 per-claim report path. `type` must be copied from the claim node's `role` and is
 expected to be exactly `final` or `validation`.
@@ -73,9 +91,9 @@ ancestor issue onto a descendant.
 
 ## Output
 
-Write exactly these four sections after the title, in this order. Do not append
+Write exactly these five sections after the title, in this order. Do not append
 per-claim narratives or any other section; the claim-path table links to the
-detailed evidence.
+detailed evidence. The repository section must remain last.
 
 ```markdown
 # Reproduction Report
@@ -103,13 +121,33 @@ detailed evidence.
 | Node | Issues |
 | --- | --- |
 | D1 | none |
+
+## Paper–repository calibration
+
+Repository acquisition: R001 available at commit ..., R002 unavailable (...).
+
+### Repository–paper contradictions
+
+- [PRC-001] P1 — concise behavior and evidence; adopt=true — rationale.
+
+### Paper-unspecified repository details
+
+- [high] [PRC-002] T1 — concise behavior and evidence; adopt=false — rationale.
 ```
 
 Escape Markdown table pipes inside values and replace embedded newlines with
-`<br>`. Before finishing, reread the report and verify: all four sections occur
+`<br>`. Use `- none` when either repository list is empty. Mention every
+repository inventory ID and its acquisition status in the coverage line. Copy
+each supplied calibration ID exactly once into its designated subsection and
+include the exact lowercase `adopt=true` or `adopt=false` value on the same
+bullet. Preserve the supplied order of paper-unspecified details; it is the
+required high-to-medium-to-low suspicion order. Do not add `supports_repo`
+entries to either list.
+
+Before finishing, reread the report and verify: all five sections occur
 once and in order; every claim occurs once in both claim tables and follows
 graph order; every claim row contains its paper result, reproduced result, and
 unchanged assessment; every paper artifact occurs once in paper order; every
 reproduced path exists relative to the run root or is `not produced`; every
 graph node occurs once; every supplied issue appears only on its origin node;
-and the node issues table is the last content in the file.
+and the repository calibration section is the last content in the file.

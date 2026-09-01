@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from medai.artifacts import write_json
 from medai.config import RunConfig
 from medai.data_availability import sha256_file
@@ -172,6 +173,10 @@ def test_replication_requires_result_and_real_evidence(tmp_path: Path, bad_field
     scope = _scope(graph_path, graph)
     scope_path = output / "preprocessing" / "execution_scope.json"
     write_json(scope_path, scope.model_dump(mode="json"))
+    write_json(
+        output / "preflight" / "paper_repositories.json",
+        {"version": 1, "repositories": []},
+    )
     codebase = output / "codegen" / "codebase"
     replication = output / "replication"
     codebase.mkdir(parents=True)
@@ -467,6 +472,10 @@ def test_report_resume_skips_valid_completed_claim(
 
     claims_dir = output / "report" / "claims"
     claims_dir.mkdir(parents=True)
+    write_json(
+        output / "preflight" / "paper_repositories.json",
+        {"version": 1, "repositories": []},
+    )
 
     def fragment(claim_id: str, paper_result: str) -> str:
         return f"""# Claim {claim_id}
@@ -534,6 +543,18 @@ Assessment: close
 | V1 | none |
 | C1 | none |
 | C2 | none |
+
+## Paper–repository calibration
+
+Repository acquisition: none.
+
+### Repository–paper contradictions
+
+- none
+
+### Paper-unspecified repository details
+
+- none
 """,
                 encoding="utf-8",
             )
@@ -565,3 +586,6 @@ Assessment: close
     report = (output / "report" / "reproduction_report.md").read_text(encoding="utf-8")
     assert report.index("## Claim comparison") < report.index("## Artifact reproduction")
     assert report.index("## Claim report paths") < report.index("## Node issues")
+    assert report.index("## Node issues") < report.index(
+        "## Paper–repository calibration"
+    )

@@ -31,8 +31,10 @@ class OpenStringIO(io.StringIO):
 
 def test_codex_prompt_uses_stdin_and_writes_transcript(tmp_path: Path, monkeypatch):
     captured = {}
+    monkeypatch.setenv("MEDAI_HOST_REPO", "/hidden/repository")
 
     def fake_popen(command, **kwargs):
+        captured["environment"] = kwargs["env"]
         captured["process"] = FakeProcess(command, **kwargs)
         return captured["process"]
 
@@ -50,6 +52,7 @@ def test_codex_prompt_uses_stdin_and_writes_transcript(tmp_path: Path, monkeypat
         siliconflow_config_path=None,
         codex_model="gpt-5.6-terra",
         codex_reasoning_effort="high",
+        environment_remove=("MEDAI_HOST_REPO",),
     )
 
     assert captured["process"].command[-1] == "-"
@@ -60,6 +63,7 @@ def test_codex_prompt_uses_stdin_and_writes_transcript(tmp_path: Path, monkeypat
         'model_reasoning_effort="high"',
     ]
     assert captured["process"].stdin.getvalue() == "do the work"
+    assert "MEDAI_HOST_REPO" not in captured["environment"]
     assert '"type":"done"' in transcript.read_text(encoding="utf-8")
     assert '"type":"interrupted"' in (tmp_path / "agent_transcript.attempt-1.jsonl").read_text(
         encoding="utf-8"
