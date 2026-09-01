@@ -506,9 +506,9 @@ HTML_TEMPLATE = r"""<!doctype html>
     .toolbar button { min-width: 34px; height: 34px; padding: 0 10px; border: 1px solid #385274; border-radius: 8px; background: #13243b; color: var(--text); cursor: pointer; }
     .toolbar button:hover { background: #1b3150; }
     .hint { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
-    .graph-scroll { position: relative; flex: 1; overflow: auto; background-color: #07111f; background-image: radial-gradient(#29415e 1px, transparent 1px); background-size: 22px 22px; cursor: grab; }
-    .graph-scroll.dragging { cursor: grabbing; user-select: none; }
-    svg { display: block; transform-origin: top left; }
+    .graph-viewport { position: relative; flex: 1; overflow: hidden; touch-action: none; background-color: #07111f; background-image: radial-gradient(#29415e 1px, transparent 1px); background-size: 22px 22px; cursor: grab; }
+    .graph-viewport.dragging { cursor: grabbing; user-select: none; }
+    svg { display: block; width: 100%; height: 100%; }
     .edge { fill: none; stroke: #395474; stroke-width: 1.45; opacity: .67; transition: opacity .12s, stroke .12s, stroke-width .12s; }
     .edge.dimmed { opacity: .08; }
     .edge.lineage { opacity: 1; stroke: var(--accent); stroke-width: 2.6; }
@@ -596,9 +596,9 @@ HTML_TEMPLATE = r"""<!doctype html>
         <button id="zoom-out" title="Zoom out">−</button>
         <button id="zoom-in" title="Zoom in">+</button>
         <button id="fit" title="Fit graph">Fit</button>
-        <span class="hint">Hover: lineage · Ctrl+wheel: zoom · Drag: pan</span>
+        <span class="hint">Hover: lineage · Ctrl+wheel: zoom · Drag: move camera</span>
       </div>
-      <div class="graph-scroll" id="graph-scroll">
+      <div class="graph-viewport" id="graph-viewport">
         <svg id="graph" role="img" aria-label="MedAI claim provenance graph"></svg>
       </div>
     </section>
@@ -613,11 +613,13 @@ HTML_TEMPLATE = r"""<!doctype html>
   const nodes = new Map(DATA.nodes.map(node => [node.id, node]));
   const app = document.querySelector(".app");
   const svg = document.getElementById("graph");
-  const scroll = document.getElementById("graph-scroll");
+  const viewport = document.getElementById("graph-viewport");
   const detailsResizer = document.getElementById("details-resizer");
   const detailsRoot = document.getElementById("details");
   let selectedId = null;
   let zoom = 1;
+  let panX = 0;
+  let panY = 0;
   let query = "";
   let detailsWidth = 430;
 
@@ -677,9 +679,11 @@ HTML_TEMPLATE = r"""<!doctype html>
   marker.appendChild(svgElement("path", {d: "M0,0 L0,7 L7,3.5 z", fill: "context-stroke"}));
   defs.appendChild(marker);
   svg.appendChild(defs);
+  const scene = svgElement("g", {class: "scene"});
   const edgeLayer = svgElement("g", {class: "edges"});
   const nodeLayer = svgElement("g", {class: "nodes"});
-  svg.append(edgeLayer, nodeLayer);
+  scene.append(edgeLayer, nodeLayer);
+  svg.appendChild(scene);
 
   const nodeWidth = DATA.layout.node_width;
   const nodeHeight = DATA.layout.node_height;
@@ -877,34 +881,44 @@ HTML_TEMPLATE = r"""<!doctype html>
     if (node.update_sources.length) addDisclosure(definition, "Update sources", node.update_sources);
   }
 
-  function setZoom(nextZoom) {
+  function syncViewport() {
+    svg.setAttribute("viewBox", `0 0 ${Math.max(1, viewport.clientWidth)} ${Math.max(1, viewport.clientHeight)}`);
+  }
+  function applyCamera() {
+    scene.setAttribute("transform", `translate(${panX} ${panY}) scale(${zoom})`);
+  }
+  function setZoom(
+    nextZoom,
+    focusX = viewport.clientWidth / 2,
+    focusY = viewport.clientHeight / 2,
+  ) {
+    const graphX = (focusX - panX) / zoom;
+    const graphY = (focusY - panY) / zoom;
     zoom = Math.min(1.8, Math.max(.22, nextZoom));
-    svg.setAttribute("width", DATA.layout.canvas_width * zoom);
-    svg.setAttribute("height", DATA.layout.canvas_height * zoom);
-    svg.setAttribute("viewBox", `0 0 ${DATA.layout.canvas_width} ${DATA.layout.canvas_height}`);
+    panX = focusX - graphX * zoom;
+    panY = focusY - graphY * zoom;
+    applyCamera();
   }
   function fitGraph() {
-    const horizontal = (scroll.clientWidth - 24) / DATA.layout.canvas_width;
-    const vertical = (scroll.clientHeight - 24) / DATA.layout.canvas_height;
-    setZoom(Math.min(1, horizontal, vertical));
-    scroll.scrollLeft = 0;
-    scroll.scrollTop = 0;
+    syncViewport();
+    const horizontal = (viewport.clientWidth - 24) / DATA.layout.canvas_width;
+    const vertical = (viewport.clientHeight - 24) / DATA.layout.canvas_height;
+    zoom = Math.min(1.8, Math.max(.22, Math.min(1, horizontal, vertical)));
+    panX = (viewport.clientWidth - DATA.layout.canvas_width * zoom) / 2;
+    panY = (viewport.clientHeight - DATA.layout.canvas_height * zoom) / 2;
+    applyCamera();
   }
   document.getElementById("zoom-in").addEventListener("click", () => setZoom(zoom * 1.2));
   document.getElementById("zoom-out").addEventListener("click", () => setZoom(zoom / 1.2));
   document.getElementById("fit").addEventListener("click", fitGraph);
-  scroll.addEventListener("wheel", event => {
+  viewport.addEventListener("wheel", event => {
     if (!event.ctrlKey) return;
     event.preventDefault();
-    const rect = scroll.getBoundingClientRect();
+    const rect = viewport.getBoundingClientRect();
     const pointerX = event.clientX - rect.left;
     const pointerY = event.clientY - rect.top;
-    const graphX = (scroll.scrollLeft + pointerX) / zoom;
-    const graphY = (scroll.scrollTop + pointerY) / zoom;
-    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroll.clientHeight : 1;
-    setZoom(zoom * Math.exp(-event.deltaY * unit * .0015));
-    scroll.scrollLeft = graphX * zoom - pointerX;
-    scroll.scrollTop = graphY * zoom - pointerY;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.clientHeight : 1;
+    setZoom(zoom * Math.exp(-event.deltaY * unit * .0015), pointerX, pointerY);
   }, {passive: false});
   document.getElementById("search").addEventListener("input", event => {
     query = event.target.value.trim().toLowerCase();
@@ -912,6 +926,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     applyFocus(null);
   });
   svg.addEventListener("click", event => {
+    if (performance.now() < suppressCanvasClickUntil) return;
     if (event.target === svg || event.target.closest(".edges")) {
       selectedId = null;
       applyFocus(null);
@@ -919,20 +934,38 @@ HTML_TEMPLATE = r"""<!doctype html>
     }
   });
 
-  let drag = null;
-  scroll.addEventListener("pointerdown", event => {
-    if (event.target.closest(".node")) return;
-    drag = {x: event.clientX, y: event.clientY, left: scroll.scrollLeft, top: scroll.scrollTop};
-    scroll.classList.add("dragging");
-    scroll.setPointerCapture(event.pointerId);
+  let cameraDrag = null;
+  let suppressCanvasClickUntil = 0;
+  viewport.addEventListener("pointerdown", event => {
+    if (event.button !== 0 || event.target.closest(".node")) return;
+    cameraDrag = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      panX,
+      panY,
+      moved: false,
+    };
+    viewport.classList.add("dragging");
+    event.preventDefault();
   });
-  scroll.addEventListener("pointermove", event => {
-    if (!drag) return;
-    scroll.scrollLeft = drag.left - (event.clientX - drag.x);
-    scroll.scrollTop = drag.top - (event.clientY - drag.y);
+  window.addEventListener("pointermove", event => {
+    if (!cameraDrag || event.pointerId !== cameraDrag.pointerId) return;
+    const deltaX = event.clientX - cameraDrag.x;
+    const deltaY = event.clientY - cameraDrag.y;
+    cameraDrag.moved ||= Math.abs(deltaX) + Math.abs(deltaY) > 3;
+    panX = cameraDrag.panX + deltaX;
+    panY = cameraDrag.panY + deltaY;
+    applyCamera();
   });
-  scroll.addEventListener("pointerup", () => { drag = null; scroll.classList.remove("dragging"); });
-  scroll.addEventListener("pointercancel", () => { drag = null; scroll.classList.remove("dragging"); });
+  function finishCameraDrag(event) {
+    if (!cameraDrag || event.pointerId !== cameraDrag.pointerId) return;
+    if (cameraDrag.moved) suppressCanvasClickUntil = performance.now() + 100;
+    cameraDrag = null;
+    viewport.classList.remove("dragging");
+  }
+  window.addEventListener("pointerup", finishCameraDrag);
+  window.addEventListener("pointercancel", finishCameraDrag);
 
   function detailsWidthBounds() {
     return {minimum: 300, maximum: Math.max(300, Math.min(760, app.clientWidth - 328))};
@@ -944,6 +977,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     detailsResizer.setAttribute("aria-valuemin", bounds.minimum);
     detailsResizer.setAttribute("aria-valuemax", bounds.maximum);
     detailsResizer.setAttribute("aria-valuenow", Math.round(detailsWidth));
+    syncViewport();
   }
   let detailsResize = null;
   detailsResizer.addEventListener("pointerdown", event => {
