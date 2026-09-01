@@ -236,7 +236,7 @@ Write only this compact JSON object to `{{ report_path }}`:
       "route": "preprocessing_fix",
       "evidence": ["results/p1_counts.json", "paper Methods"],
       "diagnosis": "The evidence-bound causal preprocessing or data-contract defect, not merely a symptom.",
-      "required_fix": "The exact cohort, loading, or preprocessing correction required."
+      "acceptance_condition": "The observable corrected P behavior or artifact condition required for a future PASS."
     }
   ]
 }
@@ -245,10 +245,10 @@ Write only this compact JSON object to `{{ report_path }}`:
 Use exactly the two top-level fields shown. `PASS` requires an empty `issues`
 list. `FAIL` requires the complete accumulated set of distinct actionable
 issues and at least one issue. Every issue must contain a runnable origin
-`node_id`, a nonblank `description`, and `route`; add open paper-specific fields
-such as `evidence`, `diagnosis`, `required_fix`, source name, or affected direct
-inputs when they improve auditability. Do not use a fixed kind or severity
-taxonomy.
+`node_id`, a nonblank `description`, `route`, a nonblank evidence-bound
+`diagnosis`, and a nonblank `acceptance_condition`; add open paper-specific
+fields such as `evidence`, source name, or affected direct inputs when they
+improve auditability. Do not use a fixed kind or severity taxonomy.
 
 Use `preprocessing_fix` only when generated cohort/loading/preprocessing logic
 within refinement scope should change. Use `source_unavailable` only when
@@ -258,9 +258,11 @@ and must exit without a verdict. Attach each issue exactly once to the node
 where it originates; do not copy it to descendants or list all affected claims,
 because orchestration computes lineage propagation later. Keep evidence
 observational, diagnosis causal without unsupported speculation, and the
-required fix testable. Leave detailed commands and statistics in
-`{{ results_dir }}` rather than copying them into the report. Before finishing,
-reload the JSON and verify all issue IDs are runnable and all cited local
-evidence exists.
+acceptance condition testable. Define what must be true after correction, not
+how refinement must implement it; do not emit `required_fix`. Paper
+underspecification alone is not a blocker. Leave detailed commands and
+statistics in `{{ results_dir }}` rather than copying them into the report.
+Before finishing, reload the JSON and verify all issue IDs are runnable and all
+cited local evidence exists.
 
 Begin the preprocessing audit now.

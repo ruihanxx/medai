@@ -72,9 +72,10 @@ compute or the `computation-provider` skill.{% endif %}
    `{{ audit_report_path }}`. Work only on issues whose route is
    `preprocessing_fix`; orchestration handles `source_unavailable` by revising
    availability and scope. Treat `description` and `evidence` as the observed
-   failure, `diagnosis` when present as its causal interpretation, and
-   `required_fix` when present as the minimum correction contract. Confirm every
-   issue's `node_id` is runnable.
+   failure, `diagnosis` when present as a causal hypothesis to confirm, and
+   `acceptance_condition` as the required observable outcome. Treat
+   `required_fix` in a legacy report only as an implementation proposal, not a
+   correction contract. Confirm every issue's `node_id` is runnable.
 2. Before editing, create the baseline and candidate copies required above.
    Keep probe scripts and outputs under `{{ refinement_workspace }}` and run
    focused probes against the baseline copy, never the authoritative codebase.
@@ -85,10 +86,13 @@ compute or the `computation-provider` skill.{% endif %}
    branch-specific artifacts. If the reported defect prevents complete
    baseline execution, retain every comparison available before the failure
    and use focused probes around the failed boundary; do not bypass the defect
-   in the baseline.
-3. In the candidate only, fix every diagnosed issue exactly as required while
-   preserving all out-of-scope behavior. Do not fix only a shared symptom while
-   leaving a reported root cause unresolved. When changing a shared P
+   in the baseline. Confirm, refine, or correct each reported diagnosis from
+   this baseline evidence before choosing a solution.
+3. In the candidate only, choose and implement the smallest evidence-supported
+   correction that satisfies each acceptance condition, or corrects each
+   observed failure in a legacy report, while preserving all out-of-scope
+   behavior. Do not fix only a shared symptom while leaving a confirmed root
+   cause unresolved. When changing a shared P
    implementation, trace every runnable consumer first and preserve branches
    not named by the issue unless the same evidenced root cause applies to them.
 4. If a fix exposes a new paper-underspecified cohort or preprocessing decision,
@@ -145,8 +149,8 @@ compute or the `computation-provider` skill.{% endif %}
    Also exit nonzero rather than promoting when the baseline/candidate semantic
    comparison cannot be completed reliably. Before finishing, reload
    `codegen_plan.json`, verify that all updated node IDs are runnable, every
-   required fix is reflected in code and node-local update metadata, all
-   unrelated plan fields are unchanged, and the codebase is ready for the next
-   independent audit attempt.
+   acceptance condition has verified evidence, all corrections are reflected
+   in code and node-local update metadata, all unrelated plan fields are
+   unchanged, and the codebase is ready for the next independent audit attempt.
 
 Begin cohort refinement now.

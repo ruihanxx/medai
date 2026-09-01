@@ -54,17 +54,19 @@ blockers. Its `node_updates` are open and aligned to graph node IDs.
 
 Audit treats source data and the codebase as read-only and writes only in its
 attempt directory. It covers all runnable P paths and accumulates every
-supported root cause. Each issue records one `node_id`, description, optional
-open evidence/fix fields, and the orchestration route `preprocessing_fix` or
-`source_unavailable`. Cohort refinement may change only cohort construction,
-loading, preprocessing, directly related configuration, and affected P-local
-updates. It creates attempt-local baseline and candidate copies while retaining
-the authoritative code unchanged, develops each fix only in the candidate,
-compares candidate and baseline cohort semantics across affected and shared P
-paths, and promotes only a patch whose every delta is required by a reported
-root cause or is an unavoidable paper-consistent consequence. Unrelated or
-paper-contradictory deltas require another candidate revision. Model, training,
-validation semantics, and results remain read-only.
+supported root cause. Each issue records one `node_id`, description,
+evidence-bound diagnosis, observable acceptance condition, and the orchestration
+route `preprocessing_fix` or `source_unavailable`; audit defines the required
+outcome, not its implementation. Cohort refinement confirms each diagnosis
+against baseline evidence, chooses the correction, and may change only cohort
+construction, loading, preprocessing, directly related configuration, and
+affected P-local updates. It creates attempt-local baseline and candidate copies
+while retaining the authoritative code unchanged, develops each fix only in the
+candidate, compares candidate and baseline cohort semantics across affected and
+shared P paths, and promotes only a patch whose every delta is required by a
+reported root cause or is an unavoidable paper-consistent consequence.
+Unrelated or paper-contradictory deltas require another candidate revision.
+Model, training, validation semantics, and results remain read-only.
 Cohort refinement treats graph `paper_result` values only as observed reference
 outputs: they cannot become runtime assertions, reconciliation gates, success
 criteria, or exception conditions. Computed discrepancies remain explicit in
