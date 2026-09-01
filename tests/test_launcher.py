@@ -159,6 +159,7 @@ def test_init_builds_image_and_runs_cpu_mineru(tmp_path: Path):
             str(dataset_root),
             "--provider",
             "codex",
+            "--force-remote",
         ],
         cwd=tmp_path,
         env=env,
@@ -176,6 +177,7 @@ def test_init_builds_image_and_runs_cpu_mineru(tmp_path: Path):
     assert "dst=/workspace/mineru-output,readonly" in run_calls
     assert f"src={dataset_root / 'test-data'},dst=/workspace/data,readonly" in run_calls
     assert "--data /workspace/data" in run_calls
+    assert "--force-remote" in run_calls
 
 
 def test_python_and_virtualenv_platform_policy():

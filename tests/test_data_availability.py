@@ -5,8 +5,12 @@ import json
 
 import pytest
 
+from medai.artifacts import write_json
+from medai.config import RunConfig
 from medai.data_availability import derive_graph_execution_scope
 from medai.models import GraphDataAvailabilityReport, PaperGraph
+from medai.pipeline_state import PipelineState, build_run_inputs
+from medai.workflow import data_availability_agent_node
 
 
 def _node(node_id: str, inputs: list[str]) -> dict[str, object]:
@@ -61,6 +65,45 @@ def _derive(report: GraphDataAvailabilityReport):
     return derive_graph_execution_scope(
         _graph(), report, paper_graph_sha256="1" * 64, report_sha256=report_hash
     )
+
+
+def test_force_remote_rejects_a_completed_local_scope(tmp_path) -> None:
+    output = tmp_path / "output"
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    data = tmp_path / "data"
+    data.mkdir()
+    config = RunConfig(
+        paper=paper,
+        output=output,
+        provider="codex",
+        data=data,
+        datasets=("data",),
+        local_data_paths=(data,),
+        force_remote=True,
+        computation_provider="fake",
+        computation_provider_config={"provider": "fake"},
+        computation_provider_reference=tmp_path / "provider.md",
+    )
+    graph_path = output / "preprocessing" / "paper_graph.json"
+    write_json(graph_path, _graph().model_dump(mode="json"))
+    report = _report("available", "available")
+    for requirement in report.requirements:
+        requirement.source_name = str(data)
+    report_path = output / "availability.json"
+    write_json(report_path, report.model_dump(mode="json"))
+    pipeline_state = PipelineState.create(output, build_run_inputs(config))
+    pipeline_state.start_stage("data_availability_agent")
+    pipeline_state.update_stage_checkpoints(
+        "data_availability_agent",
+        {"report_path": str(report_path), "scope_sha256": "0" * 64, "verdict": "FULL"},
+    )
+    pipeline_state.complete_stage("data_availability_agent", [str(report_path)])
+
+    with pytest.raises(ValueError, match="--force-remote scope must use remote"):
+        data_availability_agent_node(
+            {"config": config, "paper_graph_path": str(graph_path)}  # type: ignore[arg-type]
+        )
 
 
 def test_independent_preprocessing_variants_produce_maximal_claim_subgraph() -> None:

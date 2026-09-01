@@ -33,6 +33,7 @@ def build_run_inputs(config: RunConfig) -> dict[str, Any]:
         "datasets": list(config.dataset_names),
         "data_sources": data_sources,
         "clouddrive": config.clouddrive,
+        "force_remote": config.force_remote,
         "drive_provider": config.drive_provider,
         "cloud_dataset": config.cloud_dataset,
         "cloud_source": config.cloud_source,
@@ -160,6 +161,11 @@ class PipelineState:
             for name, value in inputs.items()
             if name in recorded and recorded[name] != value
         ]
+        if (
+            "force_remote" not in recorded
+            and inputs.get("force_remote") is True
+        ):
+            changed.append("force_remote")
         if changed:
             raise RuntimeError(
                 "Cannot resume because run inputs or output-affecting configuration "

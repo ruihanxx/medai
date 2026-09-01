@@ -92,6 +92,11 @@ def run(
         "--clouddrive",
         help="Make the configured provider cloud dataset available for remote execution",
     ),
+    force_remote: bool = typer.Option(
+        False,
+        "--force-remote",
+        help="Require remote compute regardless of local resource capacity",
+    ),
     cloud_dataset: Optional[list[str]] = typer.Option(
         None,
         "--cloud-dataset",
@@ -163,6 +168,7 @@ def run(
                 codex_reasoning_effort=codex_reasoning_effort,
                 smart_replicate=smart_replicate,
                 clouddrive=clouddrive,
+                force_remote=force_remote,
                 cloud_dataset=cloud_dataset,
                 on_partial_data=on_partial_data,
             )
@@ -177,12 +183,13 @@ def run(
                 or dataset_name is not None
                 or smart_replicate
                 or clouddrive
+                or force_remote
                 or cloud_dataset is not None
                 or on_partial_data != "continue"
             ):
                 raise ValueError(
                     "--autoresearch does not accept --paper, --repo, --data, --dataset-name, "
-                    "--clouddrive, --cloud-dataset, or --smart-replicate"
+                    "--clouddrive, --force-remote, --cloud-dataset, or --smart-replicate"
                 )
             if replicate_run is None:
                 raise ValueError("--autoresearch requires --replicate-run")

@@ -83,6 +83,13 @@ reducing the required scientific scale. `--clouddrive` alone remains remote rega
 local capacity because raw data has no local path; when local data is also
 supplied, the normal local-first capacity decision applies. Codegen consumes
 this persisted location decision and may not repeat or change it.
+`--force-remote` overrides the local-first capacity choice for replication and
+requires every runnable scope to use the configured computation provider even
+when local resources are sufficient. It requires a configured computation
+provider, remains subject to the same full-scale capacity floors and partial-data
+gate, and is recorded in `manifest.json`. For local-only data, Availability makes
+the binding remote decision without renting or uploading; Codegen realizes it
+after the gate. Auto Research does not accept this replication-only flag.
 
 Replication accepts `--on-partial-data continue|ask|stop` (default `continue`).
 A PARTIAL run lists reproducible and blocked claims, their node paths, direct

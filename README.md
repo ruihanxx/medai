@@ -126,6 +126,8 @@ VASTAI_MAX_CAMPAIGN_INSTANCES=3
 
 Cloud mode creates a read-only remote data target and a complete file inventory. Use <code>--clouddrive --data &lt;dataset-name&gt;</code>, **not** a local data path. The selected adapter manages billable creation, power-off, release, and resume through run state; never hand-edit <code>remote_compute/instance.json</code>.
 
+To require remote compute even when the local machine is sufficient, configure <code>MEDAI_COMPUTATION_PROVIDER</code> and add <code>--force-remote</code> to a new replication run. With local-only data, MedAI waits until the partial-data gate has passed before renting compute or uploading the runnable-scope data.
+
 ### 4. Initialize once
 
 <code>init</code> creates the host MinerU environment, installs the pinned PDF runtime, builds the <code>medai:local</code> image, and downloads MinerU models. The initial run can take a while; completed environments and models are reused.
@@ -200,11 +202,12 @@ Choose a completed supervised-prediction replication. Without <code>--output</co
 | Argument | Purpose and constraints |
 | --- | --- |
 | <code>--replicate</code> | Starts replication; mutually exclusive with <code>--autoresearch</code> and requires <code>--paper</code>. |
-| <code>--autoresearch</code> | Starts improvement research from a completed run. Requires <code>--replicate-run</code>; cannot be combined with <code>--paper</code>, <code>--repo</code>, <code>--data</code>, <code>--clouddrive</code>, or <code>--smart-replicate</code>. |
+| <code>--autoresearch</code> | Starts improvement research from a completed run. Requires <code>--replicate-run</code>; cannot be combined with <code>--paper</code>, <code>--repo</code>, <code>--data</code>, <code>--clouddrive</code>, <code>--force-remote</code>, or <code>--smart-replicate</code>. |
 | <code>--paper &lt;PDF&gt;</code> | Paper PDF; replication only. |
 | <code>--repo &lt;dir&gt;</code> | Optional extra/fallback calibration source. It is snapshotted read-only and never seeds codegen. |
 | <code>--data &lt;dir-or-name&gt;</code> | Existing local directory, or a safe dataset directory name with <code>--clouddrive</code>. |
 | <code>--clouddrive</code> | Enables cloud materialization; requires a configured computation provider and drive. |
+| <code>--force-remote</code> | Requires every runnable replication scope to use the configured remote-compute provider regardless of local capacity. |
 | <code>--provider &lt;codex\|claude\|codex-siliconflow&gt;</code> | Selects the agent provider; replication defaults to <code>codex</code>. |
 | <code>--siliconflow-config &lt;dotenv&gt;</code> | Required for <code>codex-siliconflow</code>; invalid with another provider. |
 | <code>--codex-model &lt;name&gt;</code> | Overrides <code>MEDAI_CODEX_MODEL</code>; <code>codex</code> only. |
@@ -494,6 +497,8 @@ VASTAI_MAX_CAMPAIGN_INSTANCES=3
 
 云端模式会创建只读远程数据目标和完整文件清单。调用时使用 <code>--clouddrive --data &lt;dataset-name&gt;</code>，**不要**传本地数据路径。适配器会通过运行状态管理计费创建、关机、释放和恢复；不要手动编辑 <code>remote_compute/instance.json</code>。
 
+如果希望本机资源充足时也强制使用远程计算，请先配置 <code>MEDAI_COMPUTATION_PROVIDER</code>，再为新的复现运行添加 <code>--force-remote</code>。仅使用本地数据时，MedAI 会等 partial-data gate 通过后才租用资源并上传可运行范围所需的数据。
+
 ### 4. 一次性初始化
 
 <code>init</code> 创建宿主机 MinerU 环境、安装固定 PDF 解析依赖、构建 <code>medai:local</code> 镜像并下载 MinerU 模型。首次运行耗时较长，后续会复用完成的环境和模型。
@@ -568,11 +573,12 @@ VASTAI_MAX_CAMPAIGN_INSTANCES=3
 | 参数 | 用途与约束 |
 | --- | --- |
 | <code>--replicate</code> | 启动复现；与 <code>--autoresearch</code> 二选一，且需要 <code>--paper</code>。 |
-| <code>--autoresearch</code> | 在已完成复现上启动改进研究；需要 <code>--replicate-run</code>，不能与 <code>--paper</code>、<code>--repo</code>、<code>--data</code>、<code>--clouddrive</code>、<code>--smart-replicate</code> 同用。 |
+| <code>--autoresearch</code> | 在已完成复现上启动改进研究；需要 <code>--replicate-run</code>，不能与 <code>--paper</code>、<code>--repo</code>、<code>--data</code>、<code>--clouddrive</code>、<code>--force-remote</code>、<code>--smart-replicate</code> 同用。 |
 | <code>--paper &lt;PDF&gt;</code> | 论文 PDF；仅复现。 |
 | <code>--repo &lt;dir&gt;</code> | 可选额外/兜底校准源；系统生成只读快照，且绝不用于初始化 codegen。 |
 | <code>--data &lt;dir-or-name&gt;</code> | 本地模式为现有数据目录；与 <code>--clouddrive</code> 同用时为安全数据集目录名。 |
 | <code>--clouddrive</code> | 启用云端数据物化；需要已配置计算提供商和云盘。 |
+| <code>--force-remote</code> | 不考虑本地资源是否充足，要求每个可运行复现范围都使用已配置的远程计算提供商。 |
 | <code>--provider &lt;codex\|claude\|codex-siliconflow&gt;</code> | 智能体提供商；复现默认值为 <code>codex</code>。 |
 | <code>--siliconflow-config &lt;dotenv&gt;</code> | <code>codex-siliconflow</code> 必填；不能与其他 provider 混用。 |
 | <code>--codex-model &lt;name&gt;</code> | 覆盖 <code>MEDAI_CODEX_MODEL</code>；仅 <code>codex</code>。 |

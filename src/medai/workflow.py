@@ -1861,6 +1861,14 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         )
         if scope.verdict in {"FULL", "PARTIAL"} and scope.execution_location is None:
             raise ValueError("A runnable execution scope requires an execution location")
+        if (
+            config.force_remote
+            and scope.verdict in {"FULL", "PARTIAL"}
+            and scope.execution_location != "remote"
+        ):
+            raise ValueError(
+                "A runnable --force-remote scope must use remote execution"
+            )
         active_sources = set(scope.active_sources)
         active_cloud = tuple(
             dataset
@@ -1947,6 +1955,7 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         scope_revision_reports=scope_revision_reports,
         cloud_only=config.data is None and bool(config.selected_cloud_datasets),
         dual_source=config.data is not None and bool(config.selected_cloud_datasets),
+        force_remote=config.force_remote,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
         computation_provider_state_path=config.output / "remote_compute" / "instance.json",

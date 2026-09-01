@@ -33,6 +33,7 @@ class RunConfig:
     datasets: tuple[str, ...] = ()
     local_data_paths: tuple[Path, ...] = ()
     clouddrive: bool = False
+    force_remote: bool = False
     computation_provider: str | None = None
     computation_provider_config: dict[str, Any] | None = None
     computation_provider_reference: Path | None = None
@@ -115,6 +116,15 @@ class RunConfig:
             or self.cloud_sources
         ):
             raise ValueError("Cloud-drive configuration requires --clouddrive")
+        if self.force_remote and (
+            self.computation_provider is None
+            or self.computation_provider_config is None
+            or self.computation_provider_reference is None
+        ):
+            raise ValueError(
+                "--force-remote requires a configured computation provider; set "
+                "MEDAI_COMPUTATION_PROVIDER"
+            )
         input_dirs = (("repository", self.repo),) + tuple(
             ("data", path) for path in self.dataset_paths
         )
@@ -160,6 +170,7 @@ class RunConfig:
         smart_replicate: bool = False,
         on_partial_data: str = "continue",
         clouddrive: bool = False,
+        force_remote: bool = False,
         cloud_dataset: str | Sequence[str] | None = None,
     ) -> "RunConfig":
         normalized_provider = provider.strip().casefold()
@@ -217,6 +228,7 @@ class RunConfig:
             datasets=dataset_names,
             local_data_paths=local_data_paths,
             clouddrive=clouddrive,
+            force_remote=force_remote,
             computation_provider=computation_provider,
             computation_provider_config=computation_provider_config,
             computation_provider_reference=computation_provider_reference,

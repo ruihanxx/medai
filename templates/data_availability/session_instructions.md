@@ -19,7 +19,16 @@ Available local sources:
 Available cloud sources:
 {% for dataset, source in cloud_datasets %}- {{ dataset }}: `{{ source }}`
 {% endfor %}
-{% if dual_source %}
+{% if force_remote %}
+The operator requires remote execution for every runnable claim path. Choose
+`execution_location: remote` regardless of whether local resources would be
+sufficient. Still derive and record the faithful full-scale resource floors;
+never weaken the scientific scale because a smaller remote offer is easier to
+obtain. When cloud sources are configured, inspect and materialize only those
+remote sources. When all active sources are local-only, do not search offers,
+create an instance, or upload data during this stage; Codegen realizes the
+binding remote decision after the partial-data gate.
+{% elif dual_source %}
 When local resources are sufficient for faithful execution, inspect only the
 local sources and choose `execution_location: local`. Do not inspect cloud
 sources, search offers, create remote state or instances, or materialize cloud

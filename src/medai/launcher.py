@@ -388,6 +388,7 @@ def _run_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dataset-path", type=Path)
     parser.add_argument("--clouddrive", action="store_true")
+    parser.add_argument("--force-remote", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--replicate-run", type=Path)
     parser.add_argument("--provider")
@@ -588,11 +589,12 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             or args.data is not None
             or args.dataset_path is not None
             or args.clouddrive
+            or args.force_remote
             or args.on_partial_data != "continue"
         ):
             raise LauncherError(
                 "--autoresearch does not accept --paper, --repo, --data, "
-                "--dataset-path, --clouddrive, or --on-partial-data"
+                "--dataset-path, --clouddrive, --force-remote, or --on-partial-data"
             )
         if args.smart_replicate:
             raise LauncherError("--smart-replicate requires --replicate")
@@ -855,6 +857,8 @@ def _run(project_root: Path, argv: Sequence[str]) -> int:
             cli_args.extend(["--codex-reasoning-effort", str(codex_reasoning_effort)])
         if args.replicate and args.smart_replicate:
             cli_args.append("--smart-replicate")
+        if args.replicate and args.force_remote:
+            cli_args.append("--force-remote")
 
         home = Path.home()
         for name in ("codex", "claude", "ssh"):

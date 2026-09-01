@@ -137,6 +137,41 @@ def test_unique_configured_provider_is_selected_without_an_environment_selector(
     assert config.computation_provider == "fake"
 
 
+def test_force_remote_requires_provider_and_is_recorded(tmp_path: Path, monkeypatch):
+    skills = tmp_path / "skills"
+    _write_provider_skill(skills)
+    monkeypatch.setenv("MEDAI_SKILLS_DIR", str(skills))
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+
+    with pytest.raises(ValueError, match="--force-remote requires"):
+        RunConfig.create(
+            paper=paper,
+            output=tmp_path / "missing-provider",
+            provider="codex",
+            repo=None,
+            data=None,
+            siliconflow_config=None,
+            force_remote=True,
+        )
+
+    monkeypatch.setenv("FAKE_TOKEN", "secret")
+    monkeypatch.setenv("FAKE_IMAGE", "image-1")
+    config = RunConfig.create(
+        paper=paper,
+        output=tmp_path / "output",
+        provider="codex",
+        repo=None,
+        data=None,
+        siliconflow_config=None,
+        force_remote=True,
+    )
+
+    assert config.force_remote is True
+    assert config.computation_provider == "fake"
+    assert build_run_inputs(config)["force_remote"] is True
+
+
 def test_resume_inherits_recorded_provider_selection(tmp_path: Path, monkeypatch):
     skills = tmp_path / "skills"
     _write_provider_skill(skills)

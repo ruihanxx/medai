@@ -23,6 +23,7 @@ def test_help_lists_required_inputs():
     assert "--provider" in result.stdout
     assert "--data" in result.stdout
     assert "--clouddrive" in result.stdout
+    assert "--force-remote" in result.stdout
     assert "--codex-model" in result.stdout
     assert "--codex-reasoning-effort" in result.stdout
     assert "--smart-replicate" in result.stdout

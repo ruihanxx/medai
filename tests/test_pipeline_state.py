@@ -105,3 +105,10 @@ def test_completed_stage_checkpoints_can_be_migrated(tmp_path: Path):
         "scope_sha256": "new",
         "verdict": "PARTIAL",
     }
+
+
+def test_resume_cannot_enable_force_remote_on_an_existing_run(tmp_path: Path):
+    state = PipelineState.create(tmp_path / "output", {"provider": "codex"})
+
+    with pytest.raises(RuntimeError, match="force_remote"):
+        state.resume({"provider": "codex", "force_remote": True})
