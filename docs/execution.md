@@ -30,7 +30,8 @@ the launcher invokes the host `mineru` command and mounts its temporary output
 read-only into the container. It detects CUDA, Apple MPS, or CPU from PyTorch,
 sets `MINERU_DEVICE_MODE`, and defaults to the cross-platform `pipeline` backend;
 `MEDAI_MINERU_BACKEND` may override it. Replicate requires `--paper`,
-`--provider`; `--repo` is optional. Repeat `--data` for each explicitly supplied
+`--provider`; `--repo` is an optional extra/fallback calibration source, never
+codegen input. Repeat `--data` for each explicitly supplied
 dataset (for example `--data mimic-iv --data eicu`). Each
 value is a unique safe directory name and rejects slashes, absolute paths, `.`
 and `..`. Data may be omitted so the paper audit can identify unsupplied
@@ -111,8 +112,10 @@ to be released and its completed cloud inventory to remain reloadable; the
 campaign owns a separate instance and copies the inventory as its immutable
 materialization baseline.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
-Paper, repository, data, provider configuration, and CLI credentials are
-mounted read-only. The host `~/.ssh` directory is copied from its read-only
+Paper, optional local repository, data, provider configuration, and CLI
+credentials are mounted read-only. Preflight snapshots a local repository and
+deduplicates it with paper-disclosed sources. The host `~/.ssh` directory is
+copied from its read-only
 mount into the container's ephemeral HOME so computation-provider SSH operations
 can use OpenSSH config and identities without modifying host credentials. The
 project `.env` is passed to Docker with `--env-file`, so provider skills must
@@ -125,8 +128,8 @@ directory, named from its UTC start time and paper filename. Passing its existin
 directory through replication `--output` resumes it.
 
 Auto Research restores paper, repository, and data locations from the base
-manifest, skips MinerU, and requires manifest v6 plus a completed base run with
-all canonical replication stages reloadable. Manifest v1–v5 is rejected before
+manifest, skips MinerU, and requires manifest v7 plus a completed base run with
+all canonical replication stages reloadable. Manifest v1–v6 is rejected before
 writeback. The launcher mounts the base run
 read-only at `/workspace/base-run`, mounts only the selected campaign output
 writable at `/workspace/autoresearch`, and remounts recorded local source data
@@ -203,5 +206,12 @@ methodological hypothesis and exact change, and rerun the affected commands.
 Hard-coding anchors, editing computed outputs, or unsupported tuning remains
 prohibited. The resolved boolean is recorded in `manifest.json`.
 
-When a repository is supplied, it is copied to `codegen/codebase/`; agents
-modify only that copy.
+After PDF conversion, preflight extracts only verbatim paper-disclosed public
+HTTPS Git URLs. Git acquisition is non-interactive, disables hooks and LFS
+smudge, pins the URL ref or fetched default-branch commit, recursively accepts
+only similarly valid submodules, removes `.git`, and records missing LFS or
+submodule content. Failures remain in the inventory and replication continues.
+Completed preflight inventories are frozen: resume hash-checks snapshots and
+never downloads or updates them. Codegen receives none of these sources;
+calibration statically reads the frozen snapshots only after independent
+codegen. Remote synchronization contains calibrated generated code only.

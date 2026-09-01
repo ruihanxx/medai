@@ -4,8 +4,12 @@
 
 ```text
 runs/<run_id>/
-├── manifest.json                         # manifest v6
-├── preflight/resources.json
+├── manifest.json                         # manifest v7
+├── preflight/
+│   ├── resources.json
+│   ├── repository_candidates.json
+│   ├── paper_repositories.json
+│   └── repositories/<repo_id>/           # frozen tree; no .git metadata
 ├── preprocessing/
 │   ├── paper.md
 │   ├── artifacts/
@@ -22,6 +26,10 @@ runs/<run_id>/
 │   ├── codebase/codegen_plan.json
 │   ├── codegen_transcript.jsonl
 │   ├── codegen_agent_result.json
+│   ├── repo_calibration/
+│   │   ├── paper_repo_ambiguity.json
+│   │   ├── repo_calibration_transcript.jsonl
+│   │   └── attempt_<NNN>/{baseline_codebase/,candidate_codebase/}
 │   ├── audit/attempt_<NNN>/{audit_report.json,audit_transcript.jsonl,scripts/,results/}
 │   ├── cohort_refine/attempt_<NNN>/cohort_refine_transcript.jsonl
 │   └── scope_revision_<scope-sha256>.json
@@ -142,9 +150,39 @@ ordered Markdown tables: every C in graph order with its `final`/`validation`
 role, paper result, reproduced result, and unchanged assessment; every named
 paper Figure/Table artifact with its real reproduced path and artifact-level
 assessment; every C with its fragment path; and every graph node with only its
-origin-local issues.
-The final report is checked for existence and non-empty content but is not
-governed by a static Markdown schema.
+origin-local issues. The host additionally validates the repository section
+contract below; the four scientific tables remain agent-checked rather than
+parsed into a closed Markdown schema.
+
+`repository_candidates.json` contains only verbatim, paper-disclosed public
+HTTPS Git URLs and their paper evidence. `paper_repositories.json` records each
+paper/local source, normalized URL, requested ref, acquisition status, frozen
+commit, tree hash, snapshot path, incomplete LFS/submodule notes, and error.
+Available snapshots are hash-validated on every resume and are never refreshed.
+
+`paper_repo_ambiguity.json` is bound to the inventory, graph, execution scope,
+and independent-codegen baseline hashes. Each `PRC-NNN` entry has exactly one
+origin `node_id`, topic, repository/paper/codegen before-and-after evidence,
+`supports_repo|unspecified|contradicts_repo`, repository-conflict and scope
+flags, boolean `adopt`, rationale, changed files, and integrity flags. Only
+`unspecified` entries carry `high|medium|low` suspicion. Inactive,
+repository-conflicting, result-hardcoded, outcome-selected, or leaking behavior
+cannot be adopted. The candidate/authoritative file delta must exactly equal
+the union of changed files declared by adopted entries.
+
+Suspicion is `high` for outcome-oriented evidence, hidden cohort manipulation,
+leakage, manual seed/checkpoint/threshold choice, result hardcoding, or an
+unjustified special performance-enhancing procedure; `medium` for a fixed
+performance-sensitive value normally selected by validation/CV/search without
+evidence of outcome peeking; and `low` for medical conventions, standard
+processing/training practice, ordinary defaults, and routine operational values.
+
+After the four core tables, the report has a final
+`Paper–repository calibration` section. It reports acquisition coverage, then
+lists every contradiction exactly once with `adopt`, followed by every
+paper-unspecified item exactly once with `adopt` in high-to-medium-to-low
+suspicion order. The host validates headings, coverage, identity, uniqueness,
+classification, adoption display, and ordering.
 
 ## Auto Research
 
@@ -198,7 +236,7 @@ sum against the configured threshold.
 
 ## Compatibility
 
-Manifest v6 is the only writable/resumable format. Directories with manifest
-v1–v5 remain untouched and readable as historical output, but cannot be
+Manifest v7 is the only writable/resumable format. Directories with manifest
+v1–v6 remain untouched and readable as historical output, but cannot be
 resumed or used as a new Auto Research base. No graph is inferred from legacy
 artifacts; rerun into a new output directory.

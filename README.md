@@ -22,6 +22,7 @@ MedAI is an evidence-bound harness for medical-paper replication and Auto Resear
 - **Heterogeneous datasets:** MedAI is not restricted to one dataset or one table format. It is designed for the structured clinical, EHR/longitudinal, time-series, medical-imaging, omics, text, and other research inputs required by a paper—provided that complete paper-required source files and a usable runtime are supplied.
 - **Prediction and statistical analysis:** The replication workflow extracts a fine-grained D/P/T/M/V/C graph for datasets, preprocessing, training, trained-model artifacts, validations, and claims. Statistical paths do not need training or model nodes.
 - **Scientific fidelity and traceability:** The paper, source repository, and source data are read-only. Missing paper-required files, invalid artifacts, and technical failures stop explicitly; MedAI does not fabricate results, silently substitute inputs, or reduce scale just to produce a successful-looking run.
+- **Isolated repository calibration:** Preflight freezes public Git repositories directly disclosed by the paper. Codegen still starts empty and cannot inspect them; a later static calibration records paper conflicts and undisclosed repository details before applying only validated, safe changes.
 - **Paper improvement / Auto Research:** From a completed, valid prediction replication, MedAI proposes paper- and literature-grounded input-representation, model, or training-strategy improvements. It assesses isolated refinement graphs against selected prediction-validation nodes and existing baseline evidence; statistical-only validations can receive zero weight.
 
 
@@ -143,7 +144,7 @@ Useful initialization variables: <code>MEDAI_MODEL_CACHE</code> selects the mode
 
 ### 5. Replicate a paper
 
-Replace the placeholders with absolute paths. <code>--repo</code> is optional; in local mode <code>--data</code> must be the prepared data directory.
+Replace the placeholders with absolute paths. <code>--repo</code> is an optional extra/fallback calibration source, never initial codegen input; in local mode <code>--data</code> must be the prepared data directory.
 
 ~~~bash
 ./medai \
@@ -201,7 +202,7 @@ Choose a completed supervised-prediction replication. Without <code>--output</co
 | <code>--replicate</code> | Starts replication; mutually exclusive with <code>--autoresearch</code> and requires <code>--paper</code>. |
 | <code>--autoresearch</code> | Starts improvement research from a completed run. Requires <code>--replicate-run</code>; cannot be combined with <code>--paper</code>, <code>--repo</code>, <code>--data</code>, <code>--clouddrive</code>, or <code>--smart-replicate</code>. |
 | <code>--paper &lt;PDF&gt;</code> | Paper PDF; replication only. |
-| <code>--repo &lt;dir&gt;</code> | Optional source repository; only its run copy is modified. |
+| <code>--repo &lt;dir&gt;</code> | Optional extra/fallback calibration source. It is snapshotted read-only and never seeds codegen. |
 | <code>--data &lt;dir-or-name&gt;</code> | Existing local directory, or a safe dataset directory name with <code>--clouddrive</code>. |
 | <code>--clouddrive</code> | Enables cloud materialization; requires a configured computation provider and drive. |
 | <code>--provider &lt;codex\|claude\|codex-siliconflow&gt;</code> | Selects the agent provider; replication defaults to <code>codex</code>. |
@@ -283,28 +284,32 @@ or shared code alone does not create an edge. Availability audits only direct
 
 ~~~mermaid
 flowchart LR
-    I[Paper PDF / optional code / data] --> A[Preflight and PDF parsing]
-    A --> B[Immutable D/P/T/M/V/C paper graph]
-    B --> C[Runnable subgraph and node updates]
-    C --> D[Data and cohort audit]
-    D -->|FAIL, up to 3 refinement rounds| E[Cohort/preprocessing refinement]
-    E --> D
-    D -->|PASS or refinements exhausted| F[Node-covering plan]
+    I[Paper PDF / optional code / data] --> A[PDF conversion]
+    A --> B[Preflight: repo discovery and frozen snapshots]
+    B --> C[Paper graph and availability scope]
+    C --> D[Independent codegen from empty directory]
+    D -->|Repo available| K[Static repository calibration]
+    D -->|No repo| L[Data and cohort audit]
+    K --> L
+    L -->|FAIL, up to 3 refinement rounds| E[Cohort/preprocessing refinement]
+    E --> L
+    L -->|PASS or refinements exhausted| F[Node-covering plan]
     F --> G[Full-scale replication]
     G --> H[Claim/artifact comparison report]
 ~~~
 
 | Section | Responsibility | Primary outputs |
 | --- | --- | --- |
-| <code>preflight</code> | Validates inputs and records CPU, RAM, disk, and GPU. | <code>preflight/resources.json</code> |
 | <code>preprocess_pdf</code> | Imports host MinerU output and preserves canonical Markdown and paper assets. | <code>preprocessing/paper.md</code>, <code>artifacts/</code> |
+| <code>preflight</code> | Records resources, extracts only verbatim paper-disclosed public HTTPS Git URLs, and freezes available repositories without blocking on acquisition failures. | <code>preflight/resources.json</code>, <code>repository_candidates.json</code>, <code>paper_repositories.json</code> |
 | <code>preprocessing_agent</code> | Audits paper evidence and extracts the complete fine-grained claim-provenance graph. | <code>paper_graph.json</code>, <code>graph/node_state.json</code> |
-| <code>codegen_agent</code> | Consumes the runnable subgraph, inspects data read-only, and writes executable code plus node-local updates. | <code>codegen/codebase/</code>, <code>codegen_plan.json</code> |
+| <code>codegen_agent</code> | Starts from an empty directory, consumes the runnable subgraph, and writes executable code without repository paths, contents, or hints. | <code>codegen/codebase/</code>, <code>codegen_plan.json</code> |
+| <code>repo_calibration_agent</code> | If snapshots exist, statically compares every paper-related repository semantic with paper and codegen, records adoption decisions, and promotes only validated runnable deltas. | <code>codegen/repo_calibration/paper_repo_ambiguity.json</code> |
 | <code>audit_agent</code> | Runs real-data preprocessing and applicable independent cohort/data-quality checks, accumulating the full issue set. | <code>codegen/audit/attempt_*/audit_report.json</code> |
 | <code>cohort_refine_agent</code> | After audit failure, changes only cohort construction, loading, preprocessing, and affected P-local updates. | Numbered attempt directories and overlay updates |
 | <code>plan_agent</code> | Covers every runnable node, prepares dependencies, smoke-tests, and writes the plan. | <code>plan/replicate_plan.json</code> |
 | <code>replicate_agent</code> | Executes the runnable graph at paper full scale and saves a result/evidence update for every active node. | <code>replication_log.json</code>, <code>evidence_summary.json</code> |
-| <code>report_agents</code> | Writes one evidence fragment per C, then indexes claims, paper artifacts, claim paths, and origin-local node issues into four final tables. | <code>report/claims/</code>, <code>reproduction_report.md</code> |
+| <code>report_agents</code> | Writes one evidence fragment per C, the four core indexes, acquisition coverage, all repo–paper contradictions, and all paper-unspecified repo details sorted by suspicion. | <code>report/claims/</code>, <code>reproduction_report.md</code> |
 
 ### Auto Research workflow
 
@@ -328,7 +333,7 @@ Auto Research lists every eligible prediction V result-blind, gives low-importan
 | Interface | Protocol / invariant |
 | --- | --- |
 | CLI → launcher | Use <code>./medai</code> on Linux/macOS or <code>medai.cmd</code> on Windows. Each invocation selects exactly one of <code>--replicate</code> and <code>--autoresearch</code>. |
-| Launcher → Docker | Paper, source repository, data, and CLI credentials enter as read-only bind mounts; only the run output is writable. |
+| Launcher → Docker | Paper, optional calibration repository, data, and CLI credentials enter as read-only bind mounts; only the run output is writable. |
 | Agent → stage | MedAI renders a Jinja2 prompt first; the agent writes stage-owned structured artifacts. A JSONL transcript is diagnostic evidence, never proof of completed work on its own. |
 | Artifacts → orchestrator | <code>manifest.json</code> records input fingerprint, overall/per-stage state, attempts, checkpoints, and outputs. On resume, completed stages are revalidated before they are skipped; invalid artifacts resume or fail explicitly. |
 | Remote compute → state | The adapter writes non-secret lifecycle state to <code>remote_compute/instance.json</code>. A cloud dataset also requires a per-file inventory; raw data never returns locally. |
@@ -351,6 +356,7 @@ medai/
 ├── .medai/mineru/             # Host MinerU environment/models after init (default)
 └── runs/<run_id>/             # Auditable replication outputs (default)
     ├── manifest.json
+    ├── preflight/repositories/
     ├── preprocessing/
     ├── graph/node_state.json
     ├── codegen/
@@ -384,6 +390,7 @@ MedAI 是一个运行在 Docker 中、以证据为约束的医学论文复现与
 - **多类型数据集：** 不将输入限制为某个固定数据集或表格格式；可面向论文所需的结构化临床数据、EHR/纵向数据、时序、医学影像、组学、文本等研究输入。前提是提供论文要求的完整原始文件和可用执行环境。
 - **预测与统计分析模型：** 复现工作流可覆盖监督式预测和统计分析；它从论文提取可检查的文本/数值声明、实验定义及图表/表格锚点，并与真实运行证据逐项比较。
 - **科学保真与可追溯：** 论文、原始仓库和源数据均以只读方式使用。缺失论文指定文件、无效产物或技术失败会明确停止，不会伪造结果、静默替代输入或缩小规模来制造“成功”。
+- **隔离式仓库校准：** Preflight 只冻结论文直接披露的公开 Git 仓库；codegen 仍从空目录独立实现且不可读取仓库，随后才静态记录论文冲突和论文未披露细节，并只采纳经过验证的安全修改。
 - **论文改进 / Auto Research：** 在已完成且有效的预测型复现之上，系统提出有论文和文献依据的输入表示、模型或训练策略改进，以独立代码副本、边界审计及已有基线证据评估改进。若论文同时含统计分析，只选择其中严格的监督式预测实验。
 
 
@@ -505,7 +512,7 @@ VASTAI_MAX_CAMPAIGN_INSTANCES=3
 
 ### 5. 快速复现一篇论文
 
-将占位符替换为绝对路径。<code>--repo</code> 可省略；本地模式的 <code>--data</code> 必须是已准备好的数据目录。
+将占位符替换为绝对路径。<code>--repo</code> 是可省略的额外/兜底校准源，绝不会作为 codegen 初始代码；本地模式的 <code>--data</code> 必须是已准备好的数据目录。
 
 ~~~bash
 ./medai \
@@ -563,7 +570,7 @@ VASTAI_MAX_CAMPAIGN_INSTANCES=3
 | <code>--replicate</code> | 启动复现；与 <code>--autoresearch</code> 二选一，且需要 <code>--paper</code>。 |
 | <code>--autoresearch</code> | 在已完成复现上启动改进研究；需要 <code>--replicate-run</code>，不能与 <code>--paper</code>、<code>--repo</code>、<code>--data</code>、<code>--clouddrive</code>、<code>--smart-replicate</code> 同用。 |
 | <code>--paper &lt;PDF&gt;</code> | 论文 PDF；仅复现。 |
-| <code>--repo &lt;dir&gt;</code> | 可选原始仓库；只有运行目录副本会被修改。 |
+| <code>--repo &lt;dir&gt;</code> | 可选额外/兜底校准源；系统生成只读快照，且绝不用于初始化 codegen。 |
 | <code>--data &lt;dir-or-name&gt;</code> | 本地模式为现有数据目录；与 <code>--clouddrive</code> 同用时为安全数据集目录名。 |
 | <code>--clouddrive</code> | 启用云端数据物化；需要已配置计算提供商和云盘。 |
 | <code>--provider &lt;codex\|claude\|codex-siliconflow&gt;</code> | 智能体提供商；复现默认值为 <code>codex</code>。 |
@@ -640,28 +647,32 @@ flowchart LR
 
 ~~~mermaid
 flowchart LR
-    I[论文 PDF / 可选代码 / 数据] --> A[预检与 PDF 解析]
-    A --> B[不可变 D/P/T/M/V/C 论文图]
-    B --> C[可运行子图与节点更新]
-    C --> D[数据与队列审计]
-    D -->|FAIL，最多 3 轮修正| E[队列/预处理修正]
-    E --> D
-    D -->|PASS 或修正耗尽| F[覆盖节点的计划]
+    I[论文 PDF / 可选代码 / 数据] --> A[PDF 转换]
+    A --> B[Preflight：仓库发现与冻结快照]
+    B --> C[论文图与可运行范围]
+    C --> D[从空目录独立 codegen]
+    D -->|有可用 repo| K[静态 repo calibration]
+    D -->|无可用 repo| L[数据与队列审计]
+    K --> L
+    L -->|FAIL，最多 3 轮修正| E[队列/预处理修正]
+    E --> L
+    L -->|PASS 或修正耗尽| F[覆盖节点的计划]
     F --> G[完整规模复现]
     G --> H[声明/产物对照报告]
 ~~~
 
 | 部分 | 职责 | 主要输出 |
 | --- | --- | --- |
-| <code>preflight</code> | 验证输入并记录 CPU、内存、磁盘和 GPU。 | <code>preflight/resources.json</code> |
 | <code>preprocess_pdf</code> | 导入宿主机 MinerU 结果，保留标准 Markdown 与论文资源。 | <code>preprocessing/paper.md</code>、<code>artifacts/</code> |
+| <code>preflight</code> | 记录资源，只提取论文原文直接披露的公开 HTTPS Git URL，并冻结可用仓库；获取失败不阻断。 | <code>preflight/resources.json</code>、<code>repository_candidates.json</code>、<code>paper_repositories.json</code> |
 | <code>preprocessing_agent</code> | 审计论文证据并提取完整、高颗粒度的 claim 溯源图。 | <code>paper_graph.json</code>、<code>graph/node_state.json</code> |
-| <code>codegen_agent</code> | 消费可运行子图，只读检查数据，编写代码并输出节点局部更新。 | <code>codegen/codebase/</code>、<code>codegen_plan.json</code> |
+| <code>codegen_agent</code> | 从空目录开始，消费可运行子图并编写代码，不接收 repo 路径、内容、清单或环境提示。 | <code>codegen/codebase/</code>、<code>codegen_plan.json</code> |
+| <code>repo_calibration_agent</code> | 存在快照时，静态比较完整论文相关 repo 语义、论文与 codegen，记录采纳决定，并只提升已验证的可运行范围 delta。 | <code>codegen/repo_calibration/paper_repo_ambiguity.json</code> |
 | <code>audit_agent</code> | 使用真实数据执行预处理及适用的独立队列/数据质量检查，累积完整问题集。 | <code>codegen/audit/attempt_*/audit_report.json</code> |
 | <code>cohort_refine_agent</code> | 审计失败后仅调整队列构建、加载、预处理及受影响 P 的局部更新。 | 编号尝试目录与 overlay 更新 |
 | <code>plan_agent</code> | 覆盖全部可运行节点、准备依赖、烟雾测试并写计划。 | <code>plan/replicate_plan.json</code> |
 | <code>replicate_agent</code> | 按论文完整规模执行可运行图，为每个活跃节点保存真实结果和证据。 | <code>replication_log.json</code>、<code>evidence_summary.json</code> |
-| <code>report_agents</code> | 每个 C 独立生成证据片段，再将 claim、论文 artifact、claim 路径与节点原位 issue 汇总为四张最终表格。 | <code>report/claims/</code>、<code>reproduction_report.md</code> |
+| <code>report_agents</code> | 每个 C 独立生成证据片段，再写四个核心索引、repo 获取覆盖、全部 repo–论文矛盾和按可疑性排序的论文未披露 repo 细节。 | <code>report/claims/</code>、<code>reproduction_report.md</code> |
 
 ### Auto Research 改进流程
 
@@ -685,7 +696,7 @@ Auto Research 以结果盲方式列出所有合格预测 V，低重要性 V 可�
 | 接口 | 协议 / 不变量 |
 | --- | --- |
 | CLI → 启动器 | Linux/macOS 使用 <code>./medai</code>，Windows 使用 <code>medai.cmd</code>；每次只能选择 <code>--replicate</code> 或 <code>--autoresearch</code>。 |
-| 启动器 → Docker | 论文、原仓库、数据和 CLI 凭据以只读 bind mount 输入；只有运行输出目录可写。 |
+| 启动器 → Docker | 论文、可选校准仓库、数据和 CLI 凭据以只读 bind mount 输入；只有运行输出目录可写。 |
 | 智能体 → 阶段 | 系统先渲染 Jinja2 提示词；智能体写入阶段拥有的结构化产物。JSONL transcript 仅为诊断证据，不能独自说明阶段完成。 |
 | 产物 → 编排器 | <code>manifest.json</code> 记录输入指纹、整体/阶段状态、尝试次数、检查点和输出。恢复时先验证已完成阶段；无效产物会恢复或显式失败。 |
 | 云端计算 → 状态 | 适配器将非密钥生命周期状态写入 <code>remote_compute/instance.json</code>；云端数据还须有逐文件清单，原始数据不回传。 |
@@ -708,6 +719,7 @@ medai/
 ├── .medai/mineru/             # init 后的 MinerU 环境和模型（默认）
 └── runs/<run_id>/             # 可审计的复现产物（默认）
     ├── manifest.json
+    ├── preflight/repositories/
     ├── preprocessing/
     ├── graph/node_state.json
     ├── codegen/

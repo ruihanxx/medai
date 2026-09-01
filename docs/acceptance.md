@@ -30,11 +30,15 @@ collection, shared issue deduplication, multiple origin-to-target paths, and
 queries at intermediate nodes.
 
 Base replication coverage includes graph extraction prompts, runnable-only
-codegen/audit/refinement/planning, exact setup-plus-topological-layer plan
+codegen/audit/refinement/planning, empty-codebase repository-isolated codegen,
+paper-verbatim HTTPS Git discovery, pinned/deduplicated/failure-tolerant frozen
+snapshots, conditional repository calibration, exact adopted candidate deltas,
+ambiguity adoption/integrity/suspicion rules, exact setup-plus-topological-layer plan
 structure and coverage of all active nodes, failure on
 missing actual result or evidence, node-level resume with predecessor
 invalidation and preserved snapshots, per-claim report checkpoints/resume,
-claim-keyed Smart Replicate logs, final report agent handoff, and
+claim-keyed Smart Replicate logs, final report agent handoff, repository report
+coverage/uniqueness/classification/suspicion sorting, and
 path-relevant issues only. Plan prompt coverage pins per-node predecessor
 artifact descriptions and the mandatory reverse C-to-D artifact-flow audit.
 Direct-Codex tests also cover structured terminal
@@ -48,7 +52,7 @@ validation, free audit check names with per-positive-V evidence, refinement-only
 plan/log coverage, baseline non-execution, numeric deltas/scoring, and mixed
 statistical/prediction papers.
 
-Compatibility coverage parametrizes manifest v1–v5 and asserts that resume and
+Compatibility coverage parametrizes manifest v1–v6 and asserts that resume and
 Auto Research base loading fail before any byte is changed. Error text directs
 the operator to a new output directory.
 

@@ -1,8 +1,8 @@
 # Auto Research Workflow Contract
 
-Auto Research requires a completed FULL base replication with manifest v6,
+Auto Research requires a completed FULL base replication with manifest v7,
 valid paper graph, scope, overlay, codebase, replication evidence, and report.
-A partial base or a v1–v5 manifest is rejected without writeback. Each campaign
+A partial base or a v1–v6 manifest is rejected without writeback. Each campaign
 has an independent manifest, code copies, idea graphs, overlays, and remote
 state.
 

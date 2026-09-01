@@ -14,6 +14,10 @@ needed columns/aggregates and never substitute a missing paper-required input.
 
 ## Graph ownership
 
+- Repository discovery runs after PDF conversion and reads only paper Markdown.
+  It emits exact verbatim Git URLs and evidence, never browses or follows DOI,
+  OSF, Zenodo, publisher, or ordinary landing pages, and receives no local-repo
+  environment hint. Orchestration alone validates and acquires repositories.
 - Preprocessing alone writes the complete immutable paper graph. It creates
   fine-grained D/P/T/M/V/C nodes, treats V sets as Cartesian blocks, separates
   sparse endpoints, supports P→V→C, and does not create a separate grouping
@@ -41,7 +45,10 @@ needed columns/aggregates and never substitute a missing paper-required input.
 
 ## Replication boundaries
 
-Codegen edits only the copied codebase, plan, and allowed maintenance artifacts.
+Codegen always starts in an empty generated-code directory and edits only that
+codebase, plan, and allowed maintenance artifacts. It never receives repository
+inventory, paths, contents, or `MEDAI_HOST_REPO`; it may not inspect sibling
+snapshots or browse a disclosed repository URL. `--repo` is not seed code.
 It consumes only the runnable subgraph, inventories configured sources with
 bounded reads and follows the persisted execution location. It stops only for
 concrete unavailable direct D→P content or a measured resource constraint. It
@@ -51,6 +58,20 @@ conflict, alternatives, rationale, evidence, and implementation location on the
 exact origin node. Paper inconsistencies, unsupported mappings, and unpublished
 manifests or parameters are resolved and recorded the same way, not treated as
 blockers. Its `node_updates` are open and aligned to graph node IDs.
+
+Repository calibration runs only when a frozen snapshot is available. It may
+read bounded text source/configuration but must never run, import, compile,
+install, source, deserialize, or invoke repository content. Its first pass
+inventories every paper-related cohort, preprocessing, model, training,
+hyperparameter, and validation semantic across the complete graph, including
+hidden details codegen already matched; its second pass compares those points
+with independent codegen. Each point has one origin node. Only runnable points
+may change code, and all edits are developed in a candidate copy before exact
+delta validation and promotion. Repository behavior is normally adopted when
+paper-supported, paper-unspecified, or paper-contradictory (the contradiction
+remains explicit). Unresolved inter-repository conflicts, inactive paths,
+literal result hardcoding, outcome-guided selection, and leakage are recorded
+with `adopt=false`. Repository snapshots and calibration baselines are immutable.
 
 Audit treats source data and the codebase as read-only and writes only in its
 attempt directory. It covers all runnable P paths and accumulates every
@@ -95,8 +116,9 @@ updates/blockers, and `collect_lineage_issues(C)`; it writes one claim fragment.
 After all fragments complete, the final report agent reads the paper,
 graph-ordered claim index, complete node issue index, fragments, and real
 replication outputs. It copies claim assessments unchanged and writes only the
-four report index tables defined in `artifacts.md`; it does not redo a claim's
-scientific judgment or propagate issues to descendants.
+four report index tables plus the final repository-calibration section defined
+in `artifacts.md`; it does not redo a claim's scientific judgment or propagate
+issues to descendants.
 
 ## Auto Research boundaries
 
