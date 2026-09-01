@@ -142,8 +142,9 @@ compute or the `computation-provider` skill.{% endif %}
    checks on the promoted code and confirm that its outputs match the verified
    candidate. Do not promote temporary probes, caches, environments, or
    candidate-only instrumentation.
-9. Exit successfully only when every reported issue is fixed and verified. If
-   any issue cannot be fixed or verified, exit nonzero instead of proceeding.
+9. Exit successfully only when every reported `preprocessing_fix` issue is fixed
+   and verified. If any in-scope issue cannot be fixed or verified, exit nonzero
+   instead of proceeding.
    Also exit nonzero rather than promoting when the baseline/candidate semantic
    comparison cannot be completed reliably. Before finishing, reload
    `codegen_plan.json`, verify that all updated node IDs are runnable, every

@@ -18,6 +18,7 @@ This retry does not represent another scientific refinement round.
 - Paper Markdown: `{{ paper_markdown }}`
 - Immutable paper graph: `{{ paper_graph_path }}`
 - Approved execution scope: `{{ execution_scope_path }}`
+- Approved source-availability report: `{{ availability_report_path }}`
 - Generated codebase (read-only for this audit): `{{ codebase_dir }}`
 - Code-generation plan and node-local decisions/updates: `{{ codegen_plan_path }}`
 {% if cloud_drive_enabled %}
@@ -251,15 +252,24 @@ as `evidence`, source name, or affected direct inputs when they improve
 auditability. Do not use a fixed kind or severity taxonomy.
 
 Use `preprocessing_fix` only when generated cohort/loading/preprocessing logic
-within refinement scope should change. Use `source_unavailable` only when
-concrete evidence proves that an approved source cannot supply a required
-direct D→P input. Technical/provider failures are not source unavailability
-and must exit without a verdict. Attach each issue exactly once to the node
-where it originates; do not copy it to descendants or list all affected claims,
-because orchestration computes lineage propagation later. Keep evidence
-observational, diagnosis causal without unsupported speculation, and the
-required fix testable. State the observable outcome required after correction,
-not how refinement must implement it. Leave detailed commands and statistics in
+within refinement scope should change. Paper omissions, ambiguous scientific
+definitions, and unsupported mappings remain preprocessing decisions; they are
+not source unavailability.
+
+Use `source_unavailable` only when new concrete source-level evidence disproves
+an `available` direct D→P decision in the approved availability report. Inspect
+the complete relevant inventory of configured source components, not only the
+components selected by generated code, and make this inspection at least as
+broad as the evidence supporting the approved decision. Technical/provider
+failures are not source unavailability and must exit without a verdict.
+
+Choose the route before defining its required outcome, and keep that outcome
+within the selected route. Attach each issue exactly once to the node where it
+originates; do not copy it to descendants or list all affected claims, because
+orchestration computes lineage propagation later. Keep evidence observational,
+diagnosis causal without unsupported speculation, and the required fix
+testable. State the observable outcome required after correction, not how
+refinement must implement it. Leave detailed commands and statistics in
 `{{ results_dir }}` rather than copying them into the report. Before finishing,
 reload the JSON and verify all issue IDs are runnable and all cited local
 evidence exists.

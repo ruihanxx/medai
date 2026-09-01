@@ -63,11 +63,13 @@ terminal and does not consume artifact-repair turns. Other providers retain
 one-turn behavior. A technical retry does not consume a scientific audit or
 refinement attempt.
 
-Audit FAIL with preprocessing defects enters refinement. `source_unavailable`
-returns to availability without consuming a refinement. A new scope invalidates
-all downstream scope-bound stages. The fourth complete FAIL continues to
-planning with every issue and the exhaustion state retained. Audit accumulates
-all supported root causes; it does not stop at the first finding.
+Audit FAIL with preprocessing defects enters refinement while rounds remain,
+including a mixed report that also contains `source_unavailable`. A source-only
+FAIL, or a mixed FAIL after refinement exhaustion, returns to availability. A
+new scope invalidates all downstream scope-bound stages. The fourth complete
+FAIL without a source issue continues to planning with every issue and the
+exhaustion state retained. Audit accumulates all supported root causes; it does
+not stop at the first finding.
 
 Replication receives no paper target values by default. Smart Replicate adds
 only each assigned C's paper anchor and permits at most five hypothesis-driven

@@ -1944,6 +1944,15 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         config.output.glob("codegen/audit/attempt_*/audit_report.json")
     )
     scope_revision_reports.extend(sorted(config.output.glob("codegen/scope_revision_*.json")))
+    previous_availability_reports = [
+        path
+        for path in sorted(
+            config.output.glob(
+                "preprocessing/data_availability/attempt_*/data_availability.json"
+            )
+        )
+        if path != report_path
+    ]
     prompt_path = render_prompt(
         "data_availability/session_instructions.md",
         config.output / "prompts" / f"data_availability_attempt_{attempt:03d}.md",
@@ -1953,6 +1962,7 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         local_datasets=local_datasets,
         cloud_datasets=cloud_datasets,
         scope_revision_reports=scope_revision_reports,
+        previous_availability_reports=previous_availability_reports,
         cloud_only=config.data is None and bool(config.selected_cloud_datasets),
         dual_source=config.data is not None and bool(config.selected_cloud_datasets),
         force_remote=config.force_remote,
@@ -2661,6 +2671,15 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     pipeline_state = PipelineState(config.output)
     scope = _execution_scope(state)
     _ensure_stage_scope(pipeline_state, "audit_agent", scope.scope_sha256)
+    availability_report_path = Path(
+        str(
+            pipeline_state.get_stage_checkpoints("data_availability_agent").get(
+                "report_path", ""
+            )
+        )
+    )
+    if not availability_report_path.is_file():
+        raise RuntimeError("Preprocessing audit requires an approved availability report")
     codegen_stage = pipeline_state.state["stages"].get("codegen_agent", {})
     codegen_attempt = int(codegen_stage.get("attempts", 0))
     if codegen_stage.get("status") != "completed" or codegen_attempt < 1:
@@ -2740,6 +2759,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         paper_markdown=state["paper_markdown"],
         paper_graph_path=state["paper_graph_path"],
         execution_scope_path=state["execution_scope_path"],
+        availability_report_path=availability_report_path,
         codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
         codebase_dir=state["codebase_dir"],
         data_dir=config.data,
@@ -2829,7 +2849,12 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
     issue_kinds = sorted(
         {issue.get("route", "preprocessing_fix") for issue in audit_report["issues"]}
     )
-    source_revision = "source_unavailable" in issue_kinds
+    refinement_exhausted = (
+        verdict == "FAIL" and refine_rounds_used >= MAX_COHORT_REFINE_ROUNDS
+    )
+    source_revision = "source_unavailable" in issue_kinds and (
+        "preprocessing_fix" not in issue_kinds or refinement_exhausted
+    )
     checkpoint = {
         "audited_codegen_attempt": codegen_attempt,
         "audited_repo_calibration_sha256": repo_calibration_sha256,
@@ -2838,9 +2863,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         "report_path": str(report_path),
         "refine_rounds_used": refine_rounds_used,
         "issue_kinds": issue_kinds,
-        "refinement_exhausted": (
-            verdict == "FAIL" and refine_rounds_used >= MAX_COHORT_REFINE_ROUNDS
-        ),
+        "refinement_exhausted": refinement_exhausted,
         "scientific_attempt": scientific_attempt,
     }
     outputs = [str(attempt_dir), str(report_path), str(transcript_path)]
@@ -2880,9 +2903,13 @@ def audit_route(state: WorkflowState) -> str:
     verdict = state.get("audit_verdict")
     if verdict not in {"PASS", "FAIL"}:
         raise RuntimeError(f"Invalid preprocessing audit verdict: {verdict!r}")
-    if "source_unavailable" in state.get("audit_issue_kinds", []):
+    issue_kinds = set(state.get("audit_issue_kinds", []))
+    refinement_exhausted = state.get("audit_refinement_exhausted", False)
+    if "source_unavailable" in issue_kinds and (
+        "preprocessing_fix" not in issue_kinds or refinement_exhausted
+    ):
         return "data_availability_agent"
-    if verdict == "PASS" or state.get("audit_refinement_exhausted", False):
+    if verdict == "PASS" or refinement_exhausted:
         return "plan_agent"
     return "cohort_refine_agent"
 

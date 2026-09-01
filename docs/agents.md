@@ -34,6 +34,9 @@ needed columns/aggregates and never substitute a missing paper-required input.
   It writes only attempt-local evidence. A dataset or terminology version
   mismatch alone remains available when corresponding content exists, with both
   versions and the methodological risk recorded without claiming equivalence.
+  Later source-revision reports are evidence to investigate, not availability
+  decisions; paper ambiguity does not demonstrate source absence, and a narrower
+  inspection cannot replace a broader one.
   Orchestration owns scope derivation.
 - Later agents do not edit the paper graph. They emit node-local updates in
   their existing stage artifact; orchestration assigns the source and merges
@@ -78,12 +81,15 @@ attempt directory. It covers all runnable P paths and accumulates every
 supported root cause. Each issue records one `node_id`, description,
 evidence-bound diagnosis, observable required correction outcome, and the
 orchestration route `preprocessing_fix` or `source_unavailable`; audit defines
-the required outcome, not its implementation. Cohort refinement confirms each
-diagnosis against baseline evidence, chooses the correction, and may change only
-cohort construction, loading, preprocessing, directly related configuration,
-and affected P-local updates. It creates attempt-local baseline and candidate
-copies while retaining the authoritative code unchanged, develops each fix only
-in the candidate, compares candidate and baseline cohort semantics across
+the required outcome, not its implementation. `source_unavailable` requires new
+source evidence at least as broad as the approved availability evidence; paper
+omissions and ambiguous mappings remain preprocessing decisions. Cohort
+refinement confirms each diagnosis against baseline evidence, chooses the
+correction, and may change only cohort construction, loading, preprocessing,
+directly related configuration, and affected P-local updates. It creates
+attempt-local baseline and candidate copies while retaining the authoritative
+code unchanged, develops each fix only in the candidate, compares candidate
+and baseline cohort semantics across
 affected and shared P paths, and promotes only a patch whose every delta is
 required by a reported root cause or is an unavoidable paper-consistent
 consequence.

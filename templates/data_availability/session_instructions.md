@@ -6,6 +6,7 @@ Read:
 - immutable graph: `{{ paper_graph_path }}`
 - resources: `{{ resources_path }}`
 - any later source-revision reports: {{ scope_revision_reports }}
+- prior availability reports: {{ previous_availability_reports }}
 
 Audit every direct `D -> P` source boundary. Do not emit a requirement for a D
 that reaches P only through another P: the upstream requirement and graph
@@ -42,6 +43,12 @@ Use only source-level evidence. A requirement is:
   content;
 - `source_blocked` when the required content is demonstrably unavailable;
 - `unknown` when inspection cannot determine availability.
+
+Treat later source-revision reports as evidence to investigate, not as source
+status decisions. Reinspect the complete relevant inventory of configured
+sources before changing a prior decision. A paper omission, ambiguous scientific
+definition, or unsupported mapping does not demonstrate source absence, and a
+narrower source inspection cannot replace a broader one.
 
 Do not use `source_blocked` solely for a dataset or terminology version
 mismatch: when a configured source contains the corresponding content in
