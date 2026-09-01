@@ -11,7 +11,8 @@ python scripts/generate_run_graph.py runs/<run_id>
 The command reads canonical run artifacts without changing them and writes
 `visualization/index.html` plus the audited snapshot `visualization/run_graph.json`.
 Use `--open` to open the page, or `--output-dir <path>` to select another output
-directory.
+directory. In the page, use Control+wheel to zoom the graph and drag the details
+panel divider to change its width.
 
 ## `download_nhanes.py`
 

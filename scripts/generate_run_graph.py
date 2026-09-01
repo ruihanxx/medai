@@ -498,7 +498,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     .stats { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
     .pill { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; background: #13233a; color: #c9d8ef; font-size: 12px; }
     .pill strong { color: white; }
-    .app { display: grid; grid-template-columns: minmax(0, 1fr) 430px; height: calc(100vh - 72px); min-height: 620px; }
+    .app { --details-width: 430px; display: grid; grid-template-columns: minmax(0, 1fr) 8px var(--details-width); height: calc(100vh - 72px); min-height: 620px; }
     .workspace { min-width: 0; display: flex; flex-direction: column; }
     .toolbar { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 9px 14px; border-bottom: 1px solid var(--line); background: #0b1728; }
     .toolbar input { width: min(330px, 40vw); padding: 8px 11px; border: 1px solid #385274; border-radius: 8px; background: #071221; color: var(--text); outline: none; }
@@ -533,7 +533,11 @@ HTML_TEMPLATE = r"""<!doctype html>
     .node .node-status { font-size: 10px; opacity: .72; }
     .issue-badge { fill: #23160a; stroke: var(--warning); stroke-width: 1.4; }
     .issue-count { fill: var(--warning) !important; font-size: 10px; font-weight: 800; text-anchor: middle; dominant-baseline: central; }
-    .details-panel { overflow: auto; border-left: 1px solid var(--line); background: var(--panel); }
+    .details-resizer { position: relative; z-index: 2; cursor: col-resize; touch-action: none; background: #0a1627; outline: none; }
+    .details-resizer::after { content: ""; position: absolute; inset: 0 3px; background: var(--line); transition: background .12s, box-shadow .12s; }
+    .details-resizer:hover::after, .details-resizer:focus-visible::after, body.resizing-details .details-resizer::after { background: var(--accent); box-shadow: 0 0 8px #69d6ff88; }
+    body.resizing-details { cursor: col-resize; user-select: none; }
+    .details-panel { min-width: 0; overflow: auto; background: var(--panel); }
     .details-inner { padding: 20px; }
     .empty-state { min-height: 340px; display: grid; place-items: center; text-align: center; color: var(--muted); }
     .empty-state strong { display: block; color: var(--text); font-size: 17px; margin-bottom: 8px; }
@@ -574,6 +578,7 @@ HTML_TEMPLATE = r"""<!doctype html>
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; height: auto; }
       .workspace { height: 65vh; min-height: 520px; }
+      .details-resizer { display: none; }
       .details-panel { min-height: 35vh; border-left: 0; border-top: 1px solid var(--line); }
       .hint { display: none; }
     }
@@ -591,12 +596,13 @@ HTML_TEMPLATE = r"""<!doctype html>
         <button id="zoom-out" title="Zoom out">−</button>
         <button id="zoom-in" title="Zoom in">+</button>
         <button id="fit" title="Fit graph">Fit</button>
-        <span class="hint">Hover: lineage · Click: details · Drag: pan</span>
+        <span class="hint">Hover: lineage · Ctrl+wheel: zoom · Drag: pan</span>
       </div>
       <div class="graph-scroll" id="graph-scroll">
         <svg id="graph" role="img" aria-label="MedAI claim provenance graph"></svg>
       </div>
     </section>
+    <div class="details-resizer" id="details-resizer" role="separator" aria-label="Resize details panel" aria-orientation="vertical" tabindex="0"></div>
     <aside class="details-panel" id="details-panel"><div class="details-inner" id="details"></div></aside>
   </main>
   <script id="run-graph-data" type="application/json">__MEDAI_RUN_GRAPH_JSON__</script>
@@ -605,12 +611,15 @@ HTML_TEMPLATE = r"""<!doctype html>
   const DATA = JSON.parse(document.getElementById("run-graph-data").textContent);
   const SVG_NS = "http://www.w3.org/2000/svg";
   const nodes = new Map(DATA.nodes.map(node => [node.id, node]));
+  const app = document.querySelector(".app");
   const svg = document.getElementById("graph");
   const scroll = document.getElementById("graph-scroll");
+  const detailsResizer = document.getElementById("details-resizer");
   const detailsRoot = document.getElementById("details");
   let selectedId = null;
   let zoom = 1;
   let query = "";
+  let detailsWidth = 430;
 
   function htmlElement(tag, className, text) {
     const element = document.createElement(tag);
@@ -884,6 +893,19 @@ HTML_TEMPLATE = r"""<!doctype html>
   document.getElementById("zoom-in").addEventListener("click", () => setZoom(zoom * 1.2));
   document.getElementById("zoom-out").addEventListener("click", () => setZoom(zoom / 1.2));
   document.getElementById("fit").addEventListener("click", fitGraph);
+  scroll.addEventListener("wheel", event => {
+    if (!event.ctrlKey) return;
+    event.preventDefault();
+    const rect = scroll.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+    const graphX = (scroll.scrollLeft + pointerX) / zoom;
+    const graphY = (scroll.scrollTop + pointerY) / zoom;
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scroll.clientHeight : 1;
+    setZoom(zoom * Math.exp(-event.deltaY * unit * .0015));
+    scroll.scrollLeft = graphX * zoom - pointerX;
+    scroll.scrollTop = graphY * zoom - pointerY;
+  }, {passive: false});
   document.getElementById("search").addEventListener("input", event => {
     query = event.target.value.trim().toLowerCase();
     selectedId = null;
@@ -912,7 +934,44 @@ HTML_TEMPLATE = r"""<!doctype html>
   scroll.addEventListener("pointerup", () => { drag = null; scroll.classList.remove("dragging"); });
   scroll.addEventListener("pointercancel", () => { drag = null; scroll.classList.remove("dragging"); });
 
+  function detailsWidthBounds() {
+    return {minimum: 300, maximum: Math.max(300, Math.min(760, app.clientWidth - 328))};
+  }
+  function setDetailsWidth(nextWidth) {
+    const bounds = detailsWidthBounds();
+    detailsWidth = Math.min(bounds.maximum, Math.max(bounds.minimum, nextWidth));
+    app.style.setProperty("--details-width", `${detailsWidth}px`);
+    detailsResizer.setAttribute("aria-valuemin", bounds.minimum);
+    detailsResizer.setAttribute("aria-valuemax", bounds.maximum);
+    detailsResizer.setAttribute("aria-valuenow", Math.round(detailsWidth));
+  }
+  let detailsResize = null;
+  detailsResizer.addEventListener("pointerdown", event => {
+    detailsResize = {right: app.getBoundingClientRect().right, pointerId: event.pointerId};
+    document.body.classList.add("resizing-details");
+    event.preventDefault();
+  });
+  window.addEventListener("pointermove", event => {
+    if (!detailsResize || event.pointerId !== detailsResize.pointerId) return;
+    setDetailsWidth(detailsResize.right - event.clientX);
+  });
+  function finishDetailsResize(event) {
+    if (!detailsResize || event.pointerId !== detailsResize.pointerId) return;
+    detailsResize = null;
+    document.body.classList.remove("resizing-details");
+  }
+  window.addEventListener("pointerup", finishDetailsResize);
+  window.addEventListener("pointercancel", finishDetailsResize);
+  detailsResizer.addEventListener("keydown", event => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const direction = event.key === "ArrowLeft" ? 1 : -1;
+    setDetailsWidth(detailsWidth + direction * (event.shiftKey ? 50 : 20));
+  });
+  window.addEventListener("resize", () => setDetailsWidth(detailsWidth));
+
   showOverview();
+  setDetailsWidth(detailsWidth);
   requestAnimationFrame(fitGraph);
   </script>
 </body>
