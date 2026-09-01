@@ -41,14 +41,23 @@ Use only source-level evidence. A requirement is:
 
 - `available` only when a concrete configured source contains the required
   content;
-- `source_blocked` when the required content is demonstrably unavailable;
-- `unknown` when inspection cannot determine availability.
+- `source_blocked` only when complete relevant source inspection demonstrates
+  that the required underlying content is absent;
+- `unknown` only when source inspection itself cannot determine availability,
+  for example because the source is inaccessible or unreadable, its inventory
+  or metadata is incomplete, or the probe is inconclusive.
 
 Treat later source-revision reports as evidence to investigate, not as source
 status decisions. Reinspect the complete relevant inventory of configured
-sources before changing a prior decision. A paper omission, ambiguous scientific
-definition, or unsupported mapping does not demonstrate source absence, and a
-narrower source inspection cannot replace a broader one.
+sources before changing a prior decision. Paper omissions, ambiguous scientific
+definitions, unspecified thresholds or coding rules, unsupported field or
+category mappings, and multiple defensible operationalizations are preprocessing
+decisions. Do not include the missing decision itself in `required_content`, and
+do not use any of these conditions by itself to assign either `source_blocked`
+or `unknown`. When the configured source contains underlying observations that
+support a defensible operationalization, assign `available` and record the
+ambiguity and methodological risk in `evidence`. A narrower source inspection
+cannot replace a broader one.
 
 Do not use `source_blocked` solely for a dataset or terminology version
 mismatch: when a configured source contains the corresponding content in

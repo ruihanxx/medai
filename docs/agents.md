@@ -35,8 +35,11 @@ needed columns/aggregates and never substitute a missing paper-required input.
   mismatch alone remains available when corresponding content exists, with both
   versions and the methodological risk recorded without claiming equivalence.
   Later source-revision reports are evidence to investigate, not availability
-  decisions; paper ambiguity does not demonstrate source absence, and a narrower
-  inspection cannot replace a broader one.
+  decisions. Paper omissions, ambiguous definitions, unspecified coding, and
+  unsupported mappings are preprocessing decisions and cannot by themselves
+  produce either `source_blocked` or `unknown`; `unknown` is reserved for
+  inconclusive inspection of the source itself. A narrower inspection cannot
+  replace a broader one.
   Orchestration owns scope derivation.
 - Later agents do not edit the paper graph. They emit node-local updates in
   their existing stage artifact; orchestration assigns the source and merges
