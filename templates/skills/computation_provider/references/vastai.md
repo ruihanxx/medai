@@ -204,9 +204,9 @@ It then hands off the reviewed `cloud-pull --prepare` and `cloud-pull --monitor`
 operations defined in `../cloud/google-drive.md`. Each terminal local result is
 persisted before the same session resumes. The prepare operation proves an
 activated instance ID, onstart-backed SSH access, and writable run-owned paths
-before stopping the instance; monitor starts that same instance and verifies
-SSH before it returns. Never inspect transient state while a returned command
-is running or repeat an ambiguous create.
+in one remote preflight command before stopping the instance; monitor starts
+that same instance and verifies SSH before it returns. Never inspect transient
+state while a returned command is running or repeat an ambiguous create.
 
 Power-off and release differ. Stopping retains the container disk and can still
 incur storage charges; destroying is irreversible and deletes that disk. Auto

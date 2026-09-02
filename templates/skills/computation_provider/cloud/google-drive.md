@@ -49,9 +49,10 @@ python <skill-dir>/scripts/vastai.py cloud-pull \
   --prepare
 ```
 
-`--prepare` requires an activated, initialized running instance. It proves SSH
-access, checks the exact owned staging and target parents, creates and removes
-write probes, then powers the instance off and records `handoff_ready=true`.
+`--prepare` requires an activated, initialized running instance. In one remote
+preflight command, it proves SSH access, checks the exact owned staging and
+target parents, and creates and removes write probes. It then powers the
+instance off and records `handoff_ready=true`.
 Data availability returns the preparation command for local orchestration to
 run; codegen or Auto Research may run it before their monitor-only handoff.
 Only after preparation succeeds may the agent return this foreground local

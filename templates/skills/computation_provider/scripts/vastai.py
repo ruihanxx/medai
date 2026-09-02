@@ -60,6 +60,28 @@ SSH_KEY_TYPES = {
     "ssh-ed25519",
     "ssh-rsa",
 }
+CLOUD_PREPARE_PROGRAM = r'''
+set -eu
+staging_parent=$1
+target_parent=$2
+target_path=$3
+staging_path=$4
+check_target_absent=$5
+check_staging_absent=$6
+
+mkdir -p -- "$staging_parent" "$target_parent"
+for parent in "$staging_parent" "$target_parent"; do
+    probe="$parent/.medai-cloud-write-probe"
+    touch -- "$probe"
+    rm -f -- "$probe"
+done
+if [ "$check_target_absent" = "1" ]; then
+    test ! -e "$target_path"
+fi
+if [ "$check_staging_absent" = "1" ]; then
+    test ! -e "$staging_path"
+fi
+'''
 INVENTORY_PROGRAM = r'''
 import hashlib
 import json
@@ -2092,7 +2114,6 @@ def _prepare_cloud_pull(
     _require_activated_instance(state)
     if instance_status(state) != "running":
         raise RuntimeError("Vast cloud-pull preparation requires an initialized running instance")
-    remote_exec(state, ["true"])
     status = cloud["status"]
     if cloud.get("completed") is True:
         raise RuntimeError("Vast cloud-drive materialization is already completed")
@@ -2109,15 +2130,21 @@ def _prepare_cloud_pull(
 
     staging_parent = cloud["staging_path"].rsplit("/", 1)[0]
     target_parent = cloud["target_path"].rsplit("/", 1)[0]
-    remote_exec(state, ["mkdir", "-p", staging_parent, target_parent])
-    for parent in (staging_parent, target_parent):
-        probe = f"{parent}/.medai-cloud-write-probe"
-        remote_exec(state, ["touch", "--", probe])
-        remote_exec(state, ["rm", "-f", "--", probe])
-    if cloud.get("materialized") is not True:
-        remote_exec(state, ["test", "!", "-e", cloud["target_path"]])
-    if status in {"new", "replacement_pending"}:
-        remote_exec(state, ["test", "!", "-e", cloud["staging_path"]])
+    remote_exec(
+        state,
+        [
+            "sh",
+            "-c",
+            CLOUD_PREPARE_PROGRAM,
+            "medai-cloud-prepare",
+            staging_parent,
+            target_parent,
+            cloud["target_path"],
+            cloud["staging_path"],
+            "0" if cloud.get("materialized") is True else "1",
+            "1" if status in {"new", "replacement_pending"} else "0",
+        ],
+    )
 
     _power_off_active(args)
     cloud["handoff_ready"] = True

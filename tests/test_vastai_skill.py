@@ -1274,6 +1274,7 @@ def test_vastai_cloud_prepare_stops_only_after_ssh_and_path_preflight(tmp_path: 
         {"state": "stopped"}
     ]
     command_text = command_log.read_text(encoding="utf-8")
+    assert command_text.count("ARGS ") == 2
     assert "medai-cloud-write-probe" in command_text
     assert "/workspace/medai/test-run/data/dataset-a" in command_text
     cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
