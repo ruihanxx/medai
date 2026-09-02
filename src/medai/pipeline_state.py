@@ -55,6 +55,7 @@ def build_run_inputs(config: RunConfig) -> dict[str, Any]:
                 "siliconflow_base_url": siliconflow.base_url,
                 "siliconflow_model": siliconflow.model,
                 "siliconflow_context_window": siliconflow.context_window,
+                "siliconflow_reasoning_effort": siliconflow.reasoning_effort,
             }
         )
     return inputs
@@ -95,6 +96,7 @@ def build_autoresearch_inputs(config: AutoResearchConfig) -> dict[str, Any]:
                 "siliconflow_base_url": siliconflow.base_url,
                 "siliconflow_model": siliconflow.model,
                 "siliconflow_context_window": siliconflow.context_window,
+                "siliconflow_reasoning_effort": siliconflow.reasoning_effort,
             }
         )
     return inputs
@@ -166,6 +168,11 @@ class PipelineState:
             and inputs.get("force_remote") is True
         ):
             changed.append("force_remote")
+        if (
+            "siliconflow_reasoning_effort" not in recorded
+            and inputs.get("siliconflow_reasoning_effort") is not None
+        ):
+            changed.append("siliconflow_reasoning_effort")
         if changed:
             raise RuntimeError(
                 "Cannot resume because run inputs or output-affecting configuration "

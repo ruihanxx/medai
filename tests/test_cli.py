@@ -261,6 +261,19 @@ def test_siliconflow_config_is_provider_specific(tmp_path: Path):
         )
 
 
+def test_resume_rejects_new_siliconflow_reasoning_effort(tmp_path: Path):
+    pipeline = PipelineState.create(
+        tmp_path / "output", {"provider": "codex-siliconflow"}
+    )
+    with pytest.raises(RuntimeError, match="siliconflow_reasoning_effort"):
+        pipeline.resume(
+            {
+                "provider": "codex-siliconflow",
+                "siliconflow_reasoning_effort": "max",
+            }
+        )
+
+
 def test_output_cannot_be_inside_repo(tmp_path: Path):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")

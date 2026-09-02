@@ -119,6 +119,10 @@ to be released and its completed cloud inventory to remain reloadable; the
 campaign owns a separate instance and copies the inventory as its immutable
 materialization baseline.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
+The SiliconFlow dotenv may set `CODEX_CLI_SILICONFLOW_REASONING_EFFORT` to
+`high` or `max`; the adapter forwards it unchanged as the SiliconFlow
+`chat/completions` `reasoning_effort` field. Blank or omitted leaves the field
+unset for models that do not support it.
 Paper, optional local repository, data, provider configuration, and CLI
 credentials are mounted read-only. Preflight snapshots a local repository and
 deduplicates it with paper-disclosed sources. The host `~/.ssh` directory is

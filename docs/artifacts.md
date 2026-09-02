@@ -51,6 +51,9 @@ runs/<run_id>/
 
 `preprocessing/paper_graph.json` has version 1 and six ordered collections:
 `datasets`, `preprocessing`, `training`, `models`, `validations`, and `claims`.
+The manifest input fingerprint includes the resolved non-secret SiliconFlow
+base URL, model, context window, and optional reasoning effort. It never stores
+the SiliconFlow API key.
 Every node fixes only this envelope:
 
 ```json

@@ -101,10 +101,11 @@ SILICONFLOW_API_KEY=<your-api-key>
 SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
 CODEX_CLI_SILICONFLOW_MODEL=<your-model-id>
 CODEX_CLI_SILICONFLOW_CONTEXT_WINDOW=131072
+CODEX_CLI_SILICONFLOW_REASONING_EFFORT=high
 CODEX_CLI_TIMEOUT_SECONDS=1200
 ~~~
 
-The <code>codex</code> CLI is still required. Pass <code>--provider codex-siliconflow --siliconflow-config /absolute/path/siliconflow.env</code>. The secret is never written to the run manifest, prompts, logs, or command arguments.
+For SiliconFlow models that expose <code>reasoning_effort</code>, set it to <code>high</code> or <code>max</code>; otherwise omit it or leave it blank. The <code>codex</code> CLI is still required. Pass <code>--provider codex-siliconflow --siliconflow-config /absolute/path/siliconflow.env</code>. The secret is never written to the run manifest, prompts, logs, or command arguments.
 
 ### 3. Optional: Vast.ai + Google Drive cloud data
 
@@ -474,10 +475,11 @@ SILICONFLOW_API_KEY=<your-api-key>
 SILICONFLOW_BASE_URL=https://api.siliconflow.cn/v1
 CODEX_CLI_SILICONFLOW_MODEL=<your-model-id>
 CODEX_CLI_SILICONFLOW_CONTEXT_WINDOW=131072
+CODEX_CLI_SILICONFLOW_REASONING_EFFORT=high
 CODEX_CLI_TIMEOUT_SECONDS=1200
 ~~~
 
-仍需安装 <code>codex</code> CLI。运行时指定 <code>--provider codex-siliconflow --siliconflow-config /absolute/path/siliconflow.env</code>；密钥不会写入运行 manifest、提示词、日志或命令行。
+对于支持 <code>reasoning_effort</code> 的 SiliconFlow 模型，将其设为 <code>high</code> 或 <code>max</code>；其他模型应省略或留空。仍需安装 <code>codex</code> CLI。运行时指定 <code>--provider codex-siliconflow --siliconflow-config /absolute/path/siliconflow.env</code>；密钥不会写入运行 manifest、提示词、日志或命令行。
 
 ### 3. 可选：Vast.ai + Google Drive 云端数据
 

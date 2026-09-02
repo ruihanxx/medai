@@ -152,6 +152,24 @@ def test_siliconflow_key_is_removed_from_child_environment():
     assert environment["SAFE"] == "value"
 
 
+def test_siliconflow_reasoning_effort_is_validated(tmp_path: Path):
+    config_path = tmp_path / "siliconflow.env"
+    config_path.write_text(
+        "SILICONFLOW_API_KEY=secret\n"
+        "CODEX_CLI_SILICONFLOW_REASONING_EFFORT=max\n",
+        encoding="utf-8",
+    )
+    assert SiliconFlowConfig.from_dotenv(config_path).reasoning_effort == "max"
+
+    config_path.write_text(
+        "SILICONFLOW_API_KEY=secret\n"
+        "CODEX_CLI_SILICONFLOW_REASONING_EFFORT=medium\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="must be 'high' or 'max'"):
+        SiliconFlowConfig.from_dotenv(config_path)
+
+
 def test_responses_and_tool_calls_translate():
     chat = responses_to_chat(
         {
@@ -171,11 +189,13 @@ def test_responses_and_tool_calls_translate():
                     "parameters": {"type": "object"},
                 }
             ],
-        }
+        },
+        reasoning_effort="max",
     )
     assert chat["messages"][0]["role"] == "system"
     assert chat["messages"][1]["content"] == "Inspect files"
     assert chat["tools"][0]["function"]["name"] == "shell"
+    assert chat["reasoning_effort"] == "max"
 
     items = chat_to_response_items(
         {

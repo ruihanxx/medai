@@ -26,6 +26,7 @@ class SiliconFlowConfig:
     base_url: str = "https://api.siliconflow.cn/v1"
     model: str = "Qwen/Qwen3-Coder-30B-A3B-Instruct"
     context_window: int = 131072
+    reasoning_effort: str | None = None
     timeout_seconds: int = 1200
 
     @classmethod
@@ -46,14 +47,20 @@ class SiliconFlowConfig:
         context_window = int(
             values.get("CODEX_CLI_SILICONFLOW_CONTEXT_WINDOW", str(cls.context_window))
         )
+        reasoning_effort = (
+            values.get("CODEX_CLI_SILICONFLOW_REASONING_EFFORT", "").strip() or None
+        )
         timeout_seconds = int(values.get("CODEX_CLI_TIMEOUT_SECONDS", str(cls.timeout_seconds)))
         if not model or context_window <= 0 or timeout_seconds <= 0:
             raise ValueError("SiliconFlow model, context window, and timeout must be positive")
+        if reasoning_effort not in {None, "high", "max"}:
+            raise ValueError("SiliconFlow reasoning effort must be 'high' or 'max'")
         return cls(
             api_key=api_key,
             base_url=base_url,
             model=model,
             context_window=context_window,
+            reasoning_effort=reasoning_effort,
             timeout_seconds=timeout_seconds,
         )
 
@@ -210,7 +217,9 @@ class SiliconFlowAdapter:
         try:
             length = int(handler.headers.get("Content-Length", "0"))
             payload = json.loads(handler.rfile.read(length).decode("utf-8"))
-            chat_payload = responses_to_chat(payload)
+            chat_payload = responses_to_chat(
+                payload, reasoning_effort=self.settings.reasoning_effort
+            )
             chat_payload["model"] = self.settings.model
             upstream = urllib.request.Request(
                 f"{self.settings.base_url}/chat/completions",
@@ -236,6 +245,7 @@ class SiliconFlowAdapter:
                 {
                     "status": "ok",
                     "model": self.settings.model,
+                    "reasoning_effort": self.settings.reasoning_effort,
                     "message_count": len(chat_payload["messages"]),
                     "tool_count": len(chat_payload.get("tools", [])),
                     "usage": response_usage(upstream_payload.get("usage")),
@@ -306,7 +316,9 @@ class SiliconFlowAdapter:
         handler.wfile.write(body)
 
 
-def responses_to_chat(payload: dict[str, Any]) -> dict[str, Any]:
+def responses_to_chat(
+    payload: dict[str, Any], *, reasoning_effort: str | None = None
+) -> dict[str, Any]:
     system_parts = []
     if payload.get("instructions"):
         system_parts.append(str(payload["instructions"]))
@@ -365,6 +377,8 @@ def responses_to_chat(payload: dict[str, Any]) -> dict[str, Any]:
         "temperature": 0.2,
         "stream": False,
     }
+    if reasoning_effort is not None:
+        chat_payload["reasoning_effort"] = reasoning_effort
     tools = []
     for tool in payload.get("tools") or []:
         if not isinstance(tool, dict) or tool.get("type") != "function":
