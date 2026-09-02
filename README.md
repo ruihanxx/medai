@@ -8,6 +8,14 @@
   <a href="#english">English</a> · <a href="#中文">简体中文</a>
 </p>
 
+<p align="center">
+  <img src="docs/assets/claim-provenance-graph-example.png" width="100%" alt="A MedAI replication graph linking datasets, preprocessing, training, models, validations, and claims to node-level evidence and risks">
+</p>
+
+<p align="center">
+  <sub><strong>Graph-native replication:</strong> edit experimental paths as structured nodes, then trace every final claim back through its evidence and node-level risks.<br><strong>图结构化复现：</strong>以结构化节点修改实验路径，并将每个最终结论沿证据链溯源到节点级风险。</sub>
+</p>
+
 
 ---
 
@@ -19,8 +27,10 @@
 
 MedAI is an evidence-bound harness for medical-paper replication and Auto Research, running in Docker. It turns a paper PDF, an optional source repository, and data into an executable claim-provenance graph, audited replication records, and claim- and artifact-level reports.
 
+- **Graph-native replication:** MedAI decomposes the paper into a fine-grained D/P/T/M/V/C graph spanning datasets, preprocessing, training, trained-model artifacts, validations, and claims. Making experimental dependencies explicit helps surface replication details that a monolithic workflow can miss.
+- **Structured revision and risk lineage:** Each material change becomes a node or path update, so an experiment can be revised without obscuring the rest of the workflow. Every final claim remains traceable through the exact evidence path that produced it, including issues originating at any upstream node and the claims they can affect.
 - **Heterogeneous datasets:** MedAI is not restricted to one dataset or one table format. It is designed for the structured clinical, EHR/longitudinal, time-series, medical-imaging, omics, text, and other research inputs required by a paper—provided that complete paper-required source files and a usable runtime are supplied.
-- **Prediction and statistical analysis:** The replication workflow extracts a fine-grained D/P/T/M/V/C graph for datasets, preprocessing, training, trained-model artifacts, validations, and claims. Statistical paths do not need training or model nodes.
+- **Prediction and statistical analysis:** The same graph represents supervised-prediction and statistical-analysis paths; statistical paths do not need training or model nodes.
 - **Scientific fidelity and traceability:** The paper, source repository, and source data are read-only. Missing paper-required files, invalid artifacts, and technical failures stop explicitly; MedAI does not fabricate results, silently substitute inputs, or reduce scale just to produce a successful-looking run.
 - **Isolated repository calibration:** Preflight freezes public Git repositories directly disclosed by the paper. Codegen still starts empty and cannot inspect them; a later static calibration records paper conflicts and undisclosed repository details before applying only validated, safe changes.
 - **Paper improvement / Auto Research:** From a completed, valid prediction replication, MedAI proposes paper- and literature-grounded input-representation, model, or training-strategy improvements. It assesses isolated refinement graphs against selected prediction-validation nodes and existing baseline evidence; statistical-only validations can receive zero weight.
@@ -388,10 +398,12 @@ For canonical paths, schemas, and validation rules, see the [documentation route
 
 ## 项目介绍
 
-MedAI 是一个运行在 Docker 中、以证据为约束的医学论文复现与 Auto Research harness。它将论文 PDF、可选的原始代码仓库和数据集转换为可执行实验、可审计的复现记录，以及逐项声明和图表/表格对照的报告。
+MedAI 是一个运行在 Docker 中、以证据为约束的医学论文复现与 Auto Research 系统。它将论文 PDF、可选的原始代码仓库和数据集转换为可执行的 claim 溯源图、可审计的复现记录，以及逐项声明和产物级对照报告。
 
+- **图结构化复现：** MedAI 将论文拆解为覆盖数据集、预处理、训练、模型产物、验证和结论的细粒度 D/P/T/M/V/C 图。显式表达实验依赖，有助于更准确地定位传统单体流程容易遗漏的复现细节。
+- **结构化修改与风险溯源：** 每个实质性修改都落实为节点或路径更新，因而可以局部调整实验流程而不掩盖其他步骤。每个最终结论都能沿实际证据路径回溯，并定位任一上游节点产生的风险及其可能影响的结论。
 - **多类型数据集：** 不将输入限制为某个固定数据集或表格格式；可面向论文所需的结构化临床数据、EHR/纵向数据、时序、医学影像、组学、文本等研究输入。前提是提供论文要求的完整原始文件和可用执行环境。
-- **预测与统计分析模型：** 复现工作流可覆盖监督式预测和统计分析；它从论文提取可检查的文本/数值声明、实验定义及图表/表格锚点，并与真实运行证据逐项比较。
+- **预测与统计分析：** 同一张图可表达监督式预测与统计分析路径；统计分析路径不强制包含训练或模型节点。
 - **科学保真与可追溯：** 论文、原始仓库和源数据均以只读方式使用。缺失论文指定文件、无效产物或技术失败会明确停止，不会伪造结果、静默替代输入或缩小规模来制造“成功”。
 - **隔离式仓库校准：** Preflight 只冻结论文直接披露的公开 Git 仓库；codegen 仍从空目录独立实现且不可读取仓库，随后才静态记录论文冲突和论文未披露细节，并只采纳经过验证的安全修改。
 - **论文改进 / Auto Research：** 在已完成且有效的预测型复现之上，系统提出有论文和文献依据的输入表示、模型或训练策略改进，以独立代码副本、边界审计及已有基线证据评估改进。若论文同时含统计分析，只选择其中严格的监督式预测实验。
