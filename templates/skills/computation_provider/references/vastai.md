@@ -127,10 +127,12 @@ actual Replicate resource: use `gpu_name` as the first exact search,
 state and instance. If the exact model has no eligible inventory, use only the
 stronger fallback procedure above.
 
-The adapter creates an on-demand Docker SSH instance with the explicit image,
-disk size, and a run-owned label. It records non-secret requested and selected
-resource details in `remote_compute/instance.json`. The Vast API workflow is
-documented at <https://docs.vast.ai/api-reference/search/search-offers> and
+The adapter creates an on-demand Docker `ssh_direct` instance with the explicit
+image, disk size, and a run-owned label. Direct SSH is the primary transport;
+the Vast proxy remains the fallback when the provider does not expose a usable
+direct endpoint. The adapter records non-secret requested and selected resource
+details in `remote_compute/instance.json`. The Vast API workflow is documented
+at <https://docs.vast.ai/api-reference/search/search-offers> and
 <https://docs.vast.ai/api-reference/instances/create-instance>.
 
 After the first successful Auto Research rental, the adapter upgrades this

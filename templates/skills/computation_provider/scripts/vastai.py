@@ -886,7 +886,7 @@ def _create_offer(
     body = {
         "image": requested["image"],
         "disk": requested["disk_gb"],
-        "runtype": "ssh",
+        "runtype": "ssh_direct",
         "target_state": "running",
         "label": provider_state["label"],
     }

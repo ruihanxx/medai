@@ -581,7 +581,7 @@ def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path:
     created = next(item for item in requests if item["path"] == "/api/v0/asks/12345/")
     assert created["body"]["disk"] == 64
     assert created["body"]["image"] == "registry.example/medai@sha256:image"
-    assert created["body"]["runtype"] == "ssh"
+    assert created["body"]["runtype"] == "ssh_direct"
     assert created["body"]["target_state"] == "running"
     assert "ssh-ed25519 ZmFrZS1wdWJsaWMta2V5" in created["body"]["onstart"]
     assert "local-private-secret" not in json.dumps(requests)
