@@ -2,7 +2,7 @@
 
 ## `generate_run_graph.py`
 
-Generate a self-contained interactive graph from a MedAI manifest v6 run:
+Generate a self-contained interactive graph from a MedAI manifest v6 or v7 run:
 
 ```bash
 python scripts/generate_run_graph.py runs/<run_id>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a standalone interactive graph page from one MedAI v6 run."""
+"""Generate a standalone interactive graph page from one MedAI v6 or v7 run."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ GRAPH_COLLECTIONS = (
     "validations",
     "claims",
 )
+SUPPORTED_MANIFEST_VERSIONS = {6, 7}
 TYPE_CODES = {
     "datasets": "D",
     "preprocessing": "P",
@@ -277,8 +278,8 @@ def build_run_graph_snapshot(run_dir: Path, output_dir: Path) -> dict[str, Any]:
     scope_path = run_dir / "preprocessing" / "execution_scope.json"
 
     manifest = _load_json(manifest_path)
-    if not isinstance(manifest, dict) or manifest.get("version") != 6:
-        raise VisualizationError("The graph visualizer supports MedAI manifest v6 runs only")
+    if not isinstance(manifest, dict) or manifest.get("version") not in SUPPORTED_MANIFEST_VERSIONS:
+        raise VisualizationError("The graph visualizer supports MedAI manifest v6 and v7 runs only")
     graph = _load_json(graph_path)
     node_state = _load_json(node_state_path)
     nodes, categories, topological_order = _validate_graph(graph)
@@ -1047,7 +1048,7 @@ def generate_run_graph_page(run_dir: Path, output_dir: Path | None = None) -> Pa
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Generate a standalone interactive graph for one MedAI manifest v6 run."
+        description="Generate a standalone interactive graph for one MedAI manifest v6 or v7 run."
     )
     parser.add_argument("run", type=Path, help="Path to the run directory")
     parser.add_argument(
