@@ -49,11 +49,13 @@ support for a provider, drive, or capability that metadata and its selected
 reference do not document.
 
 A drive may set `cloud_pull_handoff: true` when its reference defines a safe
-two-step preparation and local-monitor procedure. A resumable Codex codegen or
-Auto Research planning session may use that opt-in: the agent completes the
-reference's active-instance preparation and power-off step, then local
-orchestration runs the returned foreground monitor command, powers off again
-after validation, and resumes that same session.
+preparation and local-monitor procedure. Direct Codex data availability uses
+that opt-in for every state-changing acquisition and materialization action:
+the agent selects the reviewed operation, local orchestration runs its returned
+foreground command, and the same session resumes from the terminal result.
+Codegen and Auto Research planning may retain an already prepared instance and
+hand off only the foreground monitor. Orchestration validates canonical state
+between turns and owns subsequent power-off and release.
 
 ## Local Configs
 

@@ -39,7 +39,8 @@ Repeat the command once for every selected dataset. The provider records each
 materialization independently under `provider_state.cloud_drives[<dataset>]`;
 one failed or incomplete entry keeps the overall run incomplete.
 
-For an opted-in Codex command handoff, the active agent must first run:
+For an opted-in Codex command handoff, this preparation command must first
+complete:
 
 ```bash
 python <skill-dir>/scripts/vastai.py cloud-pull \
@@ -51,8 +52,10 @@ python <skill-dir>/scripts/vastai.py cloud-pull \
 `--prepare` requires an activated, initialized running instance. It proves SSH
 access, checks the exact owned staging and target parents, creates and removes
 write probes, then powers the instance off and records `handoff_ready=true`.
-Only after this command succeeds may the agent return this foreground local
-command and end its turn:
+Data availability returns the preparation command for local orchestration to
+run; codegen or Auto Research may run it before their monitor-only handoff.
+Only after preparation succeeds may the agent return this foreground local
+monitor command and end its turn:
 
 ```bash
 python <skill-dir>/scripts/vastai.py cloud-pull \

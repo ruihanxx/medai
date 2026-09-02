@@ -521,6 +521,31 @@ class CodegenCloudPullRequest(StrictModel):
         return self
 
 
+class DataAvailabilityHandoffRequest(StrictModel):
+    status: Literal["command", "completed", "blocked", "failed"]
+    command: str | None
+    error: str | None
+
+    @model_validator(mode="after")
+    def status_matches_payload(self) -> "DataAvailabilityHandoffRequest":
+        if self.status == "command":
+            if self.command is None or not self.command.strip():
+                raise ValueError("availability handoff requires a non-empty command")
+            if self.error is not None:
+                raise ValueError("availability command handoff must have error=null")
+        elif self.status == "completed":
+            if self.command is not None or self.error is not None:
+                raise ValueError("completed availability handoff requires null payloads")
+        else:
+            if self.command is not None:
+                raise ValueError(f"{self.status} availability handoff must have command=null")
+            if self.error is None or not self.error.strip():
+                raise ValueError(
+                    f"{self.status} availability handoff requires a non-empty error"
+                )
+        return self
+
+
 class ReplicationCommand(StrictModel):
     command: str = Field(min_length=1)
 

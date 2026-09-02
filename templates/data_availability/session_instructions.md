@@ -74,6 +74,27 @@ against their metadata before invoking this stage. Do not inspect a stage-local
 any provider environment variable name. A missing computation-provider state
 means that no instance has been acquired yet; it does not show that provider
 configuration is missing.
+{% if provider_command_handoff %}
+
+This direct Codex stage uses foreground provider-command handoff. You may run
+the selected adapter's read-only search, status, and state-validation actions
+inside the current turn. Do not invoke `create`, `cloud-pull`, power, reconcile,
+release, or another state-changing provider action from a shell tool. When one
+is required, return it as the single foreground command in the structured
+result and end the turn. Orchestration runs it to a terminal result while this
+Codex process is absent, saves its complete log and result, and resumes this
+same session. Never detach, background, independently poll, or inspect provider
+state while a handed-off command is running.
+
+Use read-only offer discovery to select documented capacity before handing off
+`create`. After every resumed result, reread the canonical state rather than a
+pre-command snapshot. Hand off every reviewed cloud-materialization action,
+including preparation and monitoring when the drive separates them. Never
+repeat a billable create after an ambiguous result; follow the selected
+provider's reconciliation and bounded-replacement rules through another
+foreground handoff when applicable. Read-only remote source inspection may run
+inside the resumed turn only after materialization is complete.
+{% endif %}
 
 Choose `execution_location` as `local`, `remote`, or null. Use null only when no
 runnable location can yet be established. Consider the paper's intended scale,
@@ -82,10 +103,11 @@ needed, determine provider readiness only by invoking the adapter selected in
 provider metadata and following `{{ computation_provider_reference }}` and
 `{{ drive_reference }}`. Use the current state at
 `{{ computation_provider_state_path }}` when it exists; otherwise follow the
-adapter's documented search and create procedure. Only an actual adapter failure
-may support a claim that the provider is unavailable. Store its non-secret
-failure evidence under `{{ results_dir }}`. Never copy restricted row-level data
-into the run.
+adapter's documented search and create procedure{% if provider_command_handoff %},
+returning its state-changing command through the handoff above{% endif %}.
+Only an actual adapter failure may support a claim that the provider is unavailable.
+Store its non-secret failure evidence under `{{ results_dir }}`. Never copy
+restricted row-level data into the run.
 
 Write `{{ report_path }}`:
 
@@ -113,3 +135,16 @@ The requirements list must cover every direct D→P pair exactly once and contai
 no extra pair. Do not write execution scope yourself; the orchestrator
 validates coverage, propagates blockers through the graph, and writes the
 hash-bound scope.
+{% if provider_command_handoff %}
+
+For every turn return exactly one structured object. Use
+`{"status":"command","command":"<foreground adapter command>","error":null}`
+when orchestration must execute the next provider operation. After all required
+source inspection and report writing are complete, return
+`{"status":"completed","command":null,"error":null}`. Use `blocked` only for
+an irrecoverable external prerequisite and `failed` only when bounded technical
+recovery cannot produce a valid availability report; both require
+`command:null` and a non-empty `error`. A terminal provider failure normally
+supports an `unknown` requirement with saved non-secret evidence and a
+`completed` report rather than a failed stage.
+{% endif %}

@@ -13,7 +13,9 @@ grouping. One run executes these stages:
    groups nodes into a separate canonical unit.
 4. Data availability covers every direct D→P source boundary exactly once.
    Orchestration propagates unavailable or unknown requirements forward and
-   writes the hash-bound maximal claim scope.
+   writes the hash-bound maximal claim scope. For an opted-in direct Codex cloud
+   source, state-changing provider commands run as foreground orchestration
+   handoffs between turns of the same temporary availability session.
 5. The PARTIAL gate records a scope-bound decision and proceeds by default.
    NONE or an explicitly rejected PARTIAL stops before mutation or billable
    execution.

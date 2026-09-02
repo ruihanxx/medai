@@ -195,13 +195,16 @@ rejects reuse of the failed offer. If creation is uncertain, release is not
 confirmed, no different eligible offer exists, or the third create attempt
 fails, stop explicitly without another rental.
 
-For the selected Google Drive command handoff, never stop a merely provisioning
-instance. First complete the reviewed `cloud-pull --prepare` procedure in
-`../cloud/google-drive.md`; it proves an activated instance ID, onstart-backed
-SSH access, and writable run-owned paths before stopping the instance. The
-returned `cloud-pull --monitor` command runs locally while the Codex session is
-paused, then starts the same instance and verifies SSH before that session
-resumes.
+For a selected Google Drive command handoff, never stop a merely provisioning
+instance. Data availability returns `create` as a foreground command so local
+orchestration waits through running and SSH readiness before resuming the agent.
+It then hands off the reviewed `cloud-pull --prepare` and `cloud-pull --monitor`
+operations defined in `../cloud/google-drive.md`. Each terminal local result is
+persisted before the same session resumes. The prepare operation proves an
+activated instance ID, onstart-backed SSH access, and writable run-owned paths
+before stopping the instance; monitor starts that same instance and verifies
+SSH before it returns. Never inspect transient state while a returned command
+is running or repeat an ambiguous create.
 
 Power-off and release differ. Stopping retains the container disk and can still
 incur storage charges; destroying is irreversible and deletes that disk. Auto

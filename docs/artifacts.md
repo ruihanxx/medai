@@ -18,6 +18,7 @@ runs/<run_id>/
 │   ├── data_availability/attempt_<NNN>/
 │   │   ├── data_availability.json
 │   │   ├── data_availability_transcript.jsonl
+│   │   ├── provider_handoff/{turn_<NNN>.json,turn_<NNN>.log,turn_<NNN>_result.json}
 │   │   └── results/
 │   ├── execution_scope.json
 │   └── partial_replication_decisions.json
@@ -137,6 +138,11 @@ It records `runnable_node_ids`, `blocked_nodes`, blocker paths,
 `active_sources`, execution location, and one orchestration lifecycle verdict:
 `FULL`, `PARTIAL`, or `NONE`. Blocked nodes retain `source_blocked` versus
 `unknown` evidence. A partial decision is valid for one scope hash only.
+For an opted-in direct Codex provider handoff, each availability `turn_<NNN>.json`
+is the schema-validated request to execute one foreground provider command or
+complete the session. Command turns retain a combined `.log` and a `_result.json`
+with command, exit code, duration, log path, and validation-error slot before
+the same session resumes. No raw cloud data is stored locally.
 
 The replication plan starts with exactly one node-free environment/setup step.
 Each later step equals one earliest topological layer of the runnable DAG in

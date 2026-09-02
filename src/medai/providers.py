@@ -36,6 +36,27 @@ TRANSCRIPT_FLAGS = {
 }
 
 
+def _unfinished_command_count(transcript_path: Path) -> int:
+    pending: set[str] = set()
+    with transcript_path.open(encoding="utf-8") as transcript:
+        for line in transcript:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            item = event.get("item")
+            if not isinstance(item, dict) or item.get("type") != "command_execution":
+                continue
+            item_id = item.get("id")
+            if not isinstance(item_id, str):
+                continue
+            if event.get("type") == "item.started":
+                pending.add(item_id)
+            elif event.get("type") == "item.completed":
+                pending.discard(item_id)
+    return len(pending)
+
+
 def run_agent(
     *,
     provider: str,
@@ -145,6 +166,13 @@ def run_agent(
                 f"{provider} agent failed with exit code {return_code} "
                 f"(transcript: {transcript_path})"
             )
+        if provider.startswith("codex"):
+            unfinished_commands = _unfinished_command_count(transcript_path)
+            if unfinished_commands:
+                raise RuntimeError(
+                    f"{provider} agent exited with {unfinished_commands} unfinished command "
+                    f"execution(s) (transcript: {transcript_path})"
+                )
         if resume_session_id is not None:
             return resume_session_id
         if output_schema_path is not None and session_id is None:

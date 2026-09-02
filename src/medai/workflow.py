@@ -24,6 +24,7 @@ from medai.models import (
     AgentStageResult,
     CodegenCloudPullRequest,
     CodegenPlan,
+    DataAvailabilityHandoffRequest,
     DatasetPatchFile,
     EvidenceSummary,
     GraphDataAvailabilityReport,
@@ -942,11 +943,13 @@ def _cloud_pull(
         )
 
 
-def _cloud_pull_handoff_enabled(config: RunConfig) -> bool:
+def _cloud_pull_handoff_enabled(
+    config: RunConfig, *, require_cloud_only: bool = True
+) -> bool:
     if (
         config.provider != "codex"
         or not config.clouddrive
-        or config.data is not None
+        or (require_cloud_only and config.data is not None)
         or config.computation_provider is None
         or config.drive_provider is None
     ):
@@ -1109,6 +1112,74 @@ def _run_codegen_cloud_pull_handoff(
         environment_remove=("MEDAI_HOST_REPO",),
     )
     return session_id
+
+
+def _run_data_availability_handoff(
+    *,
+    config: RunConfig,
+    attempt_dir: Path,
+    prompt_path: Path,
+    transcript_path: Path,
+) -> str:
+    """Run provider commands outside a paused data-availability agent session."""
+    handoff_dir = attempt_dir / "provider_handoff"
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+    schema_path = config.output / "prompts" / "data_availability_handoff.schema.json"
+    write_json(schema_path, DataAvailabilityHandoffRequest.model_json_schema())
+    session_id: str | None = None
+    next_prompt_path = prompt_path
+    turn_index = 1
+    while True:
+        request_path = handoff_dir / f"turn_{turn_index:03d}.json"
+        session_id = run_agent(
+            provider=config.provider,
+            prompt_path=next_prompt_path,
+            working_dir=attempt_dir,
+            transcript_path=transcript_path,
+            siliconflow_config_path=config.siliconflow_config,
+            codex_model=config.codex_model,
+            codex_reasoning_effort=config.codex_reasoning_effort,
+            output_schema_path=schema_path,
+            output_last_message_path=request_path,
+            resume_session_id=session_id,
+        )
+        if session_id is None:
+            raise RuntimeError(
+                "Codex data-availability handoff did not return a session ID"
+            )
+
+        request = load_model(request_path, DataAvailabilityHandoffRequest)
+        if request.status == "completed":
+            return session_id
+        if request.status != "command":
+            raise RuntimeError(
+                "data_availability_agent reported "
+                f"{request.status} during provider handoff: {request.error}"
+            )
+
+        assert request.command is not None
+        log_path = handoff_dir / f"turn_{turn_index:03d}.log"
+        result_path = handoff_dir / f"turn_{turn_index:03d}_result.json"
+        result = _run_agent_command(
+            request.command,
+            codebase_dir=attempt_dir,
+            log_path=log_path,
+            result_path=result_path,
+        )
+        next_prompt_path = render_prompt(
+            "data_availability/provider_command_result.md",
+            config.output
+            / "prompts"
+            / f"data_availability_handoff_resume_{turn_index:03d}.md",
+            command_result_path=result_path,
+            command_log_path=log_path,
+            exit_code=result["exit_code"],
+            duration_seconds=result["duration_seconds"],
+            computation_provider_state_path=config.output
+            / "remote_compute"
+            / "instance.json",
+        )
+        turn_index += 1
 
 
 def _run_has_remote_plan(config: RunConfig) -> bool:
@@ -1953,6 +2024,9 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         )
         if path != report_path
     ]
+    provider_command_handoff = _cloud_pull_handoff_enabled(
+        config, require_cloud_only=False
+    )
     prompt_path = render_prompt(
         "data_availability/session_instructions.md",
         config.output / "prompts" / f"data_availability_attempt_{attempt:03d}.md",
@@ -1966,21 +2040,30 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
         cloud_only=config.data is None and bool(config.selected_cloud_datasets),
         dual_source=config.data is not None and bool(config.selected_cloud_datasets),
         force_remote=config.force_remote,
+        provider_command_handoff=provider_command_handoff,
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
         computation_provider_state_path=config.output / "remote_compute" / "instance.json",
         report_path=report_path,
         results_dir=results_dir,
     )
-    session_id = run_agent(
-        provider=config.provider,
-        prompt_path=prompt_path,
-        working_dir=attempt_dir,
-        transcript_path=transcript_path,
-        siliconflow_config_path=config.siliconflow_config,
-        codex_model=config.codex_model,
-        codex_reasoning_effort=config.codex_reasoning_effort,
-    )
+    if provider_command_handoff:
+        session_id = _run_data_availability_handoff(
+            config=config,
+            attempt_dir=attempt_dir,
+            prompt_path=prompt_path,
+            transcript_path=transcript_path,
+        )
+    else:
+        session_id = run_agent(
+            provider=config.provider,
+            prompt_path=prompt_path,
+            working_dir=attempt_dir,
+            transcript_path=transcript_path,
+            siliconflow_config_path=config.siliconflow_config,
+            codex_model=config.codex_model,
+            codex_reasoning_effort=config.codex_reasoning_effort,
+        )
     scope: GraphExecutionScope | None = None
 
     def validate_outputs() -> None:
@@ -2005,10 +2088,10 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
             "verdict": scope.verdict,
         },
     )
-    pipeline_state.complete_stage(
-        "data_availability_agent",
-        [str(report_path), str(results_dir), str(transcript_path), str(scope_path)],
-    )
+    outputs = [str(report_path), str(results_dir), str(transcript_path), str(scope_path)]
+    if provider_command_handoff:
+        outputs.append(str(attempt_dir / "provider_handoff"))
+    pipeline_state.complete_stage("data_availability_agent", outputs)
     return {"execution_scope_path": str(scope_path)}
 
 

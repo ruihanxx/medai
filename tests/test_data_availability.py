@@ -29,6 +29,131 @@ def test_availability_prompt_requires_metadata_adapter_for_provider_readiness() 
     assert "provider readiness only by invoking the adapter" in prompt
     assert "selected in\nprovider metadata" in prompt
     assert "Only an actual adapter failure" in prompt
+    assert "foreground provider-command handoff" in prompt
+    assert "Do not invoke `create`, `cloud-pull`" in prompt
+    assert '"status":"completed"' in prompt
+
+
+def test_availability_hands_provider_commands_to_host_and_resumes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output = tmp_path / "output"
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    provider_reference = tmp_path / "provider.md"
+    drive_reference = tmp_path / "drive.md"
+    provider_reference.write_text("provider\n", encoding="utf-8")
+    drive_reference.write_text("drive\n", encoding="utf-8")
+    config = RunConfig(
+        paper=paper,
+        output=output,
+        provider="codex",
+        clouddrive=True,
+        computation_provider="fake",
+        computation_provider_config={"provider": "fake"},
+        computation_provider_reference=provider_reference,
+        drive_provider="fake-drive",
+        drive_reference=drive_reference,
+        cloud_dataset="dataset-a",
+        cloud_source="datasets/dataset-a",
+        cloud_datasets=("dataset-a",),
+        cloud_sources=("datasets/dataset-a",),
+    )
+    PipelineState.create(output, build_run_inputs(config))
+    graph_path = output / "preprocessing" / "paper_graph.json"
+    resources_path = output / "preflight" / "resources.json"
+    write_json(graph_path, _graph().model_dump(mode="json"))
+    write_json(resources_path, {"gpus": [], "cpu": {}, "memory": {}, "disk": {}})
+
+    agent_calls = []
+    events = []
+
+    def fake_agent(**kwargs):
+        agent_calls.append(kwargs)
+        call_index = len(agent_calls)
+        request_path = kwargs["output_last_message_path"]
+        if call_index == 1:
+            payload = {"status": "command", "command": "create-instance", "error": None}
+        elif call_index == 2:
+            payload = {"status": "command", "command": "cloud-pull", "error": None}
+        else:
+            report = _report("available", "available")
+            report.capacity_decision.execution_location = "remote"
+            for requirement in report.requirements:
+                requirement.source_kind = "cloud"
+                requirement.source_name = "datasets/dataset-a"
+            write_json(
+                output
+                / "preprocessing"
+                / "data_availability"
+                / "attempt_001"
+                / "data_availability.json",
+                report.model_dump(mode="json"),
+            )
+            payload = {"status": "completed", "command": None, "error": None}
+        write_json(request_path, payload)
+        mode = "a" if kwargs.get("resume_session_id") else "w"
+        with kwargs["transcript_path"].open(mode, encoding="utf-8") as transcript:
+            transcript.write('{"type":"turn.completed"}\n')
+        events.append(f"agent-{call_index}")
+        return "thread-123"
+
+    def fake_command(command, *, codebase_dir, log_path, result_path):
+        events.append(f"local-{command}")
+        log_path.write_text(f"{command}: complete\n", encoding="utf-8")
+        result = {
+            "command": command,
+            "exit_code": 0,
+            "duration_seconds": 1.0,
+            "log_path": str(log_path),
+            "artifact_validation_error": None,
+        }
+        write_json(result_path, result)
+        return result
+
+    monkeypatch.setattr("medai.workflow.run_agent", fake_agent)
+    monkeypatch.setattr("medai.workflow._run_agent_command", fake_command)
+    monkeypatch.setattr(
+        "medai.workflow._cloud_pull_handoff_enabled",
+        lambda _config, **_kwargs: True,
+    )
+    monkeypatch.setattr(
+        "medai.workflow._cloud_drive_materialization_completed",
+        lambda *_args, **_kwargs: True,
+    )
+
+    result = data_availability_agent_node(
+        {
+            "config": config,
+            "paper_markdown": str(output / "preprocessing" / "paper.md"),
+            "paper_graph_path": str(graph_path),
+            "resources_path": str(resources_path),
+        }
+    )
+
+    assert events == [
+        "agent-1",
+        "local-create-instance",
+        "agent-2",
+        "local-cloud-pull",
+        "agent-3",
+    ]
+    assert agent_calls[0]["resume_session_id"] is None
+    assert agent_calls[1]["resume_session_id"] == "thread-123"
+    assert agent_calls[2]["resume_session_id"] == "thread-123"
+    assert result["execution_scope_path"].endswith("preprocessing/execution_scope.json")
+    handoff_dir = (
+        output / "preprocessing" / "data_availability" / "attempt_001" / "provider_handoff"
+    )
+    assert json.loads((handoff_dir / "turn_001.json").read_text())["command"] == (
+        "create-instance"
+    )
+    assert json.loads((handoff_dir / "turn_002.json").read_text())["command"] == (
+        "cloud-pull"
+    )
+    assert json.loads((handoff_dir / "turn_003.json").read_text())["status"] == (
+        "completed"
+    )
 
 
 def _node(node_id: str, inputs: list[str]) -> dict[str, object]:

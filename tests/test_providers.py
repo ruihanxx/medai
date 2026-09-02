@@ -24,6 +24,17 @@ class FakeProcess:
         return 0
 
 
+class FakeUnfinishedCommandProcess(FakeProcess):
+    def __init__(self, command, **kwargs):
+        super().__init__(command, **kwargs)
+        self.stdout = io.StringIO(
+            '{"type":"thread.started","thread_id":"thread-123"}\n'
+            '{"type":"item.started","item":{"id":"item-1",'
+            '"type":"command_execution","status":"in_progress"}}\n'
+            '{"type":"turn.completed"}\n'
+        )
+
+
 class OpenStringIO(io.StringIO):
     def close(self):
         return
@@ -127,6 +138,23 @@ def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Pa
     assert "--last" not in processes[1].command
     assert transcript.read_text(encoding="utf-8").count('"type":"done"') == 2
     assert not (tmp_path / "replication_transcript.attempt-1.jsonl").exists()
+
+
+def test_codex_turn_rejects_unfinished_command_execution(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "medai.providers.subprocess.Popen", FakeUnfinishedCommandProcess
+    )
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("wait for commands", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="1 unfinished command execution"):
+        run_agent(
+            provider="codex",
+            prompt_path=prompt,
+            working_dir=tmp_path,
+            transcript_path=tmp_path / "transcript.jsonl",
+            siliconflow_config_path=None,
+        )
 
 
 def test_replication_command_requires_exactly_one_nonblank_field():
