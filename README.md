@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/claim-provenance-graph-example.png" width="100%" alt="A MedAI replication graph linking datasets, preprocessing, training, models, validations, and claims to node-level evidence and risks">
+  <img src="docs/assets/claim-provenance-graph-example.svg" width="100%" alt="A MedAI replication graph with one highlighted path from data to claim, closely matching paper and reproduced results, and node-level risk lineage">
 </p>
 
 <p align="center">
