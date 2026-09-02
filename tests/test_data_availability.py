@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,23 @@ from medai.data_availability import derive_graph_execution_scope
 from medai.models import GraphDataAvailabilityReport, PaperGraph
 from medai.pipeline_state import PipelineState, build_run_inputs
 from medai.workflow import data_availability_agent_node
+
+
+def test_availability_prompt_requires_metadata_adapter_for_provider_readiness() -> None:
+    prompt = (
+        Path(__file__).parents[1]
+        / "templates"
+        / "data_availability"
+        / "session_instructions.md"
+    ).read_text(encoding="utf-8")
+
+    assert "already validated the selected provider and drive configuration" in prompt
+    assert "shell variable tests" in prompt
+    assert "guess or reconstruct" in prompt
+    assert "any provider environment variable name" in prompt
+    assert "provider readiness only by invoking the adapter" in prompt
+    assert "selected in\nprovider metadata" in prompt
+    assert "Only an actual adapter failure" in prompt
 
 
 def _node(node_id: str, inputs: list[str]) -> dict[str, object]:

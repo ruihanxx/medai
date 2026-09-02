@@ -39,7 +39,13 @@ needed columns/aggregates and never substitute a missing paper-required input.
   unsupported mappings are preprocessing decisions and cannot by themselves
   produce either `source_blocked` or `unknown`; `unknown` is reserved for
   inconclusive inspection of the source itself. A narrower inspection cannot
-  replace a broader one.
+  replace a broader one. The host validates selected provider and drive
+  configuration against metadata before invocation. Availability does not
+  inspect `.env`, hand-check or infer environment-variable names, or treat a
+  missing instance state as missing configuration. When remote inspection is
+  required, provider readiness is established only through the metadata-selected
+  adapter; a provider-unavailable finding requires non-secret evidence from an
+  actual adapter failure.
   Orchestration owns scope derivation.
 - Later agents do not edit the paper graph. They emit node-local updates in
   their existing stage artifact; orchestration assigns the source and merges

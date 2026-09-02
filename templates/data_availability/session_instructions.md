@@ -68,13 +68,24 @@ An available entry must set `source_kind` and `source_name` to one of the exact
 configured sources. A non-available entry may use null source fields. Preserve
 the distinction between unavailable and uncertain.
 
+The host has already validated the selected provider and drive configuration
+against their metadata before invoking this stage. Do not inspect a stage-local
+`.env`, use `env`, `printenv`, or shell variable tests, or guess or reconstruct
+any provider environment variable name. A missing computation-provider state
+means that no instance has been acquired yet; it does not show that provider
+configuration is missing.
+
 Choose `execution_location` as `local`, `remote`, or null. Use null only when no
 runnable location can yet be established. Consider the paper's intended scale,
 `{{ resources_path }}`, and configured providers. If remote inspection is
-needed, follow `{{ computation_provider_reference }}` and
-`{{ drive_reference }}` using the existing state at
-`{{ computation_provider_state_path }}`. Store probe evidence under
-`{{ results_dir }}` and never copy restricted row-level data into the run.
+needed, determine provider readiness only by invoking the adapter selected in
+provider metadata and following `{{ computation_provider_reference }}` and
+`{{ drive_reference }}`. Use the current state at
+`{{ computation_provider_state_path }}` when it exists; otherwise follow the
+adapter's documented search and create procedure. Only an actual adapter failure
+may support a claim that the provider is unavailable. Store its non-secret
+failure evidence under `{{ results_dir }}`. Never copy restricted row-level data
+into the run.
 
 Write `{{ report_path }}`:
 
