@@ -60,7 +60,8 @@ the operator to a new output directory.
 
 Remote mocks retain provider-authorized drive selection, bounded inventory and
 polling, secret non-persistence, safe replacement/reconciliation, no duplicate
-billable action after uncertainty, confined downloads, per-operation power-off,
-resume recovery, and release only after validated completion. A real cloud E2E
-is manual and billable and must use disposable data/resources with cleanup on
-every outcome.
+billable action after uncertainty, SSH-readiness-gated creation, confined
+downloads, per-operation power-off, resume recovery, and release only after
+validated completion or an unambiguous failed creation. A real cloud E2E is
+manual and billable and must use disposable data/resources with cleanup on every
+outcome.

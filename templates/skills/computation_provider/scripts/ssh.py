@@ -29,6 +29,8 @@ target = f"{args.user}@{args.host}"
 host_options = [
     "-o",
     "StrictHostKeyChecking=accept-new",
+    "-o",
+    "ConnectTimeout=10",
 ]
 identity_options: list[str] = []
 identity = (

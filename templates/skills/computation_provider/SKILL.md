@@ -170,11 +170,12 @@ created it. Transfer all required results, logs, and evidence before release.
 During the `replicate` stage, power off every current-run instance after all
 remote experiments finish and their required outputs are transferred. Attempt
 the same idempotent power-off on failure paths. Release only after the report
-artifacts have been validated and the pipeline is completed. The sole earlier
-release case is resume reconciliation: an instance that is still recorded by
-the provider but fails the one harmless SSH probe must be powered off and
-successfully released before one replacement may be created. Persisted lifecycle
-state must guard every release and replacement.
+artifacts have been validated and the pipeline is completed. Earlier release is
+limited to an unambiguously owned instance whose create-readiness check failed,
+or resume reconciliation when a provider-recorded instance fails the harmless
+SSH probe. The failed instance must be powered off and successfully released
+before one replacement may be created. Persisted lifecycle state must guard
+every release and replacement.
 
 For a cloud-backed Auto Research campaign, create the first campaign-owned
 instance only when the first audited idea reaches experiment planning. A

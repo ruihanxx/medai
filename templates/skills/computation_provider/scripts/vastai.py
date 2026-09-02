@@ -30,6 +30,8 @@ NO_INVENTORY_MARKERS = (
 )
 CAPACITY_UNAVAILABLE_MARKER = "required resources are currently unavailable"
 CLOUD_COPY_TIMEOUT_SECONDS = 3600
+SSH_READY_TIMEOUT_SECONDS = 180
+SSH_READY_INTERVAL_SECONDS = 10
 INVENTORY_FILENAME = "cloud-inventory.v1.json"
 POOL_INSTANCE_FIELDS = (
     "instance_id",
@@ -1009,14 +1011,15 @@ def create_instance(args: argparse.Namespace) -> str:
                         raise RuntimeError("Vast create response is ambiguous: multiple instances share the run label")
                 else:
                     raise
-    saved = load_state(args.state)
     try:
-        _wait_for_status(saved, "running", 600, 10)
+        _wait_for_status(load_state(args.state), "running", 600, 10)
+        _wait_for_ssh_ready(
+            load_state(args.state),
+            SSH_READY_TIMEOUT_SECONDS,
+            SSH_READY_INTERVAL_SECONDS,
+        )
     except RuntimeError as exc:
-        failed = load_state(args.state)
-        failed["provider_state"]["creation_failed"] = True
-        failed["provider_state"]["creation_failure"] = str(exc)
-        save_state(args.state, failed)
+        _record_creation_failure(args.state, exc)
         raise
     saved = _enable_campaign_pool(args.state, load_state(args.state))
     save_state(args.state, saved)
@@ -1072,6 +1075,31 @@ def _wait_for_status(
             )
         time.sleep(interval_seconds)
     raise RuntimeError(f"Vast instance did not reach {expected}; last status={last_status}")
+
+
+def _wait_for_ssh_ready(
+    state: dict[str, Any], timeout_seconds: int, interval_seconds: int
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            probe = _ssh_command(state, "exec", ["--", "true"])
+        except RuntimeError:
+            probe = None
+        if probe is not None and probe.returncode == 0:
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        time.sleep(min(interval_seconds, remaining))
+    raise RuntimeError("Vast instance reached running but did not become SSH-ready")
+
+
+def _record_creation_failure(state_path: Path, failure: RuntimeError) -> None:
+    state = load_state(state_path)
+    state["provider_state"]["creation_failed"] = True
+    state["provider_state"]["creation_failure"] = _redact(str(failure))
+    save_state(state_path, state)
 
 
 def _ssh_command(
@@ -1549,14 +1577,15 @@ def _create_pool_member(args: argparse.Namespace, state: dict[str, Any]) -> str:
             raise RuntimeError(
                 "The selected Vast offer became unavailable before pool creation"
             ) from exc
-    saved = load_state(args.state)
     try:
-        _wait_for_status(saved, "running", 600, 10)
+        _wait_for_status(load_state(args.state), "running", 600, 10)
+        _wait_for_ssh_ready(
+            load_state(args.state),
+            SSH_READY_TIMEOUT_SECONDS,
+            SSH_READY_INTERVAL_SECONDS,
+        )
     except RuntimeError as exc:
-        failed = load_state(args.state)
-        failed["provider_state"]["creation_failed"] = True
-        failed["provider_state"]["creation_failure"] = str(exc)
-        save_state(args.state, failed)
+        _record_creation_failure(args.state, exc)
         raise
     return instance_id
 
@@ -1659,9 +1688,6 @@ def _acquire_campaign_instance(
         )
     instance_id = _create_pool_member(args, state)
     state = load_state(args.state)
-    probe = _ssh_command(state, "exec", ["--", "true"])
-    if probe.returncode != 0:
-        raise RuntimeError("New Vast campaign instance failed its SSH probe")
     return {
         "created": True,
         "instance_id": instance_id,

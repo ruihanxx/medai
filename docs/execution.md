@@ -55,7 +55,11 @@ terminal result; codegen may inspect data only after provider state records
 completed materialization.
 Provider-specific resource selection, create initialization, fallback, and
 retry behavior lives only in the metadata-selected computation-provider
-reference. Host orchestration never infers an undocumented alternative.
+reference. A provider create is successful only after its documented remote
+readiness check, including SSH authentication when applicable. An unambiguously
+owned instance that fails create readiness is recorded as a failed creation so
+it can be released before a bounded replacement; host orchestration never
+infers an undocumented alternative.
 
 The data-availability agent receives the complete preflight CPU,
 available-memory, free-disk, and GPU snapshot. It first determines whether

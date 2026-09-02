@@ -182,10 +182,12 @@ create response without an unambiguous instance ID remains
 `creation_uncertain`; a later resume may adopt exactly one instance found by
 that member's unique label, otherwise it fails explicitly.
 
-`create` waits at most 600 seconds for a confirmed instance to reach `running`.
-If that wait fails after state records an unambiguous current-run instance, the
-adapter marks `creation_failed=true`, records a non-secret `creation_failure`,
-and keeps released failed attempts in `instance_history`. State records
+`create` waits at most 600 seconds for a confirmed instance to reach `running`,
+then retries the shared helper's harmless SSH public-key probe for at most 180
+seconds. It returns success only after that probe succeeds. If either readiness
+check fails after state records an unambiguous current-run instance, the adapter
+marks `creation_failed=true`, records a non-secret `creation_failure`, and keeps
+released failed attempts in `instance_history`. State records
 `failed_create_retries` from zero through two. Release the failed instance with
 the reviewed `release` command before searching for and creating a different
 eligible offer. The adapter permits at most two such replacement creates and

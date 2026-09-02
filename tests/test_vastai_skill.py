@@ -395,6 +395,9 @@ def test_vastai_cpu_only_create_records_cpu_request_and_effective_capacity(
     tmp_path: Path,
 ):
     state_path = tmp_path / "remote_compute" / "instance.json"
+    ssh_environment, _ = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
     selected = offer(
         "cpu-host",
         gpu_name="RTX 3090",
@@ -413,7 +416,11 @@ def test_vastai_cpu_only_create_records_cpu_request_and_effective_capacity(
                 "new_contract": "instance-cpu",
             },
             ("GET", "/api/v0/instances/instance-cpu/"): {
-                "instances": {"actual_status": "running"}
+                "instances": {
+                    "actual_status": "running",
+                    "ssh_host": "host",
+                    "ssh_port": 22,
+                }
             },
         }
     ) as (base_url, _):
@@ -432,7 +439,7 @@ def test_vastai_cpu_only_create_records_cpu_request_and_effective_capacity(
                 "--disk-gb",
                 "100",
             ],
-            adapter_environment(base_url),
+            {**adapter_environment(base_url), **ssh_environment},
         )
 
     assert completed.returncode == 0, completed.stderr
@@ -531,6 +538,9 @@ def test_vastai_cpu_only_replacement_preserves_recorded_cpu_ram_and_disk(
 
 def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
+    ssh_environment, _ = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
     selected = offer("12345")
     identity = tmp_path / "ssh" / "medai-vast"
     identity.parent.mkdir()
@@ -558,6 +568,7 @@ def test_vastai_create_records_nonsecret_state_and_requested_container(tmp_path:
             ["create", "--state", str(state_path), "--offer-id", "12345"],
             {
                 **adapter_environment(base_url),
+                **ssh_environment,
                 "COMPUTATION_PROVIDER_SSH_IDENTITY_FILE": str(identity),
             },
         )
@@ -600,23 +611,62 @@ def test_vastai_create_waits_through_an_initial_null_status(tmp_path: Path, monk
             monkeypatch.setenv(name, value)
         module = load_vastai_module()
         monkeypatch.setattr(module.time, "sleep", lambda _: None)
+        probes = []
+
+        def successful_probe(state, action, arguments):
+            probes.append((state["provider_state"]["instance_id"], action, arguments))
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        monkeypatch.setattr(module, "_ssh_command", successful_probe)
         instance_id = module.create_instance(
-            argparse.Namespace(
-                state=state_path,
-                offer_id="primary",
-                fallback_offer_id=None,
-                gpu_name=None,
-                gpu_count=None,
-                min_gpu_ram_gb=None,
-                min_cpu_ram_gb=None,
-                max_dph=None,
-                min_reliability=None,
-                disk_gb=None,
-                image=None,
+            module.build_parser().parse_args(
+                ["create", "--state", str(state_path), "--offer-id", "primary"]
             )
         )
 
     assert instance_id == "instance-1"
+    assert probes == [("instance-1", "exec", ["--", "true"])]
+
+
+def test_vastai_create_marks_running_instance_failed_when_ssh_is_not_ready(
+    tmp_path: Path, monkeypatch
+):
+    state_path = tmp_path / "remote_compute" / "instance.json"
+    with vast_api(
+        {
+            ("POST", "/api/v0/bundles"): {"offers": [offer("primary")]},
+            ("PUT", "/api/v0/asks/primary/"): {
+                "success": True,
+                "new_contract": "instance-1",
+            },
+            ("GET", "/api/v0/instances/instance-1/"): {
+                "instances": {"actual_status": "running"}
+            },
+        }
+    ) as (base_url, _):
+        for name, value in adapter_environment(base_url).items():
+            monkeypatch.setenv(name, value)
+        module = load_vastai_module()
+        monkeypatch.setattr(module, "SSH_READY_TIMEOUT_SECONDS", 0)
+        monkeypatch.setattr(
+            module,
+            "_ssh_command",
+            lambda *_: subprocess.CompletedProcess([], 255, "", "probe failed"),
+        )
+
+        with pytest.raises(RuntimeError, match="did not become SSH-ready"):
+            module.create_instance(
+                module.build_parser().parse_args(
+                    ["create", "--state", str(state_path), "--offer-id", "primary"]
+                )
+            )
+
+        failed = json.loads(state_path.read_text(encoding="utf-8"))
+        assert failed["released"] is False
+        assert failed["provider_state"]["creation_failed"] is True
+        assert failed["provider_state"]["creation_failure"] == (
+            "Vast instance reached running but did not become SSH-ready"
+        )
 
 
 def test_vastai_refuses_rental_when_explicit_ssh_key_is_not_registered(tmp_path: Path):
@@ -655,6 +705,9 @@ def test_vastai_refuses_rental_when_explicit_ssh_key_is_not_registered(tmp_path:
 
 def test_vastai_uses_one_fallback_only_after_explicit_primary_no_inventory(tmp_path: Path):
     state_path = tmp_path / "instance.json"
+    ssh_environment, _ = fake_cloud_ssh_environment(
+        tmp_path, cloud_inventory("dataset-a")
+    )
     primary = offer("primary", total_flops=80.0)
     fallback = offer("fallback", gpu_name="RTX 6000 Ada", gpu_ram_mb=49152, total_flops=91.0)
     with vast_api(
@@ -663,7 +716,13 @@ def test_vastai_uses_one_fallback_only_after_explicit_primary_no_inventory(tmp_p
             ("PUT", "/api/v0/asks/primary/"): (409, {"msg": "offer is no longer available"}),
             ("GET", "/api/v1/instances/"): {"instances": []},
             ("PUT", "/api/v0/asks/fallback/"): {"success": True, "new_contract": "instance-2"},
-            ("GET", "/api/v0/instances/instance-2/"): {"instances": {"actual_status": "running"}},
+            ("GET", "/api/v0/instances/instance-2/"): {
+                "instances": {
+                    "actual_status": "running",
+                    "ssh_host": "host",
+                    "ssh_port": 22,
+                }
+            },
         }
     ) as (base_url, requests):
         completed = run_adapter(
@@ -676,7 +735,7 @@ def test_vastai_uses_one_fallback_only_after_explicit_primary_no_inventory(tmp_p
                 "--fallback-offer-id",
                 "fallback",
             ],
-            adapter_environment(base_url),
+            {**adapter_environment(base_url), **ssh_environment},
         )
 
     assert completed.returncode == 0, completed.stderr
@@ -1669,6 +1728,9 @@ def test_vastai_replacement_rejects_google_drive_data_that_changed_from_its_base
     }
     state_path.write_text(json.dumps(state), encoding="utf-8")
     selected = offer("replacement")
+    ready_ssh_environment, _ = fake_cloud_ssh_environment(
+        tmp_path / "create", cloud_inventory("dataset-a")
+    )
     with vast_api(
         {
             ("POST", "/api/v0/bundles"): {"offers": [selected]},
@@ -1680,7 +1742,7 @@ def test_vastai_replacement_rejects_google_drive_data_that_changed_from_its_base
     ) as (base_url, _):
         created = run_adapter(
             ["create", "--state", str(state_path), "--offer-id", "replacement"],
-            adapter_environment(base_url),
+            {**adapter_environment(base_url), **ready_ssh_environment},
         )
     assert created.returncode == 0, created.stderr
     replacement_cloud = json.loads(state_path.read_text(encoding="utf-8"))["provider_state"]["cloud_drive"]
