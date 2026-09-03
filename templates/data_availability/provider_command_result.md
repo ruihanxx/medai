@@ -12,11 +12,17 @@ evidence and reread the canonical provider state at
 captured before this command ran. Do not blindly repeat a billable or ambiguous
 operation.
 
-If another reviewed state-changing provider or cloud-materialization operation
-is required, return exactly
+If another reviewed state-changing provider or cloud-materialization operation,
+or any remote source inspection, is required, return exactly
 `{"status":"command","command":"<foreground adapter command>","error":null}`
-and do not run it in this turn. Once materialization and read-only source
-inspection are complete, write the required availability report and return
+and do not run it in this turn. Combine checks that inspect the same remote source
+into one command.
+Never launch overlapping command executions or an equivalent replacement before
+the prior execution reaches a terminal state. Wait on or poll the same execution
+handle. Before returning any structured result, ensure every command or tool call
+from the current turn has reached a terminal state.
+Once materialization and read-only source inspection are complete, write the
+required availability report and return
 `{"status":"completed","command":null,"error":null}`. A terminal provider
 failure normally becomes source `unknown` with non-secret evidence in the
 report. Use `blocked` or `failed` with `command:null` and a non-empty `error`

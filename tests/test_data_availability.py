@@ -21,6 +21,12 @@ def test_availability_prompt_requires_metadata_adapter_for_provider_readiness() 
         / "data_availability"
         / "session_instructions.md"
     ).read_text(encoding="utf-8")
+    resume_prompt = (
+        Path(__file__).parents[1]
+        / "templates"
+        / "data_availability"
+        / "provider_command_result.md"
+    ).read_text(encoding="utf-8")
 
     assert "already validated the selected provider and drive configuration" in prompt
     assert "shell variable tests" in prompt
@@ -31,6 +37,12 @@ def test_availability_prompt_requires_metadata_adapter_for_provider_readiness() 
     assert "Only an actual adapter failure" in prompt
     assert "foreground provider-command handoff" in prompt
     assert "Do not invoke `create`, `cloud-pull`" in prompt
+    assert "return every\nremote source inspection" in prompt
+    assert "Never launch overlapping command executions" in prompt
+    assert "every command or tool call" in prompt
+    assert "or any remote source inspection" in resume_prompt
+    assert "Never launch overlapping command executions" in resume_prompt
+    assert "every command or tool call" in resume_prompt
     assert '"status":"completed"' in prompt
 
 

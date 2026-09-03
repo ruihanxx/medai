@@ -79,12 +79,12 @@ configuration is missing.
 This direct Codex stage uses foreground provider-command handoff. You may run
 the selected adapter's read-only search, status, and state-validation actions
 inside the current turn. Do not invoke `create`, `cloud-pull`, power, reconcile,
-release, or another state-changing provider action from a shell tool. When one
-is required, return it as the single foreground command in the structured
-result and end the turn. Orchestration runs it to a terminal result while this
-Codex process is absent, saves its complete log and result, and resumes this
-same session. Never detach, background, independently poll, or inspect provider
-state while a handed-off command is running.
+release, another state-changing provider action, or the adapter's remote-execution
+action from a shell tool. When one is required, return it as the single foreground
+command in the structured result and end the turn. Orchestration runs it to a
+terminal result while this Codex process is absent, saves its complete log and
+result, and resumes this same session. Never detach, background, independently
+poll, or inspect provider state while a handed-off command is running.
 
 Use read-only offer discovery to select documented capacity before handing off
 `create`. After every resumed result, reread the canonical state rather than a
@@ -92,8 +92,13 @@ pre-command snapshot. Hand off every reviewed cloud-materialization action,
 including preparation and monitoring when the drive separates them. Never
 repeat a billable create after an ambiguous result; follow the selected
 provider's reconciliation and bounded-replacement rules through another
-foreground handoff when applicable. Read-only remote source inspection may run
-inside the resumed turn only after materialization is complete.
+foreground handoff when applicable. After materialization completes, return every
+remote source inspection through the same foreground handoff. Combine checks that
+inspect the same remote source into one command.
+Never launch overlapping command executions or an equivalent replacement before
+the prior execution reaches a terminal state. Wait on or poll the same execution
+handle. Before returning any structured result, ensure every command or tool call
+from the current turn has reached a terminal state.
 {% endif %}
 
 Choose `execution_location` as `local`, `remote`, or null. Use null only when no

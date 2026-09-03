@@ -49,12 +49,13 @@ missing explicitly selected local dataset is an error and never falls back to
 a billable cloud source.
 When a selected drive opts into cloud-pull handoff and the provider is direct
 Codex, data availability performs read-only resource selection but returns each
-state-changing create and materialization operation as one foreground command.
-Orchestration runs it without an active Codex process, records its terminal
-result, and resumes the same session. The agent rereads canonical provider state
-after every resume and may inspect cloud data only after completed
-materialization. Codegen and Auto Research retain the same local-monitor
-handoff for materialization required after their own reconciliation.
+state-changing create and materialization operation and every remote source
+inspection as one foreground command. Orchestration runs it without an active
+Codex process, records its terminal result, and resumes the same session. The
+agent rereads canonical provider state after every resume and may inspect cloud
+data only after completed materialization. Codegen and Auto Research retain the
+same local-monitor handoff for materialization required after their own
+reconciliation.
 Provider-specific resource selection, create initialization, fallback, and
 retry behavior lives only in the metadata-selected computation-provider
 reference. A provider create is successful only after its documented remote

@@ -46,8 +46,9 @@ artifact descriptions and the mandatory reverse C-to-D artifact-flow audit.
 Direct-Codex tests also cover structured terminal
 results, bounded same-session artifact repair, appended transcripts, and cleanup
 after success or terminal failure. Provider-handoff coverage requires
-availability to execute create/materialization commands locally between turns
-of one session and rejects a successful Codex exit with an unfinished command.
+availability to execute create, materialization, and remote-inspection commands
+locally between turns of one session and rejects a successful Codex exit with an
+unfinished command.
 
 Auto Research coverage includes claim-driven eligible-V selection, zero-weight
 sparsification, positive normalization, zero-weight exclusion from contract/run/
