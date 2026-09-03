@@ -5,13 +5,18 @@ import json
 from pathlib import Path
 
 import pytest
-
 from medai.artifacts import write_json
 from medai.config import RunConfig
-from medai.data_availability import derive_graph_execution_scope
-from medai.models import GraphDataAvailabilityReport, PaperGraph
+from medai.data_availability import derive_graph_execution_scope, sha256_file
+from medai.models import GraphDataAvailabilityReport, GraphExecutionScope, PaperGraph
 from medai.pipeline_state import PipelineState, build_run_inputs
-from medai.workflow import data_availability_agent_node
+from medai.study_graph import write_empty_node_state
+from medai.workflow import (
+    NoRunnableClaims,
+    codegen_agent_node,
+    data_availability_agent_node,
+    partial_data_gate_node,
+)
 
 
 def test_availability_prompt_requires_metadata_adapter_for_provider_readiness() -> None:
@@ -166,6 +171,109 @@ def test_availability_hands_provider_commands_to_host_and_resumes(
     assert json.loads((handoff_dir / "turn_003.json").read_text())["status"] == (
         "completed"
     )
+
+
+def test_scope_without_an_active_source_stops_before_codegen(tmp_path: Path) -> None:
+    output = tmp_path / "output"
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    config = RunConfig(paper=paper, output=output, provider="codex")
+    PipelineState.create(output, build_run_inputs(config))
+    scope_path = output / "preprocessing" / "execution_scope.json"
+    scope = GraphExecutionScope(
+        paper_graph_sha256="1" * 64,
+        availability_report_sha256="2" * 64,
+        scope_sha256="3" * 64,
+        verdict="PARTIAL",
+        runnable_node_ids=["D1", "V1", "C1"],
+        blocked_nodes=[],
+        active_sources=[],
+        execution_location="local",
+    )
+    write_json(scope_path, scope.model_dump(mode="json"))
+
+    with pytest.raises(NoRunnableClaims, match="requiring available source data"):
+        partial_data_gate_node(
+            {"config": config, "execution_scope_path": str(scope_path)}  # type: ignore[arg-type]
+        )
+
+    assert not (output / "codegen").exists()
+
+
+def test_codegen_does_not_pull_cloud_without_an_active_dataset(
+    tmp_path: Path, monkeypatch
+) -> None:
+    output = tmp_path / "output"
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    config = RunConfig(
+        paper=paper,
+        output=output,
+        provider="codex",
+        clouddrive=True,
+        computation_provider="fake",
+        drive_provider="fake-drive",
+        cloud_dataset="dataset-a",
+        cloud_source="datasets/dataset-a",
+        cloud_datasets=("dataset-a",),
+        cloud_sources=("datasets/dataset-a",),
+    )
+    PipelineState.create(output, build_run_inputs(config))
+    graph_path = output / "preprocessing" / "paper_graph.json"
+    scope_path = output / "preprocessing" / "execution_scope.json"
+    resources_path = output / "preflight" / "resources.json"
+    graph = _graph()
+    write_json(graph_path, graph.model_dump(mode="json"))
+    graph_sha256 = sha256_file(graph_path)
+    node_state_path = output / "graph" / "node_state.json"
+    write_empty_node_state(node_state_path, graph_sha256)
+    write_json(resources_path, {"gpus": []})
+    write_json(
+        scope_path,
+        GraphExecutionScope(
+            paper_graph_sha256=graph_sha256,
+            availability_report_sha256="2" * 64,
+            scope_sha256="3" * 64,
+            verdict="FULL",
+            runnable_node_ids=[node.id for node in graph.nodes],
+            blocked_nodes=[],
+            active_sources=[],
+            execution_location="remote",
+        ).model_dump(mode="json"),
+    )
+
+    class AgentInvoked(RuntimeError):
+        pass
+
+    monkeypatch.setattr("medai.workflow._cloud_pull_handoff_enabled", lambda _config: True)
+    monkeypatch.setattr(
+        "medai.workflow._cloud_drive_materialization_completed",
+        lambda *_args, **_kwargs: pytest.fail("inactive cloud data was checked"),
+    )
+    monkeypatch.setattr(
+        "medai.workflow._run_codegen_cloud_pull_handoff",
+        lambda **_kwargs: pytest.fail("inactive cloud data was pulled"),
+    )
+    monkeypatch.setattr(
+        "medai.workflow.render_prompt",
+        lambda *_args, **_kwargs: output / "prompts" / "codegen.md",
+    )
+    monkeypatch.setattr(
+        "medai.workflow.run_agent",
+        lambda **_kwargs: (_ for _ in ()).throw(AgentInvoked),
+    )
+
+    with pytest.raises(AgentInvoked):
+        codegen_agent_node(
+            {
+                "config": config,
+                "paper_markdown": str(output / "preprocessing" / "paper.md"),
+                "paper_graph_path": str(graph_path),
+                "node_state_path": str(node_state_path),
+                "execution_scope_path": str(scope_path),
+                "resources_path": str(resources_path),
+            }
+        )
 
 
 def _node(node_id: str, inputs: list[str]) -> dict[str, object]:

@@ -16,9 +16,10 @@ grouping. One run executes these stages:
    writes the hash-bound maximal claim scope. For an opted-in direct Codex cloud
    source, state-changing provider commands run as foreground orchestration
    handoffs between turns of the same temporary availability session.
-5. The PARTIAL gate records a scope-bound decision and proceeds by default.
-   NONE or an explicitly rejected PARTIAL stops before mutation or billable
-   execution.
+5. The PARTIAL gate records a scope-bound decision and proceeds by default only
+   when its runnable subgraph uses at least one confirmed source. NONE, a scope
+   without an active source, or an explicitly rejected PARTIAL stops before
+   mutation or billable execution.
 6. Codegen starts from an empty generated-code directory, consumes only the
    runnable subgraph and supplied data, and receives no repository inventory,
    path, content, or repository environment hint.

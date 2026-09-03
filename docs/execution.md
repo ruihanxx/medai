@@ -101,8 +101,10 @@ after the gate. Auto Research does not accept this replication-only flag.
 Replication accepts `--on-partial-data continue|ask|stop` (default `continue`).
 A PARTIAL run lists reproducible and blocked claims, their node paths, direct
 blockers, and dependency chains, records the scope-bound decision, and proceeds
-with the runnable claim subgraph by default. Explicit interactive `ask` prompts
-`Continue with the runnable claim subgraph? [y/N]`.
+with the runnable claim subgraph by default when it uses at least one confirmed
+source. A scope with no active source stops instead of executing claims that can
+be derived entirely without an available dataset. Explicit interactive `ask`
+prompts `Continue with the runnable claim subgraph? [y/N]`.
 Non-interactive `ask` safely powers off and exits 3 with resume instructions;
 `stop` exits 4, records `stopped_by_user`, and releases run-owned compute. A
 decision is valid for one scope hash only.

@@ -1008,6 +1008,7 @@ def _next_command_index(command_dir: Path) -> int:
 def _run_codegen_cloud_pull_handoff(
     *,
     config: RunConfig,
+    datasets: Sequence[str],
     codebase_dir: Path,
     prompt_path: Path,
     transcript_path: Path,
@@ -1072,7 +1073,7 @@ def _run_codegen_cloud_pull_handoff(
             result_path=result_path,
         )
         try:
-            materialized = _cloud_drive_materialization_completed(config)
+            materialized = _cloud_drive_materialization_completed(config, datasets)
             validation_error = "Cloud-drive materialization is incomplete"
         except RuntimeError as exc:
             materialized = False
@@ -2166,9 +2167,9 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
         return {"execution_scope_path": str(scope_path)}
 
     pipeline_state.start_stage("partial_data_gate")
-    if scope.verdict == "NONE":
+    if scope.verdict == "NONE" or not scope.active_sources:
         raise NoRunnableClaims(
-            "No claims are runnable with the available source data."
+            "No claims requiring available source data are runnable."
         )
 
     decision_path: Path | None = None
@@ -2299,6 +2300,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
 
     resources = json.loads(Path(state["resources_path"]).read_text(encoding="utf-8"))
     cloud_pull_handoff = _cloud_pull_handoff_enabled(config)
+    active_cloud_datasets = _active_cloud_datasets(state)
     result_schema_path: Path | None = None
     result_path: Path | None = None
     if config.provider == "codex":
@@ -2318,7 +2320,7 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
         data_paths=config.dataset_paths,
         cloud_drive_enabled=config.clouddrive,
         cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=_active_cloud_datasets(state),
+        cloud_datasets=active_cloud_datasets,
         drive_provider=config.drive_provider,
         cloud_source=", ".join(config.selected_cloud_sources),
         cloud_sources=config.selected_cloud_sources,
@@ -2338,11 +2340,16 @@ def codegen_agent_node(state: WorkflowState) -> dict[str, Any]:
         structured_stage_result=result_schema_path is not None,
         resuming=previous_status in {"running", "failed", "invalidated"},
     )
-    if cloud_pull_handoff and not _cloud_drive_materialization_completed(config):
+    if (
+        cloud_pull_handoff
+        and active_cloud_datasets
+        and not _cloud_drive_materialization_completed(config, active_cloud_datasets)
+    ):
         assert result_schema_path is not None
         assert result_path is not None
         session_id = _run_codegen_cloud_pull_handoff(
             config=config,
+            datasets=active_cloud_datasets,
             codebase_dir=codebase_dir,
             prompt_path=prompt_path,
             transcript_path=transcript_path,
