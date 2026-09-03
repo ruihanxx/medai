@@ -2007,6 +2007,7 @@ def _ensure_cloud_staging_visible(
     lifecycle_args = argparse.Namespace(state=state_path)
     _power_off_active(lifecycle_args)
     _power_on_active(lifecycle_args)
+    _wait_for_ssh_ready(state, SSH_READY_TIMEOUT_SECONDS, SSH_READY_INTERVAL_SECONDS)
     if _ssh_command(state, "exec", command).returncode != 0:
         raise RuntimeError("Vast cloud-copy staging is not visible after instance restart")
 
@@ -2128,7 +2129,7 @@ def _restore_cloud_instance(args: argparse.Namespace, state: dict[str, Any]) -> 
         _power_on_active(args, known_status=status)
     elif status != "running":
         raise RuntimeError(f"Cannot restore Vast instance from status={status}")
-    remote_exec(state, ["true"])
+    _wait_for_ssh_ready(state, SSH_READY_TIMEOUT_SECONDS, SSH_READY_INTERVAL_SECONDS)
 
 
 def _monitor_cloud_pull(
