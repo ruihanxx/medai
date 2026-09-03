@@ -68,7 +68,8 @@ python <skill-dir>/scripts/vastai.py cloud-pull \
 `--monitor` refuses a running or unprepared instance. It requests Vast Cloud
 Copy from the stopped instance into the exact run-owned staging path, records
 only non-secret progress data, and prints changed status messages while polling
-every 30 seconds. It never persists the Cloud Copy `result_url` or signed URLs.
+every 30 seconds for at most two hours. It never persists the Cloud Copy
+`result_url` or signed URLs.
 At every terminal result it starts the same instance and verifies SSH before
 returning control to the agent. On a timeout it cancels sync while stopped,
 then starts the instance and cleans only the recorded exact staging path after

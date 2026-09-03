@@ -29,7 +29,7 @@ NO_INVENTORY_MARKERS = (
     "offer is no longer available",
 )
 CAPACITY_UNAVAILABLE_MARKER = "required resources are currently unavailable"
-CLOUD_COPY_TIMEOUT_SECONDS = 3600
+CLOUD_COPY_TIMEOUT_SECONDS = 7200
 SSH_READY_TIMEOUT_SECONDS = 180
 SSH_READY_INTERVAL_SECONDS = 10
 INVENTORY_FILENAME = "cloud-inventory.v1.json"

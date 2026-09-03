@@ -44,7 +44,7 @@
     "power-off": 300,
     "reconcile": 1800,
     "release": 300,
-    "cloud-pull": 5400,
+    "cloud-pull": 9000,
     "exec": 7200,
     "upload": 7200,
     "download": 7200
