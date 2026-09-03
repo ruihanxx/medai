@@ -53,9 +53,10 @@ state-changing create and materialization operation and every remote source
 inspection as one foreground command. Orchestration runs it without an active
 Codex process, records its terminal result, and resumes the same session. The
 agent rereads canonical provider state after every resume and may inspect cloud
-data only after completed materialization. Codegen and Auto Research retain the
-same local-monitor handoff for materialization required after their own
-reconciliation.
+data only after completed materialization. Codegen returns every
+cloud-materialization action required after its own reconciliation for the same
+foreground orchestration handoff. Auto Research retains its local-monitor
+handoff.
 Provider-specific resource selection, create initialization, fallback, and
 retry behavior lives only in the metadata-selected computation-provider
 reference. A provider create is successful only after its documented remote

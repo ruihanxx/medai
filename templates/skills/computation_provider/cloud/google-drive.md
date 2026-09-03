@@ -54,9 +54,9 @@ preflight command, it proves SSH access, checks the exact owned staging and
 target parents, and creates and removes write probes. It then powers the
 instance off and records `handoff_ready=true`.
 Data availability returns the preparation command for local orchestration to
-run; codegen or Auto Research may run it before their monitor-only handoff.
-Only after preparation succeeds may the agent return this foreground local
-monitor command and end its turn:
+run. Codegen also returns preparation for local orchestration; Auto Research
+may run it before its monitor-only handoff. Only after preparation succeeds may
+the agent return this foreground local monitor command and end its turn:
 
 ```bash
 python <skill-dir>/scripts/vastai.py cloud-pull \

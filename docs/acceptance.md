@@ -66,6 +66,7 @@ Remote mocks retain provider-authorized drive selection, bounded inventory and
 polling, secret non-persistence, safe replacement/reconciliation, no duplicate
 billable action after uncertainty, SSH-readiness-gated creation, confined
 downloads, direct-SSH creation, single-command cloud preparation, per-operation
-power-off, resume recovery, and release after any unambiguous terminal outcome.
+power-off, Codegen preparation-and-monitor handoff, resume recovery, and release
+after any unambiguous terminal outcome.
 A real cloud E2E is manual and billable and must
 use disposable data/resources with cleanup on every outcome.

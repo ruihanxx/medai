@@ -1015,7 +1015,7 @@ def _run_codegen_cloud_pull_handoff(
     stage_result_schema_path: Path,
     stage_result_path: Path,
 ) -> str:
-    """Pause one Codex session while local orchestration monitors cloud materialization."""
+    """Pause one Codex session while orchestration runs cloud materialization."""
     command_dir = config.output / "codegen" / "cloud_pull" / "commands"
     command_dir.mkdir(parents=True, exist_ok=True)
     command_schema_path = config.output / "prompts" / "codegen_cloud_pull_command.schema.json"
@@ -1039,7 +1039,7 @@ def _run_codegen_cloud_pull_handoff(
                 environment_remove=("MEDAI_HOST_REPO",),
             )
             if session_id is None:
-                raise RuntimeError("Codex cloud-pull preparation turn did not return a session ID")
+                raise RuntimeError("Codex cloud-pull handoff did not return a session ID")
         else:
             assert resume_prompt_path is not None
             run_agent(
@@ -1060,7 +1060,7 @@ def _run_codegen_cloud_pull_handoff(
         if request.status != "command":
             raise RuntimeError(
                 "codegen_agent reported "
-                f"{request.status} during cloud-pull preparation: {request.error}"
+                f"{request.status} during cloud-pull handoff: {request.error}"
             )
         assert request.command is not None
         command = request.command

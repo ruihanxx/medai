@@ -7,8 +7,9 @@ remote instance. The replacement is already running and recorded at
 instance. Preserve the current local codebase and source preparation, then
 restore every remote prerequisite represented by the existing implementation:
 upload code and ordinary local data again, recreate the environment, and rerun
-remote setup checks. For cloud-backed data, invoke the reviewed cloud
-materialization command again and require its completed state before inspection.
+remote setup checks. For cloud-backed data, follow the selected drive's
+foreground handoff contract for every reviewed cloud-materialization action and
+require completed state before inspection.
 Rerun all codegen self-review checks before completing the stage.
 {% elif resuming %}
 This stage is resuming after an interrupted code-generation attempt. Inspect the
@@ -165,10 +166,18 @@ available to the reviewed adapter, and secrets must never be printed.
 {% endif %}
 
 {% if cloud_drive_enabled|default(false) and cloud_pull_handoff|default(false) %}
-If materialization is incomplete, follow the structured handoff contract in
-the selected drive reference and return only the requested command result. Do
-not inspect cloud data or continue code generation before orchestration resumes
-this same session with completed materialization.
+If materialization is incomplete, do not invoke the selected adapter's
+`cloud-pull` action from a shell tool. Return every reviewed materialization
+action, including separate preparation and monitoring actions, as
+`{"status":"command","command":"<foreground adapter command>","error":null}`
+and end the turn. Orchestration runs each command to a terminal result while
+this Codex process is absent, saves its complete log and result, and resumes
+this same session. Reread canonical provider state after every resume. Never
+launch overlapping command executions, inspect provider state while a handed-off
+command is running, inspect incomplete cloud data, or continue code generation
+before orchestration resumes with completed materialization. Before returning
+any structured result, ensure every command or tool call from the current turn
+has reached a terminal state.
 {% endif %}
 
 If a successful, evidence-based procedure conflicts with the selected skill

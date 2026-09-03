@@ -159,9 +159,10 @@ anything outside declared model/metric/log/aggregate roots.
 One-turn invocation is the default. Direct Codex may keep one temporary session
 across these orchestration handoffs: invalid final stage artifacts (at most two
 repairs), missing/invalid audit report, opted-in data-availability provider
-and remote-inspection commands, codegen or Auto Research cloud-materialization
-monitors, and one remote validation operation. Initial and resumed turns append
-to one transcript. Explicit CLI resume never restores a process-local session ID.
+and remote-inspection commands, codegen cloud-materialization commands, Auto
+Research cloud-materialization monitors, and one remote validation operation.
+Initial and resumed turns append to one transcript. Explicit CLI resume never
+restores a process-local session ID.
 
 A successful turn alone does not complete a stage; canonical artifact validation
 does. Codegen `blocked` or `failed` is immediately terminal. Base replication
@@ -175,6 +176,12 @@ Data availability may run only provider search, status, and state validation
 inside its agent turn. Every remote-execution action is a single foreground
 handoff; checks over the same remote source are combined, and no replacement is
 started before the prior command reaches a terminal state.
+
+Before cloud materialization completes, Codegen may run only bounded read-only
+provider diagnostics inside its agent turn. Every cloud-materialization action,
+including preparation and monitoring, is a single foreground handoff. The agent
+rereads canonical state only after orchestration resumes it from the prior
+command's terminal result.
 
 Remote access uses the metadata-selected computation-provider skill. The
 provider reference owns resource selection and provider procedures; shared SSH

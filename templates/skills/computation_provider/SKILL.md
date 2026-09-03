@@ -53,9 +53,11 @@ preparation and local-monitor procedure. Direct Codex data availability uses
 that opt-in for every state-changing acquisition and materialization action:
 the agent selects the reviewed operation, local orchestration runs its returned
 foreground command, and the same session resumes from the terminal result.
-Codegen and Auto Research planning may retain an already prepared instance and
-hand off only the foreground monitor. Orchestration validates canonical state
-between turns and owns subsequent power-off and release.
+Codegen uses the same handoff for every cloud-materialization action, including
+preparation and monitoring. Auto Research planning may retain an already
+prepared instance and hand off only the foreground monitor. Orchestration
+validates canonical state between turns and owns subsequent power-off and
+release.
 
 ## Local Configs
 

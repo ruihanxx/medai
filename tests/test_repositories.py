@@ -301,3 +301,29 @@ def test_codegen_prompt_enforces_repository_isolation() -> None:
     assert "Do not search for, open, clone, download" in prompt
     assert "source-code repository" in prompt
     assert "reuse supplied repository" not in prompt.casefold()
+
+
+def test_codegen_prompt_hands_every_cloud_pull_action_to_host() -> None:
+    root = Path(__file__).parents[1]
+    prompt = (root / "templates" / "codegen" / "session_instructions.md").read_text(
+        encoding="utf-8"
+    )
+    resume_prompt = (
+        root / "templates" / "codegen" / "cloud_pull_result_instructions.md"
+    ).read_text(encoding="utf-8")
+    drive_reference = (
+        root
+        / "templates"
+        / "skills"
+        / "computation_provider"
+        / "cloud"
+        / "google-drive.md"
+    ).read_text(encoding="utf-8")
+
+    assert "do not invoke the selected adapter's\n`cloud-pull` action" in prompt
+    assert "including separate preparation and monitoring actions" in prompt
+    assert "every command or tool call" in prompt
+    assert "including `--prepare` before\nanother `--monitor`" in resume_prompt
+    assert "Do not run the returned command in this turn" in resume_prompt
+    assert "every command or tool call" in resume_prompt
+    assert "Codegen also returns preparation for local orchestration" in drive_reference

@@ -22,7 +22,9 @@ grouping. One run executes these stages:
    mutation or billable execution.
 6. Codegen starts from an empty generated-code directory, consumes only the
    runnable subgraph and supplied data, and receives no repository inventory,
-   path, content, or repository environment hint.
+   path, content, or repository environment hint. For opted-in direct Codex
+   cloud materialization, it returns every preparation and monitoring action as
+   a foreground orchestration handoff.
 7. When at least one snapshot is available, repository calibration statically
    compares all paper-related repository paths with the complete graph, paper,
    and independent codegen. It records every omission/conflict and promotes
