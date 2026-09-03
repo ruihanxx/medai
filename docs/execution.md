@@ -193,27 +193,29 @@ variables, defaults, supported drives, source mapping, action timeouts, and
 non-secret configuration fingerprint. Secrets are never placed in manifests,
 command arguments, prompts, or logs.
 
-Replicate failure cleanup powers off a run-created remote instance without
-releasing it. On explicit resume the CLI reconciles the canonical state once
-before entering LangGraph: it reuses a reachable instance or creates one bounded
-replacement from recorded actual specifications. Ambiguous provider failures or
-an unsuccessful old-instance release prevent a second rental. A replacement
-before replication invalidates codegen and downstream work as an infrastructure
-resume. Once replication has begun, explicit resume snapshots the attempt,
-recovers valid node artifacts, and reruns only nodes that fail result, evidence,
-generic integrity, or predecessor-closure checks. Cloud data is materialized
-idempotently before resumed replication execution. Normal release occurs only
-after the report is validated and the run is
-completed. A release failure is a persistent `cleanup_warning`, not a pipeline
+Every terminal Replicate or Auto Research outcome attempts power-off and release
+of each unambiguously run-owned instance before the CLI exits, including early
+NONE scope, explicit stop, and failure before report completion. The resumable
+non-interactive partial-data confirmation pause is not terminal and powers off
+without release. Cleanup failures are appended to the primary terminal error so
+they never replace it. On explicit resume the CLI reconciles canonical state
+before entering LangGraph and may create one bounded replacement from recorded
+actual specifications. Ambiguous provider failures or an unsuccessful
+old-instance release prevent a second rental. A replacement before replication
+invalidates codegen and downstream work as an infrastructure resume. Once
+replication has begun, explicit resume snapshots the attempt, recovers valid
+node artifacts, and reruns only nodes that fail result, evidence, generic
+integrity, or predecessor-closure checks. Cloud data is materialized
+idempotently before resumed replication execution. A cleanup failure after
+successful completion is a persistent `cleanup_warning`, not a pipeline
 failure, and reopening that completed run does not retry it.
 
 For cloud-backed Auto Research, host orchestration owns pool selection and
 preparation, provider execution, artifact validation, reconciliation,
-power-off, and release. It powers the pool off before resuming an agent and on
-failure, and releases owned members only after final-report validation and
-campaign completion. The campaign state machine and data-materialization flow
-are defined in `autoresearch.md`; agent-facing operation and transfer
-permissions are defined in `agents.md`.
+power-off, and release. It powers the pool off before resuming an agent and
+releases owned members on every terminal outcome. The campaign state machine
+and data-materialization flow are defined in `autoresearch.md`; agent-facing
+operation and transfer permissions are defined in `agents.md`.
 
 `--smart-replicate` is disabled by default. When enabled, the replicate agent
 receives the audited `paper_result` anchors for its assigned claims, performs a

@@ -405,7 +405,7 @@ def test_failure_preserves_stage_updates_written_by_workflow(tmp_path: Path, mon
     assert manifest["stages"]["plan_agent"]["error"] == "plan failed"
 
 
-def test_replicate_failure_powers_off_without_releasing(tmp_path: Path, monkeypatch):
+def test_replicate_failure_powers_off_and_releases(tmp_path: Path, monkeypatch):
     paper = tmp_path / "paper.pdf"
     paper.write_bytes(b"%PDF")
     output = tmp_path / "output"
@@ -439,7 +439,58 @@ def test_replicate_failure_powers_off_without_releasing(tmp_path: Path, monkeypa
     )
 
     assert result.exit_code == 1
-    assert cleanup_calls == [("power-off", output)]
+    assert cleanup_calls == [("power-off", output), ("release", output)]
+
+
+def test_replicate_failure_preserves_primary_error_when_cleanup_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    paper = tmp_path / "paper.pdf"
+    paper.write_bytes(b"%PDF")
+    output = tmp_path / "output"
+    cleanup_calls = []
+
+    class FakeWorkflow:
+        def invoke(self, _state):
+            raise RuntimeError("cloud-monitor failed")
+
+    def fail_cleanup(operation, error):
+        def cleanup(config):
+            cleanup_calls.append((operation, config.output))
+            raise RuntimeError(error)
+
+        return cleanup
+
+    monkeypatch.setattr("medai.cli.create_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr(
+        "medai.cli.power_off_run_computation_instance",
+        fail_cleanup("power-off", "stop unavailable"),
+    )
+    monkeypatch.setattr(
+        "medai.cli.release_run_computation_instance",
+        fail_cleanup("release", "destroy unavailable"),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--replicate",
+            "--paper",
+            str(paper),
+            "--output",
+            str(output),
+            "--provider",
+            "codex",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert cleanup_calls == [("power-off", output), ("release", output)]
+    assert "ERROR: cloud-monitor failed; cleanup error:" in result.stderr
+    assert "power-off: stop unavailable" in result.stderr
+    assert "release: destroy unavailable" in result.stderr
+    assert PipelineState(output).state["error"].startswith("cloud-monitor failed;")
 
 
 def test_release_failure_keeps_completed_run_and_is_not_retried(
@@ -558,7 +609,7 @@ def test_autoresearch_cli_allocates_and_resumes_campaign_output(
     assert invoked[2].output == base_run / "autoresearch" / "campaign_002"
 
 
-def test_autoresearch_failure_powers_off_without_releasing(tmp_path: Path, monkeypatch):
+def test_autoresearch_failure_powers_off_and_releases(tmp_path: Path, monkeypatch):
     base_run = tmp_path / "base"
     base_run.mkdir()
     (base_run / "manifest.json").write_text(
@@ -598,7 +649,7 @@ def test_autoresearch_failure_powers_off_without_releasing(tmp_path: Path, monke
     )
 
     assert result.exit_code == 1
-    assert cleanup_calls == [("power-off", campaign)]
+    assert cleanup_calls == [("power-off", campaign), ("release", campaign)]
 
 
 def test_autoresearch_config_inherits_base_provider_and_data(tmp_path: Path):

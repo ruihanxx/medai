@@ -211,10 +211,10 @@ state while a returned command is running or repeat an ambiguous create.
 Power-off and release differ. Stopping retains the container disk and can still
 incur storage charges; destroying is irreversible and deletes that disk. Auto
 Research power-off covers every retained pool member and restores the selected
-member in canonical state. Final release attempts every member and reports all
+member in canonical state. Release attempts every member and reports all
 failures rather than abandoning later members after the first error. The adapter
-refuses normal release before report and pipeline completion except for an
-unambiguously recorded instance whose create initialization failed. See
+accepts release whenever orchestration enters a terminal path, including before
+report completion, while still requiring unambiguous current-run ownership. See
 <https://docs.vast.ai/api-reference/instances/show-instance>,
 <https://docs.vast.ai/api-reference/instances/manage-instance>,
 <https://docs.vast.ai/api-reference/instances/destroy-instance>, and

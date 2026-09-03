@@ -69,9 +69,10 @@ validation may return one `remote_exec` or confined `download` operation at a
 time. Orchestration prepares a pool member, runs and persists the operation,
 powers the pool off in `finally`, validates artifacts, then resumes the same
 direct-Codex session if needed. Raw data is never downloaded. Ambiguous create,
-copy, inventory, or ownership state is terminal. Failure retains powered-off
-members; validated campaign completion permits release. See `execution.md` and
-`agents.md` for lifecycle and permission details.
+copy, inventory, or ownership state is terminal. Every terminal failure powers
+off and releases unambiguously campaign-owned members; successful completion
+does the same after validation. See `execution.md` and `agents.md` for lifecycle
+and permission details.
 
 Dynamic stages use `round_<NNN>.idea_<NN>.<stage>`. Completed stages are skipped
 only after artifact validation. The campaign manifest records the base

@@ -30,6 +30,21 @@ app = typer.Typer(
 )
 
 
+def _terminate_run_computation_instance(
+    config: RunConfig | AutoResearchConfig,
+) -> str | None:
+    cleanup_errors = []
+    for operation, cleanup in (
+        ("power-off", power_off_run_computation_instance),
+        ("release", release_run_computation_instance),
+    ):
+        try:
+            cleanup(config)
+        except Exception as exc:
+            cleanup_errors.append(f"{operation}: {exc}")
+    return "; ".join(cleanup_errors) or None
+
+
 def _new_autoresearch_output(replicate_run: Path) -> Path:
     root = replicate_run / "autoresearch"
     root.mkdir(parents=True, exist_ok=True)
@@ -258,20 +273,26 @@ def run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=3) from exc
     except PartialDataStopped as exc:
-        typer.echo(str(exc), err=True)
+        cleanup_error = _terminate_run_computation_instance(config)
+        message = str(exc)
+        if cleanup_error:
+            message = f"{message}; cleanup error: {cleanup_error}"
+            PipelineState(config.output).record_cleanup_warning(
+                "termination",
+                cleanup_error,
+            )
+        typer.echo(message, err=True)
         raise typer.Exit(code=4) from exc
     except Exception as exc:
         if "run_active" in locals() and (config.output / "manifest.json").is_file():
-            cleanup_error = None
-            try:
-                power_off_run_computation_instance(config)
-            except Exception as cleanup_exc:
-                cleanup_error = str(cleanup_exc)
+            cleanup_error = _terminate_run_computation_instance(config)
             message = str(exc)
             if cleanup_error:
                 message = f"{message}; cleanup error: {cleanup_error}"
             PipelineState(config.output).fail(message)
-        typer.echo(f"ERROR: {exc}", err=True)
+        else:
+            message = str(exc)
+        typer.echo(f"ERROR: {message}", err=True)
         raise typer.Exit(code=1) from exc
 
     if autoresearch:

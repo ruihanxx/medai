@@ -2167,8 +2167,6 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
 
     pipeline_state.start_stage("partial_data_gate")
     if scope.verdict == "NONE":
-        power_off_run_computation_instance(config)
-        release_run_computation_instance(config)
         raise NoRunnableClaims(
             "No claims are runnable with the available source data."
         )
@@ -2203,8 +2201,6 @@ def partial_data_gate_node(state: WorkflowState) -> dict[str, str]:
             source=source,
         )
         if not accepted:
-            power_off_run_computation_instance(config)
-            release_run_computation_instance(config)
             pipeline_state.mark_stopped_by_user(scope.scope_sha256)
             raise PartialDataStopped("Partial replication was stopped by the user.")
         if source == "interactive":

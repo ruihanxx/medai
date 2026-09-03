@@ -171,13 +171,12 @@ created it. Transfer all required results, logs, and evidence before release.
 
 During the `replicate` stage, power off every current-run instance after all
 remote experiments finish and their required outputs are transferred. Attempt
-the same idempotent power-off on failure paths. Release only after the report
-artifacts have been validated and the pipeline is completed. Earlier release is
-limited to an unambiguously owned instance whose create-readiness check failed,
-or resume reconciliation when a provider-recorded instance fails the harmless
-SSH probe. The failed instance must be powered off and successfully released
-before one replacement may be created. Persisted lifecycle state must guard
-every release and replacement.
+the same idempotent power-off on failure paths. On every terminal workflow
+outcome, including failure before report completion, power off and release each
+unambiguously run-owned instance before exit. The resumable partial-data
+confirmation pause powers off without release. A failed instance must be powered
+off and successfully released before one replacement may be created. Persisted
+lifecycle state must guard every release and replacement.
 
 For a cloud-backed Auto Research campaign, create the first campaign-owned
 instance only when the first audited idea reaches experiment planning. A
@@ -186,6 +185,6 @@ usable member before each foreground experiment command, and add one only after
 an unambiguous capacity conflict. Every newly selected member independently
 materializes and verifies the inherited inventory. Orchestration synchronizes
 the local audited mother code and local idempotent mother-environment definition,
-powers every member off in `finally`, and resumes the agent. A failed campaign
-remains powered off but unreleased. Release every owned member only after
-final-report validation and campaign completion.
+powers every member off in `finally`, and resumes the agent. Every terminal
+campaign outcome releases each unambiguously owned member; successful completion
+does so after final-report validation.

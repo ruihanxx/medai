@@ -971,14 +971,14 @@ def test_vastai_autoresearch_pool_creates_member_when_retained_gpu_is_unavailabl
     ] == [{"state": "running"}, {"state": "stopped"}]
 
 
-def test_vastai_release_stops_then_confirms_irreversible_destroy(tmp_path: Path):
+def test_vastai_release_before_completion_stops_then_confirms_destroy(tmp_path: Path):
     state_path = tmp_path / "remote_compute" / "instance.json"
     vast_state(state_path)
     (tmp_path / "manifest.json").write_text(
         json.dumps(
             {
-                "status": "completed",
-                "stages": {"report_agents": {"status": "completed"}},
+                "status": "running",
+                "stages": {"report_agents": {"status": "pending"}},
             }
         ),
         encoding="utf-8",

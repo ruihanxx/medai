@@ -1259,28 +1259,6 @@ def power_off_instance(args: argparse.Namespace) -> str:
     return "stopped"
 
 
-def _manifest_report_completed(state_path: Path) -> bool | None:
-    manifest_path = state_path.parent.parent / "manifest.json"
-    if not manifest_path.is_file():
-        return None
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Run manifest is invalid: {manifest_path}") from exc
-    inputs = manifest.get("inputs")
-    if isinstance(inputs, dict) and inputs.get("workflow") == "autoresearch":
-        return None
-    stages = manifest.get("stages")
-    if not isinstance(stages, dict):
-        raise RuntimeError(f"Run manifest has invalid stages: {manifest_path}")
-    report_stage = stages.get("report_agents")
-    return (
-        manifest.get("status") == "completed"
-        and isinstance(report_stage, dict)
-        and report_stage.get("status") == "completed"
-    )
-
-
 def _mark_released(state_path: Path, state: dict[str, Any], reason: str | None = None) -> None:
     released_at = int(time.time())
     if _pool_enabled(state):
@@ -1294,19 +1272,11 @@ def _mark_released(state_path: Path, state: dict[str, Any], reason: str | None =
     save_state(state_path, state)
 
 
-def _release_active_instance(
-    args: argparse.Namespace, *, allow_before_report: bool = False
-) -> None:
+def _release_active_instance(args: argparse.Namespace) -> None:
     state = load_state(args.state)
     if _active_released(state):
         return
     failed_creation = state["provider_state"].get("creation_failed") is True
-    if (
-        not allow_before_report
-        and not failed_creation
-        and _manifest_report_completed(args.state) is False
-    ):
-        raise RuntimeError("Refusing to release Vast instance before report and pipeline completion")
     instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
     try:
         if not failed_creation or instance_status(state) in {"running", "stopped"}:
@@ -1352,10 +1322,10 @@ def _release_active_instance(
     raise RuntimeError("Vast instance remains visible after destroy")
 
 
-def release_instance(args: argparse.Namespace, *, allow_before_report: bool = False) -> None:
+def release_instance(args: argparse.Namespace) -> None:
     state = _enable_campaign_pool(args.state, load_state(args.state))
     if not _pool_enabled(state):
-        _release_active_instance(args, allow_before_report=allow_before_report)
+        _release_active_instance(args)
         return
     errors: list[str] = []
     pool = state["provider_state"]["instance_pool"]
@@ -1365,7 +1335,7 @@ def release_instance(args: argparse.Namespace, *, allow_before_report: bool = Fa
             continue
         instance_id = state["provider_state"].get("instance_id", f"pool member {index + 1}")
         try:
-            _release_active_instance(args, allow_before_report=allow_before_report)
+            _release_active_instance(args)
         except Exception as exc:
             errors.append(f"{instance_id}: {exc}")
     if errors:
@@ -1765,7 +1735,7 @@ def reconcile_instance(args: argparse.Namespace) -> dict[str, Any]:
             "status": "running",
         }
     _ensure_replacement_allowed(args.state, state)
-    release_instance(args, allow_before_report=True)
+    release_instance(args)
     instance_id = create_instance(_replacement_args(args.state, load_state(args.state)))
     return {"replaced": True, "instance_id": instance_id, "status": "running"}
 
