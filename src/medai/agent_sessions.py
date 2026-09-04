@@ -25,6 +25,8 @@ def pending_command_sessions(transcript_path: Path) -> list[PendingCommandSessio
                 event = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(event, dict):
+                continue
             if event.get("type") == RECOVERY_RESOLVED_EVENT:
                 for item_id in event.get("command_ids", []):
                     if isinstance(item_id, str):

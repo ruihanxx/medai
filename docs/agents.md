@@ -5,7 +5,10 @@ prompts under `templates/autoresearch/<stage>/`, and runtime skills under
 `templates/skills/`. Prompts are rendered with strict Jinja context and
 persisted before invocation. Every provider event stream and orchestration
 command-session recovery event is kept as JSONL; a transcript is diagnostic
-evidence, never a structured result.
+evidence, never a structured result. Orchestration records non-protocol output
+unchanged and interprets only object-shaped protocol events needed for session
+identity and command lifecycle; tool output and tool errors remain diagnostic
+content for the agent and never become stage results.
 
 Generic prompts remain provider- and dataset-agnostic. Provider APIs,
 credentials, schemas, and recovery procedures belong only to selected skill

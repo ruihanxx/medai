@@ -81,6 +81,44 @@ def test_codex_prompt_uses_stdin_and_writes_transcript(tmp_path: Path, monkeypat
     )
 
 
+def test_codex_records_tool_error_output_without_treating_it_as_agent_status(
+    tmp_path: Path, monkeypatch
+):
+    def fake_popen(command, **kwargs):
+        process = FakeProcess(command, **kwargs)
+        process.stdout = io.StringIO(
+            '{"type":"thread.started","thread_id":"thread-123"}\n'
+            "apply_patch verification failed\n"
+            '"reported partition arithmetic"\n'
+            '{"type":"item.started","item":{"id":"item-1",'
+            '"type":"command_execution","status":"in_progress"}}\n'
+            '{"type":"item.completed","item":{"id":"item-1",'
+            '"type":"command_execution","status":"failed",'
+            '"aggregated_output":"patch context did not match"}}\n'
+            '{"type":"turn.completed"}\n'
+        )
+        return process
+
+    monkeypatch.setattr("medai.providers.subprocess.Popen", fake_popen)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("repair a tool failure", encoding="utf-8")
+    transcript = tmp_path / "agent_transcript.jsonl"
+
+    assert (
+        run_agent(
+            provider="codex",
+            prompt_path=prompt,
+            working_dir=tmp_path,
+            transcript_path=transcript,
+            siliconflow_config_path=None,
+        )
+        == "thread-123"
+    )
+    transcript_text = transcript.read_text(encoding="utf-8")
+    assert "apply_patch verification failed" in transcript_text
+    assert '"reported partition arithmetic"' in transcript_text
+
+
 def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Path, monkeypatch):
     processes = []
 
