@@ -3,8 +3,9 @@
 Generic replication prompts live under `templates/<stage>/`, Auto Research
 prompts under `templates/autoresearch/<stage>/`, and runtime skills under
 `templates/skills/`. Prompts are rendered with strict Jinja context and
-persisted before invocation. Every provider event stream is kept as JSONL; a
-transcript is diagnostic evidence, never a structured result.
+persisted before invocation. Every provider event stream and orchestration
+command-session recovery event is kept as JSONL; a transcript is diagnostic
+evidence, never a structured result.
 
 Generic prompts remain provider- and dataset-agnostic. Provider APIs,
 credentials, schemas, and recovery procedures belong only to selected skill
@@ -168,9 +169,15 @@ A successful turn alone does not complete a stage; canonical artifact validation
 does. Codegen `blocked` or `failed` is immediately terminal. Base replication
 may execute its planned commands within its complete agent turn. Other long
 running tasks must be returned as one foreground handoff operation. A Codex
-process that exits successfully while its transcript still contains an
-unfinished command execution is rejected rather than treated as a completed
-turn.
+process that exits successfully is not accepted while its transcript contains
+an unfinished command execution. The shared direct-Codex invocation wrapper
+appends a recovery request and resumes that same agent thread once. Because a
+new CLI process cannot reuse the old process-local execution handle, the agent
+checks each exact live process and its side effects, waits for needed work or
+terminates obsolete work, then confirms that the original result is safe for
+normal handoff or artifact validation. A successful recovery is recorded in the
+same transcript; a blocked, failed, or still-unfinished recovery rejects the
+turn. Canonical stage validation still decides whether the next stage may run.
 
 Within Codegen and base Replication turns, command execution is serial. A
 running execution handle blocks every new command, file edit, check, and

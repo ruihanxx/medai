@@ -45,11 +45,12 @@ coverage/uniqueness/classification/suspicion sorting, and
 path-relevant issues only. Plan prompt coverage pins per-node predecessor
 artifact descriptions and the mandatory reverse C-to-D artifact-flow audit.
 Direct-Codex tests also cover structured terminal
-results, bounded same-session artifact repair, appended transcripts, and cleanup
-after success or terminal failure. Provider-handoff coverage requires
+results, bounded same-session artifact repair, appended transcripts, shared
+same-thread unfinished-command recovery, and cleanup after success or terminal
+failure. Recovery must preserve the original stage result and reject a recovery
+turn that itself leaves an unfinished command. Provider-handoff coverage requires
 availability to execute create, materialization, and remote-inspection commands
-locally between turns of one session and rejects a successful Codex exit with an
-unfinished command.
+locally between turns of one session.
 
 Auto Research coverage includes claim-driven eligible-V selection, zero-weight
 sparsification, positive normalization, zero-weight exclusion from contract/run/

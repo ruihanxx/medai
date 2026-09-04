@@ -140,10 +140,71 @@ def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Pa
     assert not (tmp_path / "replication_transcript.attempt-1.jsonl").exists()
 
 
-def test_codex_turn_rejects_unfinished_command_execution(tmp_path: Path, monkeypatch):
-    monkeypatch.setattr(
-        "medai.providers.subprocess.Popen", FakeUnfinishedCommandProcess
+def test_codex_turn_resumes_to_settle_unfinished_command_execution(
+    tmp_path: Path, monkeypatch
+):
+    processes = []
+
+    def fake_popen(command, **kwargs):
+        if not processes:
+            process = FakeUnfinishedCommandProcess(command, **kwargs)
+            result_index = command.index("--output-last-message") + 1
+            Path(command[result_index]).write_text(
+                '{"original":"stage-result"}\n', encoding="utf-8"
+            )
+        else:
+            process = FakeProcess(command, **kwargs)
+            result_index = command.index("--output-last-message") + 1
+            Path(command[result_index]).write_text(
+                '{"status":"completed","error":null}\n', encoding="utf-8"
+            )
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr("medai.providers.subprocess.Popen", fake_popen)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("wait for commands", encoding="utf-8")
+    transcript = tmp_path / "transcript.jsonl"
+    schema = tmp_path / "stage.schema.json"
+    schema.write_text("{}\n", encoding="utf-8")
+    stage_result = tmp_path / "stage-result.json"
+
+    assert (
+        run_agent(
+            provider="codex",
+            prompt_path=prompt,
+            working_dir=tmp_path,
+            transcript_path=transcript,
+            siliconflow_config_path=None,
+            output_schema_path=schema,
+            output_last_message_path=stage_result,
+        )
+        == "thread-123"
     )
+    assert len(processes) == 2
+    assert processes[1].command[:3] == ["codex", "exec", "resume"]
+    assert "item-1" in processes[1].stdin.getvalue()
+    transcript_text = transcript.read_text(encoding="utf-8")
+    assert '"type":"medai.command_sessions.recovery_requested"' in transcript_text
+    assert '"type":"medai.command_sessions.resolved"' in transcript_text
+    assert stage_result.read_text(encoding="utf-8") == '{"original":"stage-result"}\n'
+
+
+def test_codex_turn_rejects_unfinished_recovery_command(tmp_path: Path, monkeypatch):
+    processes = []
+
+    def fake_popen(command, **kwargs):
+        process = FakeUnfinishedCommandProcess(command, **kwargs)
+        if processes:
+            process.stdout = io.StringIO(
+                '{"type":"item.started","item":{"id":"item-2",'
+                '"type":"command_execution","status":"in_progress"}}\n'
+                '{"type":"turn.completed"}\n'
+            )
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr("medai.providers.subprocess.Popen", fake_popen)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("wait for commands", encoding="utf-8")
 

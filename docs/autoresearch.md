@@ -77,4 +77,6 @@ and permission details.
 Dynamic stages use `round_<NNN>.idea_<NN>.<stage>`. Completed stages are skipped
 only after artifact validation. The campaign manifest records the base
 fingerprint, resolved configuration, maximum iterations, attempts, checkpoints,
-and `running`, `completed`, `failed`, or `ineligible`.
+and `running`, `completed`, `failed`, or `ineligible`. Before artifact or
+handoff validation, every direct-Codex turn passes the shared unfinished-command
+recovery in `agents.md`.

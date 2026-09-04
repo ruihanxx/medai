@@ -50,6 +50,12 @@ runs/<run_id>/
 └── remote_compute/instance.json
 ```
 
+Each direct-Codex transcript may include orchestration-authored
+`medai.command_sessions.recovery_requested` and
+`medai.command_sessions.resolved` events around a same-thread recovery turn.
+They identify the unfinished command item IDs and preserve the recovery prompt
+and result without replacing the stage's structured result artifact.
+
 `preprocessing/paper_graph.json` has version 1 and six ordered collections:
 `datasets`, `preprocessing`, `training`, `models`, `validations`, and `claims`.
 The manifest input fingerprint includes the resolved non-secret SiliconFlow

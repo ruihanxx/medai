@@ -3,10 +3,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from collections.abc import Sequence
 from contextlib import nullcontext
 from pathlib import Path
 
+from medai.agent_sessions import pending_command_sessions, settle_unfinished_command_sessions
+from medai.models import AgentStageResult
 from medai.siliconflow_adapter import SiliconFlowAdapter, SiliconFlowConfig
 
 PROVIDER_COMMANDS = {
@@ -36,27 +39,6 @@ TRANSCRIPT_FLAGS = {
 }
 
 
-def _unfinished_command_count(transcript_path: Path) -> int:
-    pending: set[str] = set()
-    with transcript_path.open(encoding="utf-8") as transcript:
-        for line in transcript:
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            item = event.get("item")
-            if not isinstance(item, dict) or item.get("type") != "command_execution":
-                continue
-            item_id = item.get("id")
-            if not isinstance(item_id, str):
-                continue
-            if event.get("type") == "item.started":
-                pending.add(item_id)
-            elif event.get("type") == "item.completed":
-                pending.discard(item_id)
-    return len(pending)
-
-
 def run_agent(
     *,
     provider: str,
@@ -70,6 +52,7 @@ def run_agent(
     output_last_message_path: Path | None = None,
     resume_session_id: str | None = None,
     environment_remove: Sequence[str] = (),
+    _recover_unfinished_commands: bool = True,
 ) -> str | None:
     """Run an agent and stream its provider JSONL transcript to disk."""
     if (
@@ -167,11 +150,63 @@ def run_agent(
                 f"(transcript: {transcript_path})"
             )
         if provider.startswith("codex"):
-            unfinished_commands = _unfinished_command_count(transcript_path)
-            if unfinished_commands:
+            unfinished_commands = pending_command_sessions(transcript_path)
+            if unfinished_commands and not _recover_unfinished_commands:
                 raise RuntimeError(
-                    f"{provider} agent exited with {unfinished_commands} unfinished command "
+                    f"{provider} agent exited with {len(unfinished_commands)} unfinished command "
                     f"execution(s) (transcript: {transcript_path})"
+                )
+            if unfinished_commands:
+                recovery_session_id = resume_session_id or session_id
+                if provider != "codex" or recovery_session_id is None:
+                    raise RuntimeError(
+                        f"{provider} agent exited with {len(unfinished_commands)} unfinished "
+                        "command execution(s) and cannot resume the prior agent "
+                        f"(transcript: {transcript_path})"
+                    )
+
+                def resume_agent_for_command_recovery(prompt: str) -> AgentStageResult:
+                    with tempfile.TemporaryDirectory(
+                        prefix="medai-agent-command-recovery-"
+                    ) as recovery_dir_name:
+                        recovery_dir = Path(recovery_dir_name)
+                        recovery_prompt_path = recovery_dir / "prompt.md"
+                        recovery_schema_path = recovery_dir / "result.schema.json"
+                        recovery_result_path = recovery_dir / "result.json"
+                        recovery_transcript_path = recovery_dir / "transcript.jsonl"
+                        recovery_prompt_path.write_text(prompt, encoding="utf-8")
+                        recovery_schema_path.write_text(
+                            json.dumps(AgentStageResult.model_json_schema(), indent=2) + "\n",
+                            encoding="utf-8",
+                        )
+                        try:
+                            run_agent(
+                                provider=provider,
+                                prompt_path=recovery_prompt_path,
+                                working_dir=working_dir,
+                                transcript_path=recovery_transcript_path,
+                                siliconflow_config_path=siliconflow_config_path,
+                                codex_model=codex_model,
+                                codex_reasoning_effort=codex_reasoning_effort,
+                                output_schema_path=recovery_schema_path,
+                                output_last_message_path=recovery_result_path,
+                                resume_session_id=recovery_session_id,
+                                environment_remove=environment_remove,
+                                _recover_unfinished_commands=False,
+                            )
+                        finally:
+                            if recovery_transcript_path.is_file():
+                                with transcript_path.open("a", encoding="utf-8") as transcript:
+                                    transcript.write(
+                                        recovery_transcript_path.read_text(encoding="utf-8")
+                                    )
+                        return AgentStageResult.model_validate_json(
+                            recovery_result_path.read_text(encoding="utf-8")
+                        )
+
+                settle_unfinished_command_sessions(
+                    transcript_path,
+                    resume_agent_for_command_recovery,
                 )
         if resume_session_id is not None:
             return resume_session_id

@@ -65,8 +65,9 @@ refinement, planning, replication, and per-claim reporting may resume the same
 temporary session for at most two repair turns when their final artifact is
 missing or invalid. A structured codegen `blocked` or `failed` result is
 terminal and does not consume artifact-repair turns. Other providers retain
-one-turn behavior. A technical retry does not consume a scientific audit or
-refinement attempt.
+one-turn behavior. Before artifact validation, every direct-Codex turn passes
+the shared unfinished-command recovery in `agents.md`. A technical retry does
+not consume a scientific audit or refinement attempt.
 
 Audit FAIL with preprocessing defects enters refinement while rounds remain,
 including a mixed report that also contains `source_unavailable`. A source-only
