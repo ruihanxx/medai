@@ -221,6 +221,16 @@ experiment, or remote command.
 Keep foreground work attached until it reaches a terminal state, and do not use
 `nohup`, `&`, or another detached launcher.
 
+Command execution is serial. If a shell or tool call reports that it is still
+running or returns an execution/session handle, the next tool call must wait on
+or poll that same handle, or explicitly terminate it. Do not start another
+command, edit files, perform another check, or return a final result until the
+running execution has produced a terminal event. If abandoning it, terminate it
+explicitly and continue waiting until its terminal event is recorded. Never
+leave more than one command execution running. Before returning a final result,
+ensure every command or tool call from the current turn has reached a terminal
+state.
+
 Before ending the turn, complete every plan step and write the complete
 `replication_log.json`, `evidence_summary.json`, and all locally accessible
 files referenced by `step_outcomes[].output_files`. Record command evidence,
