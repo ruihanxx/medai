@@ -172,6 +172,12 @@ process that exits successfully while its transcript still contains an
 unfinished command execution is rejected rather than treated as a completed
 turn.
 
+Within a Codegen turn, command execution is serial. A running execution handle
+blocks every new command, file edit, check, and terminal result until the agent
+polls that handle to a terminal event or explicitly terminates it and waits for
+the terminal event. Codegen never leaves more than one command execution
+running.
+
 Data availability may run only provider search, status, and state validation
 inside its agent turn. Every remote-execution action is a single foreground
 handoff; checks over the same remote source are combined, and no replacement is

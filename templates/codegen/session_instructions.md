@@ -173,12 +173,20 @@ action, including separate preparation and monitoring actions, as
 and end the turn. Orchestration runs each command to a terminal result while
 this Codex process is absent, saves its complete log and result, and resumes
 this same session. Reread canonical provider state after every resume. Never
-launch overlapping command executions, inspect provider state while a handed-off
-command is running, inspect incomplete cloud data, or continue code generation
-before orchestration resumes with completed materialization. Before returning
+inspect provider state while a handed-off command is running, inspect incomplete
+cloud data, or continue code generation before orchestration resumes with
+completed materialization.
+{% endif %}
+
+Command execution is serial. If a shell or tool call reports that it is still
+running or returns an execution/session handle, the next tool call must wait on
+or poll that same handle, or explicitly terminate it. Do not start another
+command, edit files, perform another check, or return any structured result
+until the running execution has produced a terminal event. If abandoning it,
+terminate it explicitly and continue waiting until its terminal event is
+recorded. Never leave more than one command execution running. Before returning
 any structured result, ensure every command or tool call from the current turn
 has reached a terminal state.
-{% endif %}
 
 If a successful, evidence-based procedure conflicts with the selected skill
 reference, do not edit the repository skill. Append one reviewable correction
