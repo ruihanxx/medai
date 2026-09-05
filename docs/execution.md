@@ -63,8 +63,12 @@ The request includes a positive hard timeout, a compact read-only progress
 command, and an exact graceful-stop command. On timeout orchestration runs the
 graceful stop, settles the local process group, captures lightweight progress,
 updates a compact current-handoff JSON that points to the immutable result and
-logs, and uses only that JSON to resume the same agent session; timeout alone is
-not a terminal workflow failure and does not release the instance.
+logs, and uses only that JSON to resume the agent. After six terminal handoffs it
+starts a fresh thread from the complete replication prompt, refreshed canonical
+node state, and latest handoff pointer. The same rollover handles the dedicated
+`context_exhausted` agent result; a second consecutive context result without an
+intervening terminal experiment is terminal. Timeout alone is not a terminal
+workflow failure and does not release the instance.
 Provider-specific resource selection, create initialization, fallback, and
 retry behavior lives only in the metadata-selected computation-provider
 reference. A provider create is successful only after its documented remote

@@ -46,7 +46,7 @@ runs/<run_id>/
 │   ├── reproduction_report.md
 │   ├── report_transcript.jsonl
 │   └── claims/<claim_id>{.md,_transcript.jsonl}
-├── prompts/
+├── prompts/{replicate.md,replicate_session_<NNN>.md,...}
 ├── resume_history/resume_<NNN>/
 ├── system_maintenance/{dataset/patch.json,skills/corrections.json}
 └── remote_compute/instance.json
@@ -152,16 +152,22 @@ complete the session. Command turns retain a combined `.log` and a `_result.json
 with command, exit code, duration, log path, and validation-error slot before
 the same session resumes. No raw cloud data is stored locally.
 
-Each direct-Codex replication `command_<NNN>.json` records either one experiment
-handoff or a terminal agent status. An experiment request contains its foreground
-command, hard timeout, lightweight progress command, and exact graceful-stop
-command. Its `_result.json` records the terminal or timed-out outcome and paths
-to the complete command, progress, and optional stop results/logs. At most 2000
+Each direct-Codex replication `command_<NNN>.json` records one experiment
+handoff, the recoverable `context_exhausted` status, or a terminal agent status.
+The context status has null command, timeout, progress, stop, and error fields and
+does not count toward the six-handoff session limit. An experiment request
+contains its foreground command, hard timeout, lightweight progress command, and
+exact graceful-stop command. Its `_result.json` records the terminal or timed-out
+outcome and paths to the complete command, progress, and optional stop
+results/logs. At most 2000
 characters of progress output remain in the immutable result evidence; larger
 output is retained only by path. The mutable `current_handoff.json` contains only
 the latest handoff ID, terminal status, immutable request/result paths, and a
 continuation instruction. It is overwritten and used directly as the resumed
 agent prompt, so historical progress and logs are not repeatedly injected.
+After six terminal experiments, a full `replicate_session_<NNN>.md` is rendered
+from the same template with refreshed completed/pending nodes and the latest
+current-handoff path. The new thread appends to `replication_transcript.jsonl`.
 
 The replication plan starts with exactly one node-free environment/setup step.
 Each later step equals one earliest topological layer of the runnable DAG in

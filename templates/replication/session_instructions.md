@@ -21,6 +21,23 @@ Errors are puzzles to solve. If something breaks, fix it and keep going. Install
 
 A step is only "unreproducible" once distinct strategies have each failed for a fundamental reason (core algorithm wrong, data truly paywalled with no alternative, hardware genuinely unavailable) — and you have recorded what you tried.
 
+{% if session_number > 1 %}
+## Fresh-session continuation
+
+This is replication Agent session {{ session_number }}. Orchestration started a
+fresh Codex thread because the prior session reached `{{ rollover_reason }}`.
+Continue the same replication attempt from the canonical files and the refreshed
+node state below; do not repeat completed scientific work.
+{% if current_handoff_path %}
+The latest terminal experiment pointer is `{{ current_handoff_path }}`. Read that
+compact pointer, then read only its referenced immutable request/result and the
+bounded log sections needed to process the outcome.
+{% else %}
+No experiment handoff result is pending. Continue from the canonical replication
+log, codebase, and refreshed node state.
+{% endif %}
+{% endif %}
+
 ## Success Criteria
 
 - A step where you applied fixes and got results = **success**
@@ -216,9 +233,20 @@ aggregate evidence, and logs; never download raw or row-level dataset content.
 
 {% if experiment_handoff %}
 Use your tools inside this session for bounded inspection, environment setup,
-code edits, and lightweight smoke tests. Do not launch, monitor, or wait for an
-experiment inside the agent turn. Return each experiment to local orchestration
-using the supplied output schema:
+dependency installation, code edits, and lightweight smoke tests. Execute these
+operations directly inside the Agent turn even when they target the remote
+environment or take longer than initially expected. They are not experiments and
+must never be returned as a handoff. If a direct shell or tool call yields a
+running-session handle, wait on that same handle until it reaches a terminal
+event before doing anything else.
+
+Do not launch, monitor, or wait for a result-producing scientific experiment
+inside the Agent turn. A `status: command` handoff is reserved for a foreground
+command whose primary purpose is to execute one or more pending result-producing
+plan nodes at the intended scientific scale. Never hand off the node-free setup
+step, an environment or storage probe, dependency installation, a diagnostic or
+smoke test, or a progress/stop helper as the primary experiment command. Return
+each actual experiment to local orchestration using the supplied output schema:
 
 ```json
 {
@@ -251,9 +279,10 @@ available, wait until it is terminal, and return a truthful exit status.
 
 Orchestration executes the experiment without an active agent process. After
 normal completion, or after timeout plus graceful stop, it runs the progress
-command, saves every command result and complete log, and resumes this same
-session with their paths and the lightweight progress values. Use that evidence
-to decide whether code or configuration is inefficient before submitting a new
+command, saves every command result and complete log, and resumes an eligible
+session with a compact pointer to their paths. After six terminal handoffs it
+starts a fresh session from this complete prompt instead. Use that evidence to
+decide whether code or configuration is inefficient before submitting a new
 full-scale experiment. A timeout is diagnostic evidence, not permission to
 change paper-prescribed semantics or reduce scale.
 
@@ -264,6 +293,17 @@ step and required artifact is complete, return exactly:
 ```json
 {"status":"completed","command":null,"hard_timeout_seconds":null,"progress_command":null,"graceful_stop_command":null,"error":null}
 ```
+
+If the remaining session context is insufficient to safely prepare the next
+experiment or final artifacts, return exactly:
+
+```json
+{"status":"context_exhausted","command":null,"hard_timeout_seconds":null,"progress_command":null,"graceful_stop_command":null,"error":null}
+```
+
+This is a recoverable orchestration signal. Do not report context pressure as
+`blocked` or `failed`; those statuses remain reserved for terminal scientific or
+external conditions.
 
 Use `blocked` or `failed` only for a terminal condition, with all command and
 timeout fields null and a non-empty `error`.

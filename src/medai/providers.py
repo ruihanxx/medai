@@ -51,6 +51,7 @@ def run_agent(
     output_schema_path: Path | None = None,
     output_last_message_path: Path | None = None,
     resume_session_id: str | None = None,
+    append_transcript: bool = False,
     environment_remove: Sequence[str] = (),
     _recover_unfinished_commands: bool = True,
 ) -> str | None:
@@ -59,11 +60,22 @@ def run_agent(
         output_schema_path is not None
         or output_last_message_path is not None
         or resume_session_id is not None
+        or append_transcript
     ) and provider != "codex":
-        raise ValueError("Codex output schemas and session resume require provider='codex'")
+        raise ValueError(
+            "Codex output schemas, session resume, and transcript append require "
+            "provider='codex'"
+        )
+    if append_transcript and resume_session_id is not None:
+        raise ValueError("Fresh-session transcript append cannot resume an existing session")
     prompt = prompt_path.read_text(encoding="utf-8")
     transcript_path.parent.mkdir(parents=True, exist_ok=True)
-    if resume_session_id is None and transcript_path.is_file() and transcript_path.stat().st_size:
+    if (
+        resume_session_id is None
+        and not append_transcript
+        and transcript_path.is_file()
+        and transcript_path.stat().st_size
+    ):
         attempt = 1
         archived = transcript_path.with_name(
             f"{transcript_path.stem}.attempt-{attempt}{transcript_path.suffix}"
@@ -130,7 +142,7 @@ def run_agent(
         process.stdin.write(prompt)
         process.stdin.close()
         session_id: str | None = None
-        transcript_mode = "a" if resume_session_id is not None else "w"
+        transcript_mode = "a" if resume_session_id is not None or append_transcript else "w"
         with transcript_path.open(transcript_mode, encoding="utf-8") as transcript:
             for line in iter(process.stdout.readline, ""):
                 print(line, end="")

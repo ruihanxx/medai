@@ -42,8 +42,11 @@ grouping. One run executes these stages:
     for every runnable node. Direct Codex returns each experiment as a foreground
     orchestration handoff with a hard timeout, lightweight progress command, and
     exact graceful-stop command; orchestration saves immutable terminal evidence,
-    overwrites one compact current-handoff pointer, and resumes the same session
-    using only that JSON.
+    overwrites one compact current-handoff pointer, and resumes using only that
+    JSON. Setup and bounded diagnostics remain inside the agent turn. A fresh
+    session receives the complete prompt, refreshed node state, and latest
+    handoff pointer after every six terminal experiments or an explicit
+    `context_exhausted` result.
 12. Smart Replicate, when enabled, checkpoints only runnable claims having a
     paper result under `replication/claims/<claim_id>/`.
 13. Reporting checkpoints each C independently and collects only its actual
@@ -69,8 +72,9 @@ refinement, planning, replication, and per-claim reporting may resume the same
 temporary session for at most two repair turns when their final artifact is
 missing or invalid. A structured codegen `blocked` or `failed` result is
 terminal and does not consume artifact-repair turns. Replication experiment
-handoffs may resume that session repeatedly without consuming artifact-repair
-turns. Other providers retain one-turn behavior. Before artifact validation,
+handoffs may resume a session repeatedly without consuming artifact-repair turns;
+orchestration rotates that temporary session after six terminal handoffs. Other
+providers retain one-turn behavior. Before artifact validation,
 every direct-Codex turn passes the shared unfinished-command recovery in
 `agents.md`. A technical retry does not consume a scientific audit or
 refinement attempt.

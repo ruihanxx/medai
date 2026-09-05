@@ -51,8 +51,11 @@ failure. Recovery must preserve the original stage result and reject a recovery
 turn that itself leaves an unfinished command. Replication-handoff coverage pins
 the experiment command, positive hard timeout, exact graceful stop, bounded
 progress capture, persisted result/log paths, a compact mutable current-handoff
-prompt without inline progress, and same-session resume after normal or timed-out
-execution. Provider-handoff coverage requires availability
+prompt without inline progress, same-session resume after normal or timed-out
+execution, fresh-session rollover after six terminal handoffs, transcript append,
+and dedicated context-exhaustion recovery with a bounded consecutive-signal
+failure. Prompt coverage keeps setup, diagnostics, edits, dependency installation,
+and smoke tests inside the agent turn. Provider-handoff coverage requires availability
 to execute create, materialization, and remote-inspection commands locally
 between turns of one session.
 

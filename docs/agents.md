@@ -172,14 +172,23 @@ restores a process-local session ID.
 A successful turn alone does not complete a stage; canonical artifact validation
 does. Codegen `blocked` or `failed` is immediately terminal. Direct-Codex base
 replication returns each experiment as one foreground handoff operation; bounded
-inspection, setup, editing, and smoke tests remain inside the agent turn. Each
-experiment request supplies its hard timeout, a compact read-only progress
+inspection, setup, dependency installation, editing, and smoke tests remain
+inside the agent turn and must reach a terminal event there. A handoff is
+reserved for a result-producing scientific plan command; setup, diagnostics,
+storage probes, and progress/stop helpers cannot be primary experiment commands.
+Each experiment request supplies its hard timeout, a compact read-only progress
 command, and an exact graceful-stop command. Orchestration owns execution,
 persists immutable command/progress/stop results and logs, overwrites one compact
 `current_handoff.json` containing only the latest request/result paths, and uses
-that JSON directly to resume the same session after normal completion or timeout
-cleanup. Historical progress content is never re-injected. Other long-running
-tasks must also use their defined foreground handoff. A Codex
+that JSON directly to resume the session after normal completion or timeout
+cleanup. Historical progress content is never re-injected. After six terminal
+experiment handoffs in one session, orchestration discards its session ID and
+starts a fresh thread from the same complete replication prompt with refreshed
+node state and the latest handoff pointer. A structured `context_exhausted`
+result triggers the same rollover without counting as an experiment handoff;
+two consecutive such results without an intervening terminal experiment fail
+the stage. Fresh threads append to the canonical replication transcript. Other
+long-running tasks must also use their defined foreground handoff. A Codex
 process that exits successfully is not accepted while its transcript contains
 an unfinished command execution. The shared direct-Codex invocation wrapper
 appends a recovery request and resumes that same agent thread once. Because a

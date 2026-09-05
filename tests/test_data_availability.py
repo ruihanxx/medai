@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+
 from medai.artifacts import write_json
 from medai.config import RunConfig
 from medai.data_availability import derive_graph_execution_scope, sha256_file

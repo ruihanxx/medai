@@ -178,6 +178,37 @@ def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Pa
     assert not (tmp_path / "replication_transcript.attempt-1.jsonl").exists()
 
 
+def test_codex_fresh_session_can_append_existing_transcript(tmp_path: Path, monkeypatch):
+    processes = []
+
+    def fake_popen(command, **kwargs):
+        process = FakeProcess(command, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr("medai.providers.subprocess.Popen", fake_popen)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("continue in a fresh session", encoding="utf-8")
+    transcript = tmp_path / "replication_transcript.jsonl"
+    transcript.write_text('{"type":"old-session"}\n', encoding="utf-8")
+
+    session_id = run_agent(
+        provider="codex",
+        prompt_path=prompt,
+        working_dir=tmp_path,
+        transcript_path=transcript,
+        siliconflow_config_path=None,
+        append_transcript=True,
+    )
+
+    assert session_id == "thread-123"
+    assert "resume" not in processes[0].command
+    transcript_text = transcript.read_text(encoding="utf-8")
+    assert '"type":"old-session"' in transcript_text
+    assert '"thread_id":"thread-123"' in transcript_text
+    assert not (tmp_path / "replication_transcript.attempt-1.jsonl").exists()
+
+
 def test_codex_turn_resumes_to_settle_unfinished_command_execution(
     tmp_path: Path, monkeypatch
 ):
@@ -279,6 +310,18 @@ def test_replication_experiment_handoff_requires_complete_command_contract():
     )
     assert request.hard_timeout_seconds == 3600
 
+    rollover = ReplicationExperimentHandoff.model_validate(
+        {
+            "status": "context_exhausted",
+            "command": None,
+            "hard_timeout_seconds": None,
+            "progress_command": None,
+            "graceful_stop_command": None,
+            "error": None,
+        }
+    )
+    assert rollover.status == "context_exhausted"
+
     with pytest.raises(ValueError, match="progress"):
         ReplicationExperimentHandoff.model_validate(
             {
@@ -301,6 +344,16 @@ def test_replication_experiment_handoff_requires_complete_command_contract():
                 "error": None,
             }
         )
+    context_payload = rollover.model_dump()
+    for field, value, message in (
+        ("command", "python experiment.py", "null commands"),
+        ("hard_timeout_seconds", 30, "null timeout and error"),
+        ("error", "context is full", "null timeout and error"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            ReplicationExperimentHandoff.model_validate(
+                {**context_payload, field: value}
+            )
 
 
 def test_siliconflow_key_is_removed_from_child_environment():

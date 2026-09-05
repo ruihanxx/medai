@@ -71,6 +71,7 @@ from medai.study_graph import (
 
 MAX_COHORT_REFINE_ROUNDS = 3
 MAX_AGENT_ARTIFACT_REPAIR_TURNS = 2
+MAX_REPLICATION_HANDOFFS_PER_SESSION = 6
 EXPERIMENT_AUXILIARY_TIMEOUT_SECONDS = 300
 EXPERIMENT_STOP_GRACE_SECONDS = 30
 EXPERIMENT_PROGRESS_INLINE_CHARS = 2000
@@ -1148,6 +1149,63 @@ def _next_command_index(command_dir: Path) -> int:
     return index
 
 
+def _render_replication_session_prompt(
+    state: WorkflowState,
+    destination: Path,
+    *,
+    resume_state: dict[str, Any],
+    session_number: int,
+    rollover_reason: str | None,
+    current_handoff_path: Path | None,
+) -> Path:
+    config = state["config"]
+    plan = load_model(Path(state["replicate_plan_path"]), ReplicationPlan)
+    graph = _paper_graph(state)
+    scope = _execution_scope(state)
+    cloud_data = _uses_cloud_data(config, plan)
+    runnable = set(scope.runnable_node_ids)
+    return render_prompt(
+        "replication/session_instructions.md",
+        destination,
+        replicate_plan_path=state["replicate_plan_path"],
+        paper_markdown=state["paper_markdown"],
+        codebase_dir=state["codebase_dir"],
+        replication_dir=config.output / "replication",
+        skills_dir=skills_dir(),
+        computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
+        cloud_drive_enabled=cloud_data,
+        cloud_dataset=", ".join(config.selected_cloud_datasets),
+        cloud_datasets=_active_cloud_datasets(state),
+        drive_provider=config.drive_provider,
+        computation_provider=config.computation_provider,
+        computation_provider_reference=config.computation_provider_reference,
+        drive_reference=config.drive_reference,
+        smart=config.smart_replicate,
+        experiment_handoff=config.provider == "codex",
+        execution_scope_path=state["execution_scope_path"],
+        paper_graph_path=state["paper_graph_path"],
+        node_state_path=state["node_state_path"],
+        resume_state_json=json.dumps(resume_state, ensure_ascii=False, indent=2),
+        session_number=session_number,
+        rollover_reason=rollover_reason,
+        current_handoff_path=current_handoff_path,
+        smart_anchors=json.dumps(
+            [
+                {
+                    "claim_id": claim.id,
+                    "method": claim.method,
+                    "paper_result": claim.paper_result,
+                    "provenance": claim.provenance,
+                }
+                for claim in graph.claims
+                if claim.id in runnable and claim.paper_result is not None
+            ],
+            ensure_ascii=False,
+            indent=2,
+        ),
+    )
+
+
 def _run_replication_experiment_handoff(
     *,
     config: RunConfig,
@@ -1156,6 +1214,7 @@ def _run_replication_experiment_handoff(
     transcript_path: Path,
     artifact_paths: list[Path],
     validate: Callable[[], list[str]],
+    render_new_session_prompt: Callable[[int, str, Path | None], Path],
 ) -> list[str]:
     """Pause one Codex session while orchestration owns experiment execution."""
     command_dir = config.output / "replication" / "commands"
@@ -1166,6 +1225,11 @@ def _run_replication_experiment_handoff(
     next_prompt_path = prompt_path
     command_index = _next_command_index(command_dir)
     repair_turns = 0
+    session_number = 1
+    handoffs_in_session = 0
+    consecutive_context_exhaustions = 0
+    append_fresh_session_transcript = False
+    current_handoff_path: Path | None = None
 
     while True:
         request_path = command_dir / f"command_{command_index:03d}.json"
@@ -1180,11 +1244,33 @@ def _run_replication_experiment_handoff(
             output_schema_path=schema_path,
             output_last_message_path=request_path,
             resume_session_id=session_id,
+            append_transcript=append_fresh_session_transcript,
         )
+        append_fresh_session_transcript = False
         if session_id is None:
             raise RuntimeError("Codex replication handoff did not return a session ID")
 
         request = load_model(request_path, ReplicationExperimentHandoff)
+        if request.status == "context_exhausted":
+            consecutive_context_exhaustions += 1
+            if consecutive_context_exhaustions >= 2:
+                raise RuntimeError(
+                    "replicate_agent reported context_exhausted in two consecutive "
+                    "fresh sessions without a terminal experiment handoff"
+                )
+            command_index += 1
+            session_number += 1
+            session_id = None
+            handoffs_in_session = 0
+            next_prompt_path = render_new_session_prompt(
+                session_number,
+                "context_exhausted",
+                current_handoff_path,
+            )
+            append_fresh_session_transcript = True
+            continue
+
+        consecutive_context_exhaustions = 0
         if request.status == "completed":
             try:
                 return validate()
@@ -1234,8 +1320,20 @@ def _run_replication_experiment_handoff(
                 ),
             },
         )
-        next_prompt_path = current_handoff_path
         command_index += 1
+        handoffs_in_session += 1
+        if handoffs_in_session >= MAX_REPLICATION_HANDOFFS_PER_SESSION:
+            session_number += 1
+            session_id = None
+            next_prompt_path = render_new_session_prompt(
+                session_number,
+                "handoff_limit",
+                current_handoff_path,
+            )
+            handoffs_in_session = 0
+            append_fresh_session_transcript = True
+        else:
+            next_prompt_path = current_handoff_path
 
 
 def _run_codegen_cloud_pull_handoff(
@@ -1591,6 +1689,7 @@ def _archive_replicate_attempt(config: RunConfig, resume_count: int) -> Path:
     report_dir = output / "report"
     codebase_dir = output / "codegen" / "codebase"
     prompt_paths = [output / "prompts" / "replicate.md"]
+    prompt_paths.extend(sorted((output / "prompts").glob("replicate_session_*.md")))
     prompt_paths.extend(sorted((output / "prompts").glob("replicate_resume_*.md")))
     prompt_paths.extend(sorted((output / "prompts").glob("replicate_agent_validation_resume_*.md")))
     prompt_paths.extend(sorted((output / "prompts").glob("replicate_command*.json")))
@@ -3520,48 +3619,32 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         "replicate_agent",
         {"completed_node_ids": resume_state["completed_node_ids"]},
     )
-    runnable = set(scope.runnable_node_ids)
-    prompt_path = render_prompt(
-        "replication/session_instructions.md",
+    prompt_path = _render_replication_session_prompt(
+        state,
         config.output / "prompts" / "replicate.md",
-        replicate_plan_path=state["replicate_plan_path"],
-        paper_markdown=state["paper_markdown"],
-        codebase_dir=state["codebase_dir"],
-        replication_dir=config.output / "replication",
-        skills_dir=skills_dir(),
-        computation_provider_state_path=(config.output / "remote_compute" / "instance.json"),
-        cloud_drive_enabled=cloud_data,
-        cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=_active_cloud_datasets(state),
-        drive_provider=config.drive_provider,
-        computation_provider=config.computation_provider,
-        computation_provider_reference=config.computation_provider_reference,
-        drive_reference=config.drive_reference,
-        smart=config.smart_replicate,
-        experiment_handoff=config.provider == "codex",
-        execution_scope_path=state["execution_scope_path"],
-        paper_graph_path=state["paper_graph_path"],
-        node_state_path=state["node_state_path"],
-        resume_state_json=json.dumps(resume_state, ensure_ascii=False, indent=2),
-        smart_anchors=json.dumps(
-            [
-                {
-                    "claim_id": claim.id,
-                    "method": claim.method,
-                    "paper_result": claim.paper_result,
-                    "provenance": claim.provenance,
-                }
-                for claim in graph.claims
-                if claim.id in runnable and claim.paper_result is not None
-            ],
-            ensure_ascii=False,
-            indent=2,
-        ),
+        resume_state=resume_state,
+        session_number=1,
+        rollover_reason=None,
+        current_handoff_path=None,
     )
     outputs: list[str] = []
 
     def validate_outputs() -> None:
         outputs[:] = validate_replication_artifacts(state)
+
+    def render_new_session_prompt(
+        session_number: int,
+        rollover_reason: str,
+        current_handoff_path: Path | None,
+    ) -> Path:
+        return _render_replication_session_prompt(
+            state,
+            config.output / "prompts" / f"replicate_session_{session_number:03d}.md",
+            resume_state=_inspect_completed_replication_nodes(state),
+            session_number=session_number,
+            rollover_reason=rollover_reason,
+            current_handoff_path=current_handoff_path,
+        )
 
     try:
         if config.provider == "codex":
@@ -3575,6 +3658,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
                     config.output / "replication" / "evidence_summary.json",
                 ],
                 validate=lambda: validate_replication_artifacts(state),
+                render_new_session_prompt=render_new_session_prompt,
             )
         else:
             session_id = run_agent(

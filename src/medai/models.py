@@ -547,7 +547,7 @@ class DataAvailabilityHandoffRequest(StrictModel):
 
 
 class ReplicationExperimentHandoff(StrictModel):
-    status: Literal["command", "completed", "blocked", "failed"]
+    status: Literal["command", "completed", "context_exhausted", "blocked", "failed"]
     command: str | None
     hard_timeout_seconds: int | None = Field(ge=1)
     progress_command: str | None
@@ -576,6 +576,13 @@ class ReplicationExperimentHandoff(StrictModel):
                 raise ValueError("completed replication handoff requires null commands")
             if self.hard_timeout_seconds is not None or self.error is not None:
                 raise ValueError("completed replication handoff requires null timeout and error")
+        elif self.status == "context_exhausted":
+            if any(value is not None for value in command_fields):
+                raise ValueError("context-exhausted replication handoff requires null commands")
+            if self.hard_timeout_seconds is not None or self.error is not None:
+                raise ValueError(
+                    "context-exhausted replication handoff requires null timeout and error"
+                )
         else:
             if any(value is not None for value in command_fields):
                 raise ValueError(f"{self.status} replication handoff requires null commands")
