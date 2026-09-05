@@ -39,8 +39,8 @@ runs/<run_id>/
 │   ├── replication_log.json
 │   ├── evidence_summary.json
 │   ├── replication_transcript.jsonl
-│   ├── commands/command_<NNN>{.json,.log,_result.json,
-│   │   _progress.log,_progress_result.json,_stop.log,_stop_result.json}
+│   ├── commands/{current_handoff.json,command_<NNN>{.json,.log,_result.json,
+│   │   _progress.log,_progress_result.json,_stop.log,_stop_result.json}}
 │   └── claims/<claim_id>/smart_replicate_log.json
 ├── report/
 │   ├── reproduction_report.md
@@ -157,8 +157,11 @@ handoff or a terminal agent status. An experiment request contains its foregroun
 command, hard timeout, lightweight progress command, and exact graceful-stop
 command. Its `_result.json` records the terminal or timed-out outcome and paths
 to the complete command, progress, and optional stop results/logs. At most 2000
-characters of progress output are embedded as JSON/scalar values; larger output
-is retained only by path before the same agent session resumes.
+characters of progress output remain in the immutable result evidence; larger
+output is retained only by path. The mutable `current_handoff.json` contains only
+the latest handoff ID, terminal status, immutable request/result paths, and a
+continuation instruction. It is overwritten and used directly as the resumed
+agent prompt, so historical progress and logs are not repeatedly injected.
 
 The replication plan starts with exactly one node-free environment/setup step.
 Each later step equals one earliest topological layer of the runnable DAG in

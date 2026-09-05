@@ -50,8 +50,9 @@ same-thread unfinished-command recovery, and cleanup after success or terminal
 failure. Recovery must preserve the original stage result and reject a recovery
 turn that itself leaves an unfinished command. Replication-handoff coverage pins
 the experiment command, positive hard timeout, exact graceful stop, bounded
-progress capture, persisted result/log paths, and same-session resume after
-normal or timed-out execution. Provider-handoff coverage requires availability
+progress capture, persisted result/log paths, a compact mutable current-handoff
+prompt without inline progress, and same-session resume after normal or timed-out
+execution. Provider-handoff coverage requires availability
 to execute create, materialization, and remote-inspection commands locally
 between turns of one session.
 

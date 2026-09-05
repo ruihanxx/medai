@@ -41,8 +41,9 @@ grouping. One run executes these stages:
 11. Replication executes the plan and supplies actual result/evidence updates
     for every runnable node. Direct Codex returns each experiment as a foreground
     orchestration handoff with a hard timeout, lightweight progress command, and
-    exact graceful-stop command; orchestration resumes the same session from the
-    saved terminal result and progress evidence.
+    exact graceful-stop command; orchestration saves immutable terminal evidence,
+    overwrites one compact current-handoff pointer, and resumes the same session
+    using only that JSON.
 12. Smart Replicate, when enabled, checkpoints only runnable claims having a
     paper result under `replication/claims/<claim_id>/`.
 13. Reporting checkpoints each C independently and collects only its actual

@@ -1214,26 +1214,27 @@ def _run_replication_experiment_handoff(
 
         log_path = command_dir / f"command_{command_index:03d}.log"
         result_path = command_dir / f"command_{command_index:03d}_result.json"
-        result = _run_replication_experiment(
+        _run_replication_experiment(
             request,
             codebase_dir=codebase_dir,
             log_path=log_path,
             result_path=result_path,
         )
-        next_prompt_path = render_prompt(
-            "replication/command_result_instructions.md",
-            config.output / "prompts" / f"replicate_resume_{command_index:03d}.md",
-            command_result_path=result_path,
-            command_log_path=log_path,
-            exit_code=result["exit_code"],
-            duration_seconds=result["duration_seconds"],
-            hard_timeout_seconds=result["hard_timeout_seconds"],
-            timed_out=result["timed_out"],
-            graceful_stop_result_path=result["graceful_stop_result_path"],
-            progress_result_path=result["progress_result_path"],
-            progress_log_path=result["progress_log_path"],
-            progress_json=json.dumps(result["progress"], ensure_ascii=False, indent=2),
+        current_handoff_path = command_dir / "current_handoff.json"
+        write_json(
+            current_handoff_path,
+            {
+                "handoff_id": f"command_{command_index:03d}",
+                "status": "terminal",
+                "request_path": str(request_path),
+                "result_path": str(result_path),
+                "instruction": (
+                    "Read the immutable request and result, then continue the original "
+                    "replication task under its handoff contract."
+                ),
+            },
         )
+        next_prompt_path = current_handoff_path
         command_index += 1
 
 

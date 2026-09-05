@@ -175,9 +175,11 @@ replication returns each experiment as one foreground handoff operation; bounded
 inspection, setup, editing, and smoke tests remain inside the agent turn. Each
 experiment request supplies its hard timeout, a compact read-only progress
 command, and an exact graceful-stop command. Orchestration owns execution,
-persists command/progress/stop results and logs, and resumes the same session
-after normal completion or timeout cleanup. Other long-running tasks must also
-use their defined foreground handoff. A Codex
+persists immutable command/progress/stop results and logs, overwrites one compact
+`current_handoff.json` containing only the latest request/result paths, and uses
+that JSON directly to resume the same session after normal completion or timeout
+cleanup. Historical progress content is never re-injected. Other long-running
+tasks must also use their defined foreground handoff. A Codex
 process that exits successfully is not accepted while its transcript contains
 an unfinished command execution. The shared direct-Codex invocation wrapper
 appends a recovery request and resumes that same agent thread once. Because a

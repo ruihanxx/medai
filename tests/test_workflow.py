@@ -77,7 +77,7 @@ def test_replication_experiment_timeout_stops_then_collects_light_progress(
     ]
 
 
-def test_replication_experiment_handoff_resumes_with_result_paths_and_progress(
+def test_replication_experiment_handoff_resumes_with_current_handoff(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -150,7 +150,13 @@ def test_replication_experiment_handoff_resumes_with_result_paths_and_progress(
     assert outputs == ["validated.json"]
     assert agent_calls[0]["resume_session_id"] is None
     assert agent_calls[1]["resume_session_id"] == "thread-123"
-    resume_prompt = agent_calls[1]["prompt_path"].read_text(encoding="utf-8")
-    assert "command_001_result.json" in resume_prompt
-    assert '"epoch": 2' in resume_prompt
-    assert "Do not launch or monitor an experiment directly" in resume_prompt
+    current_handoff_path = agent_calls[1]["prompt_path"]
+    assert current_handoff_path == (
+        output / "replication" / "commands" / "current_handoff.json"
+    )
+    current_handoff = json.loads(current_handoff_path.read_text(encoding="utf-8"))
+    assert current_handoff["handoff_id"] == "command_001"
+    assert current_handoff["status"] == "terminal"
+    assert current_handoff["request_path"].endswith("command_001.json")
+    assert current_handoff["result_path"].endswith("command_001_result.json")
+    assert "progress" not in current_handoff
