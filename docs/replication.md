@@ -39,7 +39,10 @@ grouping. One run executes these stages:
    per earliest runnable-DAG topological layer. Each runnable node appears in
    exactly one layer step via `verifies`, without fallback scale.
 11. Replication executes the plan and supplies actual result/evidence updates
-    for every runnable node.
+    for every runnable node. Direct Codex returns each experiment as a foreground
+    orchestration handoff with a hard timeout, lightweight progress command, and
+    exact graceful-stop command; orchestration resumes the same session from the
+    saved terminal result and progress evidence.
 12. Smart Replicate, when enabled, checkpoints only runnable claims having a
     paper result under `replication/claims/<claim_id>/`.
 13. Reporting checkpoints each C independently and collects only its actual
@@ -64,10 +67,12 @@ Direct Codex completion is artifact-driven. Preprocessing, codegen, audit,
 refinement, planning, replication, and per-claim reporting may resume the same
 temporary session for at most two repair turns when their final artifact is
 missing or invalid. A structured codegen `blocked` or `failed` result is
-terminal and does not consume artifact-repair turns. Other providers retain
-one-turn behavior. Before artifact validation, every direct-Codex turn passes
-the shared unfinished-command recovery in `agents.md`. A technical retry does
-not consume a scientific audit or refinement attempt.
+terminal and does not consume artifact-repair turns. Replication experiment
+handoffs may resume that session repeatedly without consuming artifact-repair
+turns. Other providers retain one-turn behavior. Before artifact validation,
+every direct-Codex turn passes the shared unfinished-command recovery in
+`agents.md`. A technical retry does not consume a scientific audit or
+refinement attempt.
 
 Audit FAIL with preprocessing defects enters refinement while rounds remain,
 including a mixed report that also contains `source_unavailable`. A source-only

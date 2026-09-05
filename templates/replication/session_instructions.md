@@ -214,6 +214,60 @@ aggregate evidence, and logs; never download raw or row-level dataset content.
 
 ## Execution and completion
 
+{% if experiment_handoff %}
+Use your tools inside this session for bounded inspection, environment setup,
+code edits, and lightweight smoke tests. Do not launch, monitor, or wait for an
+experiment inside the agent turn. Return each experiment to local orchestration
+using the supplied output schema:
+
+```json
+{
+  "status": "command",
+  "command": "one foreground experiment command",
+  "hard_timeout_seconds": 3600,
+  "progress_command": "one lightweight progress inspection command",
+  "graceful_stop_command": "one exact, bounded graceful-stop command",
+  "error": null
+}
+```
+
+The experiment command must remain foreground end to end and must not use
+`nohup`, `&`, or a detached launcher. For a remote experiment, include the
+reviewed local adapter invocation so orchestration owns the entire foreground
+operation. Arrange an exact run identity such as a PID/PGID or scheduler job ID
+that both auxiliary commands can safely target; never use a broad process-name
+kill. Choose `hard_timeout_seconds` as a genuine upper bound for the intended
+full-scale experiment, including expected setup or data-loader warmup, rather
+than silently reducing scientific scale to fit a short timeout.
+
+The progress command must be read-only, quick, and bounded. It should print at
+most 2000 characters, preferably one compact JSON object containing only the
+few scalar values needed to judge the experiment, such as epoch, batch,
+throughput, latest checkpoint time, and a short list of relevant artifact paths.
+Choose those values for the actual experiment; do not dump logs, tensors,
+tables, row-level data, or model contents. The graceful-stop command must target
+only the exact experiment, request its normal checkpoint/cleanup path when
+available, wait until it is terminal, and return a truthful exit status.
+
+Orchestration executes the experiment without an active agent process. After
+normal completion, or after timeout plus graceful stop, it runs the progress
+command, saves every command result and complete log, and resumes this same
+session with their paths and the lightweight progress values. Use that evidence
+to decide whether code or configuration is inefficient before submitting a new
+full-scale experiment. A timeout is diagnostic evidence, not permission to
+change paper-prescribed semantics or reduce scale.
+
+Walk every plan layer in order and submit at most one experiment handoff at a
+time. Update `replication_log.json` after each completed step. When every plan
+step and required artifact is complete, return exactly:
+
+```json
+{"status":"completed","command":null,"hard_timeout_seconds":null,"progress_command":null,"graceful_stop_command":null,"error":null}
+```
+
+Use `blocked` or `failed` only for a terminal condition, with all command and
+timeout fields null and a non-empty `error`.
+{% else %}
 Use your tools inside this session to execute, monitor, and debug every command
 still required by the replication plan. Walk every plan layer in order, but
 skip host-validated completed nodes; do not end the turn after a single setup,
@@ -242,6 +296,7 @@ If that validation fails, it resumes this same session with the exact error and
 the existing files. In a resumed turn, inspect the complete artifact set,
 repair the stated issue, and preserve valid completed work rather than
 repeating it.
+{% endif %}
 
 ## How to Fix Issues
 

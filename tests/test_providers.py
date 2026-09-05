@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from medai.models import ReplicationCommand
+from medai.models import ReplicationCommand, ReplicationExperimentHandoff
 from medai.providers import run_agent
 from medai.siliconflow_adapter import (
     SiliconFlowConfig,
@@ -264,6 +264,43 @@ def test_replication_command_requires_exactly_one_nonblank_field():
         ReplicationCommand.model_validate({"command": "  \n"})
     with pytest.raises(ValueError, match="Extra inputs"):
         ReplicationCommand.model_validate({"command": "true", "status": "done"})
+
+
+def test_replication_experiment_handoff_requires_complete_command_contract():
+    request = ReplicationExperimentHandoff.model_validate(
+        {
+            "status": "command",
+            "command": "python train.py",
+            "hard_timeout_seconds": 3600,
+            "progress_command": "python progress.py",
+            "graceful_stop_command": "python stop.py",
+            "error": None,
+        }
+    )
+    assert request.hard_timeout_seconds == 3600
+
+    with pytest.raises(ValueError, match="progress"):
+        ReplicationExperimentHandoff.model_validate(
+            {
+                "status": "command",
+                "command": "python train.py",
+                "hard_timeout_seconds": 3600,
+                "progress_command": "",
+                "graceful_stop_command": "python stop.py",
+                "error": None,
+            }
+        )
+    with pytest.raises(ValueError, match="null commands"):
+        ReplicationExperimentHandoff.model_validate(
+            {
+                "status": "completed",
+                "command": "true",
+                "hard_timeout_seconds": None,
+                "progress_command": None,
+                "graceful_stop_command": None,
+                "error": None,
+            }
+        )
 
 
 def test_siliconflow_key_is_removed_from_child_environment():

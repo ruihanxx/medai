@@ -546,6 +546,48 @@ class DataAvailabilityHandoffRequest(StrictModel):
         return self
 
 
+class ReplicationExperimentHandoff(StrictModel):
+    status: Literal["command", "completed", "blocked", "failed"]
+    command: str | None
+    hard_timeout_seconds: int | None = Field(ge=1)
+    progress_command: str | None
+    graceful_stop_command: str | None
+    error: str | None
+
+    @model_validator(mode="after")
+    def status_matches_payload(self) -> "ReplicationExperimentHandoff":
+        command_fields = (
+            self.command,
+            self.progress_command,
+            self.graceful_stop_command,
+        )
+        if self.status == "command":
+            if any(value is None or not value.strip() for value in command_fields):
+                raise ValueError(
+                    "replication experiment handoff requires non-empty experiment, "
+                    "progress, and graceful-stop commands"
+                )
+            if self.hard_timeout_seconds is None:
+                raise ValueError("replication experiment handoff requires a hard timeout")
+            if self.error is not None:
+                raise ValueError("replication experiment handoff must have error=null")
+        elif self.status == "completed":
+            if any(value is not None for value in command_fields):
+                raise ValueError("completed replication handoff requires null commands")
+            if self.hard_timeout_seconds is not None or self.error is not None:
+                raise ValueError("completed replication handoff requires null timeout and error")
+        else:
+            if any(value is not None for value in command_fields):
+                raise ValueError(f"{self.status} replication handoff requires null commands")
+            if self.hard_timeout_seconds is not None:
+                raise ValueError(f"{self.status} replication handoff requires null timeout")
+            if self.error is None or not self.error.strip():
+                raise ValueError(
+                    f"{self.status} replication handoff requires a non-empty error"
+                )
+        return self
+
+
 class ReplicationCommand(StrictModel):
     command: str = Field(min_length=1)
 

@@ -3,10 +3,13 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
@@ -34,6 +37,7 @@ from medai.models import (
     PaperRepoAmbiguity,
     PaperRepositories,
     PendingNodeUpdate,
+    ReplicationExperimentHandoff,
     ReplicationLog,
     ReplicationPlan,
     RepositoryCandidates,
@@ -67,6 +71,9 @@ from medai.study_graph import (
 
 MAX_COHORT_REFINE_ROUNDS = 3
 MAX_AGENT_ARTIFACT_REPAIR_TURNS = 2
+EXPERIMENT_AUXILIARY_TIMEOUT_SECONDS = 300
+EXPERIMENT_STOP_GRACE_SECONDS = 30
+EXPERIMENT_PROGRESS_INLINE_CHARS = 2000
 
 
 class WorkflowState(TypedDict, total=False):
@@ -607,10 +614,12 @@ def _run_agent_command(
     codebase_dir: Path,
     log_path: Path,
     result_path: Path,
+    timeout_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Execute one Codex-requested foreground command and retain its combined log."""
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
+    timed_out = threading.Event()
     try:
         with log_path.open("w", encoding="utf-8") as log:
             process = subprocess.Popen(
@@ -621,12 +630,37 @@ def _run_agent_command(
                 text=True,
                 encoding="utf-8",
                 bufsize=1,
+                start_new_session=timeout_seconds is not None,
             )
-            assert process.stdout is not None
-            for line in iter(process.stdout.readline, ""):
-                print(line, end="")
-                log.write(line)
+            timer: threading.Timer | None = None
+            if timeout_seconds is not None:
+
+                def terminate_on_timeout() -> None:
+                    if process.poll() is None:
+                        timed_out.set()
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+
+                timer = threading.Timer(timeout_seconds, terminate_on_timeout)
+                timer.daemon = True
+                timer.start()
+            try:
+                assert process.stdout is not None
+                for line in iter(process.stdout.readline, ""):
+                    print(line, end="")
+                    log.write(line)
+            finally:
+                if timer is not None:
+                    timer.cancel()
         exit_code = process.wait()
+        if timed_out.is_set():
+            message = f"Command timed out after {timeout_seconds} seconds\n"
+            print(message, end="")
+            with log_path.open("a", encoding="utf-8") as log:
+                log.write(message)
+            exit_code = 124
     except OSError as exc:
         raise RuntimeError(f"Could not execute Codex command: {exc}") from exc
 
@@ -635,6 +669,115 @@ def _run_agent_command(
         "exit_code": exit_code,
         "duration_seconds": round(time.monotonic() - started, 3),
         "log_path": str(log_path),
+        "timed_out": timed_out.is_set(),
+        "artifact_validation_error": None,
+    }
+    write_json(result_path, result)
+    return result
+
+
+def _lightweight_progress(log_path: Path) -> Any:
+    text = log_path.read_text(encoding="utf-8").strip()
+    if len(text) > EXPERIMENT_PROGRESS_INLINE_CHARS:
+        return {
+            "output_omitted": True,
+            "characters": len(text),
+            "reason": "progress output exceeded the inline context limit",
+        }
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
+
+
+def _run_replication_experiment(
+    request: ReplicationExperimentHandoff,
+    *,
+    codebase_dir: Path,
+    log_path: Path,
+    result_path: Path,
+) -> dict[str, Any]:
+    """Run one handed-off experiment through completion or its hard timeout."""
+    assert request.command is not None
+    assert request.hard_timeout_seconds is not None
+    assert request.progress_command is not None
+    assert request.graceful_stop_command is not None
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command_stem = result_path.stem.removesuffix("_result")
+    progress_log_path = result_path.with_name(f"{command_stem}_progress.log")
+    progress_result_path = result_path.with_name(f"{command_stem}_progress_result.json")
+    stop_log_path = result_path.with_name(f"{command_stem}_stop.log")
+    stop_result_path = result_path.with_name(f"{command_stem}_stop_result.json")
+    print(
+        "running handed-off replication experiment with hard timeout "
+        f"{request.hard_timeout_seconds}s; log: {log_path}"
+    )
+    started = time.monotonic()
+    timed_out = False
+    stop_result: dict[str, Any] | None = None
+    try:
+        with log_path.open("w", encoding="utf-8") as log:
+            process = subprocess.Popen(
+                ["/bin/bash", "-lc", request.command],
+                cwd=codebase_dir,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                start_new_session=True,
+            )
+            try:
+                process_exit_code = process.wait(timeout=request.hard_timeout_seconds)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                stop_result = _run_agent_command(
+                    request.graceful_stop_command,
+                    codebase_dir=codebase_dir,
+                    log_path=stop_log_path,
+                    result_path=stop_result_path,
+                    timeout_seconds=EXPERIMENT_AUXILIARY_TIMEOUT_SECONDS,
+                )
+                try:
+                    process_exit_code = process.wait(timeout=EXPERIMENT_STOP_GRACE_SECONDS)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        process_exit_code = process.wait(timeout=EXPERIMENT_STOP_GRACE_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        process_exit_code = process.wait()
+    except OSError as exc:
+        raise RuntimeError(f"Could not execute replication experiment: {exc}") from exc
+
+    duration_seconds = round(time.monotonic() - started, 3)
+    progress_result = _run_agent_command(
+        request.progress_command,
+        codebase_dir=codebase_dir,
+        log_path=progress_log_path,
+        result_path=progress_result_path,
+        timeout_seconds=EXPERIMENT_AUXILIARY_TIMEOUT_SECONDS,
+    )
+    result = {
+        "command": request.command,
+        "exit_code": 124 if timed_out else process_exit_code,
+        "process_exit_code": process_exit_code,
+        "duration_seconds": duration_seconds,
+        "hard_timeout_seconds": request.hard_timeout_seconds,
+        "timed_out": timed_out,
+        "log_path": str(log_path),
+        "graceful_stop_result_path": str(stop_result_path) if stop_result is not None else None,
+        "progress_result_path": str(progress_result_path),
+        "progress_log_path": str(progress_log_path),
+        "progress_exit_code": progress_result["exit_code"],
+        "progress": _lightweight_progress(progress_log_path),
         "artifact_validation_error": None,
     }
     write_json(result_path, result)
@@ -1003,6 +1146,95 @@ def _next_command_index(command_dir: Path) -> int:
     while (command_dir / f"command_{index:03d}.json").exists():
         index += 1
     return index
+
+
+def _run_replication_experiment_handoff(
+    *,
+    config: RunConfig,
+    codebase_dir: Path,
+    prompt_path: Path,
+    transcript_path: Path,
+    artifact_paths: list[Path],
+    validate: Callable[[], list[str]],
+) -> list[str]:
+    """Pause one Codex session while orchestration owns experiment execution."""
+    command_dir = config.output / "replication" / "commands"
+    command_dir.mkdir(parents=True, exist_ok=True)
+    schema_path = config.output / "prompts" / "replication_experiment_handoff.schema.json"
+    write_json(schema_path, ReplicationExperimentHandoff.model_json_schema())
+    session_id: str | None = None
+    next_prompt_path = prompt_path
+    command_index = _next_command_index(command_dir)
+    repair_turns = 0
+
+    while True:
+        request_path = command_dir / f"command_{command_index:03d}.json"
+        session_id = run_agent(
+            provider=config.provider,
+            prompt_path=next_prompt_path,
+            working_dir=codebase_dir,
+            transcript_path=transcript_path,
+            siliconflow_config_path=config.siliconflow_config,
+            codex_model=config.codex_model,
+            codex_reasoning_effort=config.codex_reasoning_effort,
+            output_schema_path=schema_path,
+            output_last_message_path=request_path,
+            resume_session_id=session_id,
+        )
+        if session_id is None:
+            raise RuntimeError("Codex replication handoff did not return a session ID")
+
+        request = load_model(request_path, ReplicationExperimentHandoff)
+        if request.status == "completed":
+            try:
+                return validate()
+            except (OSError, RuntimeError, ValueError) as exc:
+                if repair_turns >= MAX_AGENT_ARTIFACT_REPAIR_TURNS:
+                    raise RuntimeError(
+                        "replicate_agent artifacts still failed validation after "
+                        f"{MAX_AGENT_ARTIFACT_REPAIR_TURNS} resumed repair turns: {exc}"
+                    ) from exc
+                repair_turns += 1
+                next_prompt_path = render_prompt(
+                    "replication/artifact_validation_resume.md",
+                    config.output
+                    / "prompts"
+                    / f"replicate_agent_validation_resume_{repair_turns:03d}.md",
+                    stage_name="replicate_agent",
+                    artifact_paths=artifact_paths,
+                    artifact_validation_error=str(exc),
+                    experiment_handoff=True,
+                )
+                command_index += 1
+                continue
+        if request.status != "command":
+            raise RuntimeError(
+                f"replicate_agent reported {request.status}: {request.error}"
+            )
+
+        log_path = command_dir / f"command_{command_index:03d}.log"
+        result_path = command_dir / f"command_{command_index:03d}_result.json"
+        result = _run_replication_experiment(
+            request,
+            codebase_dir=codebase_dir,
+            log_path=log_path,
+            result_path=result_path,
+        )
+        next_prompt_path = render_prompt(
+            "replication/command_result_instructions.md",
+            config.output / "prompts" / f"replicate_resume_{command_index:03d}.md",
+            command_result_path=result_path,
+            command_log_path=log_path,
+            exit_code=result["exit_code"],
+            duration_seconds=result["duration_seconds"],
+            hard_timeout_seconds=result["hard_timeout_seconds"],
+            timed_out=result["timed_out"],
+            graceful_stop_result_path=result["graceful_stop_result_path"],
+            progress_result_path=result["progress_result_path"],
+            progress_log_path=result["progress_log_path"],
+            progress_json=json.dumps(result["progress"], ensure_ascii=False, indent=2),
+        )
+        command_index += 1
 
 
 def _run_codegen_cloud_pull_handoff(
@@ -3305,6 +3537,7 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         computation_provider_reference=config.computation_provider_reference,
         drive_reference=config.drive_reference,
         smart=config.smart_replicate,
+        experiment_handoff=config.provider == "codex",
         execution_scope_path=state["execution_scope_path"],
         paper_graph_path=state["paper_graph_path"],
         node_state_path=state["node_state_path"],
@@ -3330,29 +3563,40 @@ def replicate_agent_node(state: WorkflowState) -> dict[str, Any]:
         outputs[:] = validate_replication_artifacts(state)
 
     try:
-        session_id = run_agent(
-            provider=config.provider,
-            prompt_path=prompt_path,
-            working_dir=Path(state["codebase_dir"]),
-            transcript_path=transcript_path,
-            siliconflow_config_path=config.siliconflow_config,
-            codex_model=config.codex_model,
-            codex_reasoning_effort=config.codex_reasoning_effort,
-        )
-        if config.provider == "codex" and session_id is None:
-            raise RuntimeError("Codex replication turn did not return a session ID")
-        _validate_agent_artifacts_with_resume(
-            config=config,
-            stage_name="replicate_agent",
-            session_id=session_id,
-            working_dir=Path(state["codebase_dir"]),
-            transcript_path=transcript_path,
-            artifact_paths=[
-                config.output / "replication" / "replication_log.json",
-                config.output / "replication" / "evidence_summary.json",
-            ],
-            validate=validate_outputs,
-        )
+        if config.provider == "codex":
+            outputs[:] = _run_replication_experiment_handoff(
+                config=config,
+                codebase_dir=Path(state["codebase_dir"]),
+                prompt_path=prompt_path,
+                transcript_path=transcript_path,
+                artifact_paths=[
+                    config.output / "replication" / "replication_log.json",
+                    config.output / "replication" / "evidence_summary.json",
+                ],
+                validate=lambda: validate_replication_artifacts(state),
+            )
+        else:
+            session_id = run_agent(
+                provider=config.provider,
+                prompt_path=prompt_path,
+                working_dir=Path(state["codebase_dir"]),
+                transcript_path=transcript_path,
+                siliconflow_config_path=config.siliconflow_config,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+            )
+            _validate_agent_artifacts_with_resume(
+                config=config,
+                stage_name="replicate_agent",
+                session_id=session_id,
+                working_dir=Path(state["codebase_dir"]),
+                transcript_path=transcript_path,
+                artifact_paths=[
+                    config.output / "replication" / "replication_log.json",
+                    config.output / "replication" / "evidence_summary.json",
+                ],
+                validate=validate_outputs,
+            )
     finally:
         power_off_run_computation_instance(config)
     pipeline_state.complete_stage(

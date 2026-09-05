@@ -23,7 +23,16 @@ symptom, and return only after the corrected artifacts satisfy the original
 stage instructions. If the error is caused by an irrecoverable external or
 infrastructure condition, surface that condition explicitly instead of
 fabricating a valid-looking artifact.
-{% if structured_stage_result|default(false) %}
+{% if experiment_handoff|default(false) %}
+
+Do not launch or monitor an experiment directly during this repair turn. If a
+new experiment is genuinely required, return the structured replication
+experiment handoff with its command, hard timeout, lightweight progress command,
+and exact graceful-stop command. Otherwise return `status: completed` with all
+command, timeout, and error fields null only when the owned artifacts are ready
+for validation. Return `blocked` or `failed` with null command and timeout fields
+and a non-empty `error` for a terminal condition.
+{% elif structured_stage_result|default(false) %}
 
 End this repair turn with exactly the structured result required by the supplied
 output schema. Return `{"status":"completed","error":null}` only when the owned

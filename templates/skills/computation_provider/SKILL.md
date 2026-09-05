@@ -59,6 +59,13 @@ prepared instance and hand off only the foreground monitor. Orchestration
 validates canonical state between turns and owns subsequent power-off and
 release.
 
+Direct-Codex base replication returns every experiment as one local
+orchestration handoff. The agent supplies the complete foreground adapter
+command, a hard timeout, a compact read-only progress command, and an exact
+graceful-stop command. Orchestration executes and monitors that operation while
+the agent is absent, then resumes the same session from persisted result/log
+paths and bounded progress values.
+
 ## Local Configs
 
 Store provider keys, API URLs, and other local provider configuration in the
@@ -156,8 +163,10 @@ read the applicable document under `cloud/` before synchronizing a dataset.
 
 Execute the complete planned experiment at its prescribed scale. Capture the exact
 command, exit status, logs, and output locations. Make long-running execution
-resilient to connection loss. Do not report success until required evidence and
-artifacts have been transferred to persistent run output.
+resilient to connection loss. In a direct-Codex base replication turn, construct
+the required orchestration handoff rather than launching or polling the
+experiment yourself. Do not report success until required evidence and artifacts
+have been transferred to persistent run output.
 
 ### Power Instances On and Off
 

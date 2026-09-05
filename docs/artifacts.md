@@ -39,6 +39,8 @@ runs/<run_id>/
 │   ├── replication_log.json
 │   ├── evidence_summary.json
 │   ├── replication_transcript.jsonl
+│   ├── commands/command_<NNN>{.json,.log,_result.json,
+│   │   _progress.log,_progress_result.json,_stop.log,_stop_result.json}
 │   └── claims/<claim_id>/smart_replicate_log.json
 ├── report/
 │   ├── reproduction_report.md
@@ -149,6 +151,14 @@ is the schema-validated request to execute one foreground provider command or
 complete the session. Command turns retain a combined `.log` and a `_result.json`
 with command, exit code, duration, log path, and validation-error slot before
 the same session resumes. No raw cloud data is stored locally.
+
+Each direct-Codex replication `command_<NNN>.json` records either one experiment
+handoff or a terminal agent status. An experiment request contains its foreground
+command, hard timeout, lightweight progress command, and exact graceful-stop
+command. Its `_result.json` records the terminal or timed-out outcome and paths
+to the complete command, progress, and optional stop results/logs. At most 2000
+characters of progress output are embedded as JSON/scalar values; larger output
+is retained only by path before the same agent session resumes.
 
 The replication plan starts with exactly one node-free environment/setup step.
 Each later step equals one earliest topological layer of the runnable DAG in

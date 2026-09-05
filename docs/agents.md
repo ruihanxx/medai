@@ -164,14 +164,20 @@ One-turn invocation is the default. Direct Codex may keep one temporary session
 across these orchestration handoffs: invalid final stage artifacts (at most two
 repairs), missing/invalid audit report, opted-in data-availability provider
 and remote-inspection commands, codegen cloud-materialization commands, Auto
-Research cloud-materialization monitors, and one remote validation operation.
+Research cloud-materialization monitors, base-replication experiments, and one
+remote validation operation.
 Initial and resumed turns append to one transcript. Explicit CLI resume never
 restores a process-local session ID.
 
 A successful turn alone does not complete a stage; canonical artifact validation
-does. Codegen `blocked` or `failed` is immediately terminal. Base replication
-may execute its planned commands within its complete agent turn. Other long
-running tasks must be returned as one foreground handoff operation. A Codex
+does. Codegen `blocked` or `failed` is immediately terminal. Direct-Codex base
+replication returns each experiment as one foreground handoff operation; bounded
+inspection, setup, editing, and smoke tests remain inside the agent turn. Each
+experiment request supplies its hard timeout, a compact read-only progress
+command, and an exact graceful-stop command. Orchestration owns execution,
+persists command/progress/stop results and logs, and resumes the same session
+after normal completion or timeout cleanup. Other long-running tasks must also
+use their defined foreground handoff. A Codex
 process that exits successfully is not accepted while its transcript contains
 an unfinished command execution. The shared direct-Codex invocation wrapper
 appends a recovery request and resumes that same agent thread once. Because a
@@ -185,7 +191,8 @@ turn. Canonical stage validation still decides whether the next stage may run.
 Within Codegen and base Replication turns, command execution is serial. A
 running execution handle blocks every new command, file edit, check, and
 terminal result until the agent polls that handle to a terminal event or
-explicitly terminates it and waits for the terminal event. Neither agent leaves
+explicitly terminates it and waits for the terminal event. Replication never
+starts or monitors an experiment inside the agent turn. Neither agent leaves
 more than one command execution running.
 
 Data availability may run only provider search, status, and state validation

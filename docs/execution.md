@@ -57,6 +57,13 @@ data only after completed materialization. Codegen returns every
 cloud-materialization action required after its own reconciliation for the same
 foreground orchestration handoff. Auto Research retains its local-monitor
 handoff.
+Direct-Codex base replication likewise hands each experiment to orchestration
+as one foreground local command, including adapter invocation for remote work.
+The request includes a positive hard timeout, a compact read-only progress
+command, and an exact graceful-stop command. On timeout orchestration runs the
+graceful stop, settles the local process group, captures lightweight progress,
+and resumes the same agent session; timeout alone is not a terminal workflow
+failure and does not release the instance.
 Provider-specific resource selection, create initialization, fallback, and
 retry behavior lives only in the metadata-selected computation-provider
 reference. A provider create is successful only after its documented remote
