@@ -869,7 +869,10 @@ def test_vastai_power_on_waits_through_exited_when_control_plane_is_running(
             ("GET", "/api/v0/instances/instance-1/"): lambda _: {
                 "instances": next(states)
             },
-            ("PUT", "/api/v0/instances/instance-1/"): {"success": True},
+            ("PUT", "/api/v0/instances/instance-1/"): {
+                "success": False,
+                "msg": "Required resources are currently unavailable, state change queued.",
+            },
         }
     ) as (base_url, requests):
         for name, value in adapter_environment(base_url).items():
@@ -885,7 +888,7 @@ def test_vastai_power_on_waits_through_exited_when_control_plane_is_running(
 
 
 def test_vastai_autoresearch_pool_creates_member_when_retained_gpu_is_unavailable(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ):
     state_path = tmp_path / "remote_compute" / "instance.json"
     vast_state(state_path)
@@ -937,17 +940,22 @@ def test_vastai_autoresearch_pool_creates_member_when_retained_gpu_is_unavailabl
             },
         }
     ) as (base_url, requests):
-        completed = run_adapter(
-            ["power-on", "--state", str(state_path)],
-            {
-                **adapter_environment(base_url),
-                **ssh_environment,
-                "VASTAI_MAX_CAMPAIGN_INSTANCES": "3",
-            },
+        for name, value in {
+            **adapter_environment(base_url),
+            **ssh_environment,
+            "VASTAI_MAX_CAMPAIGN_INSTANCES": "3",
+        }.items():
+            monkeypatch.setenv(name, value)
+        module = load_vastai_module()
+        now = [0.0]
+        monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
+        monkeypatch.setattr(
+            module.time,
+            "sleep",
+            lambda seconds: now.__setitem__(0, now[0] + seconds),
         )
+        result = json.loads(module.power_on_instance(argparse.Namespace(state=state_path)))
 
-    assert completed.returncode == 0, completed.stderr
-    result = json.loads(completed.stdout)
     assert result == {
         "created": True,
         "instance_id": "instance-2",

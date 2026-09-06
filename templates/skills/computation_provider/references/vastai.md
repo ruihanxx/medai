@@ -140,10 +140,12 @@ state to a bounded campaign pool. `VASTAI_MAX_CAMPAIGN_INSTANCES` is a positive
 integer and defaults to three. Before each foreground experiment command the
 adapter tries the active member and then the other retained members. Only the
 explicit Vast response that required resources are unavailable and the state
-change is queued permits a new rental. The adapter cancels that queued start,
-preserves the stopped member and its disk, and creates a uniquely labelled pool
-member from the same resource floors. Unknown, ambiguous, and non-capacity
-failures never expand the pool.
+change is queued permits a new rental. Because Vast may complete that queued
+power-on asynchronously, the adapter first waits up to 60 seconds for the
+retained member to reach `running`. Only if it remains unavailable does the
+adapter cancel that queued start, preserve the stopped member and its disk, and
+create a uniquely labelled pool member from the same resource floors. Unknown,
+ambiguous, and non-capacity failures never expand the pool.
 
 ## State, SSH, and Lifecycle
 

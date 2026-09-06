@@ -29,6 +29,7 @@ NO_INVENTORY_MARKERS = (
     "offer is no longer available",
 )
 CAPACITY_UNAVAILABLE_MARKER = "required resources are currently unavailable"
+QUEUED_POWER_ON_TIMEOUT_SECONDS = 60
 CLOUD_COPY_TIMEOUT_SECONDS = 7200
 SSH_READY_TIMEOUT_SECONDS = 180
 SSH_READY_INTERVAL_SECONDS = 10
@@ -1200,7 +1201,20 @@ def _power_on_active(args: argparse.Namespace, *, known_status: str | None = Non
     if status != "stopped":
         raise RuntimeError(f"Cannot power on Vast instance from status={status}")
     instance_id = _required_string(state["provider_state"], "instance_id", "provider_state")
-    _successful(request("PUT", f"/api/v0/instances/{instance_id}/", {"state": "running"}))
+    try:
+        _successful(request("PUT", f"/api/v0/instances/{instance_id}/", {"state": "running"}))
+    except VastApiError as exc:
+        if not _is_capacity_unavailable(exc):
+            raise
+        try:
+            return _wait_for_status(
+                state,
+                "running",
+                QUEUED_POWER_ON_TIMEOUT_SECONDS,
+                10,
+            )
+        except RuntimeError:
+            raise exc
     return _wait_for_status(state, "running", 840, 10)
 
 
