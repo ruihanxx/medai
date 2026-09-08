@@ -91,7 +91,18 @@ with `adopt=false`. Repository snapshots and calibration baselines are immutable
 
 Audit treats source data and the codebase as read-only and writes only in its
 attempt directory. It covers all runnable P paths and accumulates every
-supported root cause. Each issue records one `node_id`, description,
+supported root cause. A comparable cohort/subgroup count passes when
+`abs(N_actual - N_paper) / N_paper < 0.01` for positive paper counts; exactly 1%
+is outside the tolerance. Compare each reported population separately using
+the same counting unit and preprocessing boundary. A paper count of zero
+requires actual zero; missing/incomparable counts receive no tolerance-based
+pass. Below-threshold count differences alone do not create issues or trigger
+refinement; other methodological checks still apply. Outside-tolerance counts
+remain subject to evidence-bound diagnosis, never count-targeted tuning.
+Keep actual/reference counts, absolute/relative differences, and paper evidence
+in attempt results even on PASS. This is an audit comparison rule, not a
+generated-code runtime gate.
+Each issue records one `node_id`, description,
 evidence-bound diagnosis, observable required correction outcome, and the
 orchestration route `preprocessing_fix` or `source_unavailable`; audit defines
 the required outcome, not its implementation. `source_unavailable` requires new

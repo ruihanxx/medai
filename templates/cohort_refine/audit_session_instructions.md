@@ -84,8 +84,9 @@ Never use the `computation-provider` skill during this stage.
 - Do not connect to, query, stop, release, or otherwise operate a remote server.
 {% endif %}
 - Do not change scientific preprocessing to make the data look better.
-- Do not invent fixed universal thresholds. Judge basic statistics in the
-  context of the paper's cohort, data type, and stated balancing procedure.
+- Apply the explicit cohort-size tolerance below; do not invent other fixed
+  universal thresholds. Judge other basic statistics in the context of the
+  paper's cohort, data type, and stated balancing procedure.
 
 ## Workflow
 
@@ -200,9 +201,27 @@ do not write the report when the first issue is found. At minimum check:
 - for every P consumed by V, the feature/label/split schema and endpoint
   coverage needed for the declared statistical or Cartesian validation block.
 
+For each comparable paper-reported cohort or subgroup size, use the same
+population, counting unit, and preprocessing boundary. When `N_paper > 0`, the
+count comparison passes if `abs(N_actual - N_paper) / N_paper < 0.01`. Use
+unrounded counts; exactly 1% is outside this tolerance. A discrepancy below 1%
+must not create an issue or trigger refinement solely because the counts are
+unequal. Apply this separately to each reported cohort/subgroup; agreement in
+the total cannot cancel a subgroup discrepancy. When `N_paper = 0`, only an
+actual zero matches; a missing or incomparable paper count cannot receive this
+tolerance-based pass. Outside the tolerance, investigate and apply the
+evidence-bound failure rules below rather than tuning the cohort to the count.
+Retain the paper and actual counts, absolute difference, relative error when
+defined, and paper reference in aggregate evidence under `{{ results_dir }}`,
+including passing comparisons. This tolerance applies only to the count
+comparison: eligibility, source identity, mappings, labels, splits, and other
+methodological checks must still pass. Never implement the tolerance as a
+generated-code runtime gate or change preprocessing to reach it.
+
 Natural imbalance described by the paper is not by itself a failure. Decide
 whether an observation is significant from the paper's methodology and the
-data, and explain the reasoning rather than applying a universal cutoff.
+data, and explain the reasoning. The count tolerance above does not provide a
+universal cutoff for other statistics.
 
 ### 4. Decide and report
 
