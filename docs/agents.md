@@ -16,6 +16,26 @@ references or adapters. Secrets never enter prompts, transcripts, commands,
 logs, manifests, or reports. Source data is read-only; agents retain only
 needed columns/aggregates and never substitute a missing paper-required input.
 
+## Context-aware delegation
+
+The runtime skill
+[`context-delegation`](../templates/skills/context-delegation/SKILL.md) owns the
+shared task-contract, context, evidence-return, and integration procedure. Each
+stage prompt selects its useful delegation boundaries and retained decisions;
+small stages may explicitly stay with one agent. Prompts pass the resolved
+runtime skill path, without loading the skill body or other stages' rules into
+every invocation. Delegated work preserves the stage's information and mutation
+boundaries, including result-blindness, serial commands, and foreground handoffs.
+Children finish before the parent returns a handoff/result or rolls over its
+session. Existing stage artifacts remain the only canonical outputs; worker
+notes use only already-permitted locations and introduce no required artifact.
+
+Delegation uses available native subagent tools. Providers without those tools
+execute directly with bounded reads; this policy does not change provider
+feature flags or authorize nested agent CLIs. Context isolation is an execution
+strategy, not a guarantee of lower total tokens or unchanged scientific quality;
+the stage owner retains coverage, integration, and evidence verification.
+
 ## Graph ownership
 
 - Repository discovery runs after PDF conversion and reads only paper Markdown.
