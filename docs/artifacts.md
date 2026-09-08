@@ -61,6 +61,22 @@ Each direct-Codex transcript may include orchestration-authored
 They identify the unfinished command item IDs and preserve the recovery prompt
 and result without replacing the stage's structured result artifact.
 
+A direct-Codex transcript with discovered subagents has a sibling directory
+`<transcript-stem>_subagents/` containing `index.json` and one native
+`<thread-id>.jsonl` rollout snapshot per available child. This also applies to
+Auto Research and per-claim transcripts. The index records `stage` (the
+transcript stem without `_transcript`), relative `parent_transcript`, indexed
+`transcript_lines`, `updated_at`, and `agents`. Each agent records `thread_id`,
+`parent_thread_id`, available `name`, `task`, `task_log_line`, observed `status`,
+relative `log_path`, indexed `log_lines` when available, and `log_status`
+(`archived` or `missing`). Task text is null when unavailable;
+`task_log_line` locates its native message when available, including opaque
+provider-encrypted content, which is preserved unchanged. Unknown status is
+explicit, and an archived snapshot alone does not imply successful completion.
+Resume refreshes records by thread ID and retains earlier archived logs when
+their runtime source is gone; a new attempt archives the sidecar together with
+its parent transcript. No sidecar is created when no child is discovered.
+
 `preprocessing/paper_graph.json` has version 1 and six ordered collections:
 `datasets`, `preprocessing`, `training`, `models`, `validations`, and `claims`.
 The manifest input fingerprint includes the resolved non-secret SiliconFlow

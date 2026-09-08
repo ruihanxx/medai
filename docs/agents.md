@@ -7,8 +7,15 @@ persisted before invocation. Every provider event stream and orchestration
 command-session recovery event is kept as JSONL; a transcript is diagnostic
 evidence, never a structured result. Orchestration records non-protocol output
 unchanged and interprets only object-shaped protocol events needed for session
-identity and command lifecycle; tool output and tool errors remain diagnostic
+identity and command/agent lifecycle; tool output and tool errors remain diagnostic
 content for the agent and never become stage results.
+
+On direct-Codex invocation exit, including provider failure, orchestration
+archives native descendant session rollouts beside the stage transcript and
+indexes their parent IDs, tasks, observed statuses, and log locations as defined
+in `artifacts.md`. Discovery follows session ancestry rather than copying the
+runtime's unrelated histories or credentials. These diagnostic files are not
+injected into agent prompts and do not add a stage-completion gate.
 
 Generic prompts remain provider- and dataset-agnostic. Provider APIs,
 credentials, schemas, and recovery procedures belong only to selected skill

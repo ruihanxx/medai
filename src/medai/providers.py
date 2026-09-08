@@ -5,10 +5,15 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Sequence
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 
-from medai.agent_sessions import pending_command_sessions, settle_unfinished_command_sessions
+from medai.agent_sessions import (
+    archive_codex_subagents,
+    pending_command_sessions,
+    settle_unfinished_command_sessions,
+)
+from medai.artifacts import write_json
 from medai.models import AgentStageResult
 from medai.siliconflow_adapter import SiliconFlowAdapter, SiliconFlowConfig
 
@@ -86,6 +91,15 @@ def run_agent(
                 f"{transcript_path.stem}.attempt-{attempt}{transcript_path.suffix}"
             )
         transcript_path.replace(archived)
+        subagents = transcript_path.with_name(f"{transcript_path.stem}_subagents")
+        if subagents.is_dir():
+            archived_subagents = archived.with_name(f"{archived.stem}_subagents")
+            subagents.rename(archived_subagents)
+            index_path = archived_subagents / "index.json"
+            if index_path.is_file():
+                index = json.loads(index_path.read_text(encoding="utf-8"))
+                index["parent_transcript"] = f"../{archived.name}"
+                write_json(index_path, index)
     if output_last_message_path is not None:
         output_last_message_path.parent.mkdir(parents=True, exist_ok=True)
         output_last_message_path.unlink(missing_ok=True)
@@ -97,7 +111,7 @@ def run_agent(
         settings = SiliconFlowConfig.from_dotenv(siliconflow_config_path)
         adapter_context = SiliconFlowAdapter(settings, artifact_dir=transcript_path.parent)
 
-    with adapter_context as adapter:
+    with adapter_context as adapter, ExitStack() as cleanup:
         command = list(PROVIDER_COMMANDS[provider])
         if resume_session_id is not None:
             command.insert(2, "resume")
@@ -137,6 +151,12 @@ def run_agent(
         except FileNotFoundError as exc:
             raise RuntimeError(f"Provider CLI is not installed: {command[0]}") from exc
 
+        if provider == "codex":
+            cleanup.callback(
+                archive_codex_subagents,
+                transcript_path,
+                Path(environment.get("CODEX_HOME", str(Path.home() / ".codex"))),
+            )
         assert process.stdin is not None
         assert process.stdout is not None
         process.stdin.write(prompt)
