@@ -142,7 +142,6 @@ def test_refinement_candidate_lifecycle(tmp_path: Path, monkeypatch, mode: str) 
         scratch = candidate / ".medai_refine"
         calls.append(kwargs)
         assert candidate.name == "candidate_codebase"
-        assert kwargs["confine_to_working_dir"] is True
         assert (codebase / "prep.py").read_text() == "original\n"
         assert not (candidate.parent / "baseline_codebase").exists()
         if len(calls) == 1:

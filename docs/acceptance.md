@@ -63,7 +63,7 @@ Cohort-refinement coverage includes host-created candidates, frozen audit file
 boundaries, same-session issue-coverage continuation without a scientific failure,
 open node-local dispositions, interrupted promotion recovery, and candidate
 cleanup without losing retained evidence or other stage updates. Remote actions
-are mocked. Provider checks preserve candidate confinement on session resume.
+are mocked. Provider checks preserve the configured invocation policy on session resume.
 
 Auto Research coverage includes claim-driven eligible-V selection, zero-weight
 sparsification, positive normalization, zero-weight exclusion from contract/run/

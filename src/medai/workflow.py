@@ -255,7 +255,6 @@ def _validate_agent_artifacts_with_resume(
     result_schema_path: Path | None = None,
     result_path: Path | None = None,
     environment_remove: Sequence[str] = (),
-    confine_to_working_dir: bool = False,
 ) -> None:
     """Resume a direct Codex stage when its owned artifacts fail validation."""
     repair_turns = 0
@@ -309,7 +308,6 @@ def _validate_agent_artifacts_with_resume(
                 output_last_message_path=result_path,
                 resume_session_id=session_id,
                 environment_remove=environment_remove,
-                confine_to_working_dir=confine_to_working_dir,
             )
             if result_path is not None:
                 _require_agent_stage_completion(result_path, stage_name)
@@ -3510,7 +3508,6 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
             siliconflow_config_path=config.siliconflow_config,
             codex_model=config.codex_model,
             codex_reasoning_effort=config.codex_reasoning_effort,
-            confine_to_working_dir=True,
         )
 
         def validate_outputs() -> None:
@@ -3538,7 +3535,6 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
             transcript_path=transcript_path,
             artifact_paths=[candidate, updates_path],
             validate=validate_outputs,
-            confine_to_working_dir=True,
         )
         proposed = validate_refinement_candidate(
             codebase_dir, candidate, workspace["baseline"], editable_paths,
