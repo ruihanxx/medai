@@ -20,6 +20,7 @@ This retry does not represent another scientific refinement round.
 - Approved execution scope: `{{ execution_scope_path }}`
 - Approved source-availability report: `{{ availability_report_path }}`
 - Generated codebase (read-only for this audit): `{{ codebase_dir }}`
+- Current node overlay and prior issue dispositions (read-only): `{{ node_state_path }}`
 - Code-generation plan and node-local decisions/updates: `{{ codegen_plan_path }}`
 {% if cloud_drive_enabled %}
 - Cloud datasets: {% for dataset in cloud_datasets %}`{{ dataset }}`{% if not loop.last %}, {% endif %}{% endfor %} (drive provider: `{{ drive_provider }}`)
@@ -121,6 +122,10 @@ through its applicable preprocessing boundary or recorded as a diagnosed issue.
 
 Inspect the codebase and its entry points without modifying it. Run
 preprocessing through the final input immediately before model computation.
+Read prior refinement dispositions in the node overlay when reassessing a
+finding. Verify the current implementation and evidence independently; retain
+documented assumptions, contradictions, refutations, and source limitations
+without treating the mere absence of a paper-specified decision as a new defect.
 Execute every runnable P path in dependency order and retain separately
 attributable aggregate evidence for each concrete P product; do not let a
 successful shared branch stand in for an unexecuted sibling.
@@ -254,6 +259,7 @@ Write only this compact JSON object to `{{ report_path }}`:
       "node_id": "P1",
       "description": "Concise evidence-bound statement of the local defect.",
       "route": "preprocessing_fix",
+      "editable_paths": ["src/preprocessing.py", "config/data.yaml"],
       "evidence": ["results/p1_counts.json", "paper Methods"],
       "diagnosis": "The evidence-bound causal preprocessing or data-contract defect, not merely a symptom.",
       "required_fix": "The testable corrected P behavior or artifact condition required for a future PASS."
@@ -269,6 +275,16 @@ issues and at least one issue. Every issue must contain a runnable origin
 `diagnosis`, and a nonblank `required_fix`; add open paper-specific fields such
 as `evidence`, source name, or affected direct inputs when they improve
 auditability. Do not use a fixed kind or severity taxonomy.
+
+For each `preprocessing_fix`, include `editable_paths`: the exact relative
+source/configuration files that refinement may add, modify, or delete. Determine
+this boundary from the inspected implementation, including shared preprocessing
+helpers and any needed new file. No globs, directories, absolute paths, parent
+traversal, or `codegen_plan.json`. Keep model/training/evaluation files and
+results outside the list. A shared file may be listed only for its preprocessing
+portion. Use an empty list when investigation needs no code change. The host
+freezes this list before refinement and checks file boundaries, not scientific
+correctness. Refinement cannot expand it.
 
 Use `preprocessing_fix` only when generated cohort/loading/preprocessing logic
 within refinement scope should change. Paper omissions, ambiguous scientific

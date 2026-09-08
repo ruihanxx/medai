@@ -59,6 +59,12 @@ and smoke tests inside the agent turn. Provider-handoff coverage requires availa
 to execute create, materialization, and remote-inspection commands locally
 between turns of one session.
 
+Cohort-refinement coverage includes host-created candidates, frozen audit file
+boundaries, same-session issue-coverage continuation without a scientific failure,
+open node-local dispositions, interrupted promotion recovery, and candidate
+cleanup without losing retained evidence or other stage updates. Remote actions
+are mocked. Provider checks preserve candidate confinement on session resume.
+
 Auto Research coverage includes claim-driven eligible-V selection, zero-weight
 sparsification, positive normalization, zero-weight exclusion from contract/run/
 score, base-node immutability, new M/V creation, full refinement-graph

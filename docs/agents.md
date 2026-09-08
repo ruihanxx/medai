@@ -108,17 +108,38 @@ orchestration route `preprocessing_fix` or `source_unavailable`; audit defines
 the required outcome, not its implementation. `source_unavailable` requires new
 source evidence at least as broad as the approved availability evidence; paper
 omissions and ambiguous mappings remain preprocessing decisions. Cohort
-refinement confirms each diagnosis against baseline evidence, chooses the
-correction, and may change only cohort construction, loading, preprocessing,
-directly related configuration, and affected P-local updates. It creates
-attempt-local baseline and candidate copies while retaining the authoritative
-code unchanged, develops each fix only in the candidate, compares candidate
-and baseline cohort semantics across
-affected and shared P paths, and promotes only a patch whose every delta is
-required by a reported root cause or is an unavoidable paper-consistent
-consequence.
-Unrelated or paper-contradictory deltas require another candidate revision.
-Model, training, validation semantics, and results remain read-only.
+refinement confirms diagnoses against baseline evidence and may change only
+cohort construction, loading, preprocessing, and directly related configuration.
+Each preprocessing audit issue supplies exact relative `editable_paths`, including
+needed new files; an empty list permits investigation without source edits.
+The host freezes their union before refinement and rejects changed paths outside
+it. Shared-file scientific boundaries remain agent-audited, not host-inferred.
+
+The host creates one attempt-local candidate; the authoritative code remains the
+read-only baseline. Initial and resumed turns work only in that candidate, with
+probes and evidence under `.medai_refine/`. No extra baseline copy is created.
+Refinement compares source/configuration and affected/shared P semantics, reverts
+unrelated changes, and records unavailable verification. It handles every input
+issue through a correction, implemented evidence-based assumption, coherent
+interpretation of a paper contradiction, evidenced refutation, or documented
+limitation and follow-up. True source absence remains subject to availability
+and scope revision. Omissions and contradictions do not block refinement.
+Before returning, the agent checks every issue was actually handled and repeats
+handling for omissions. This coverage review never requests failure exit.
+The host repeats the same session for missing dispositions without consuming
+artifact-repair or scientific rounds. Other invalid artifacts/file-boundary
+violations use the normal bounded repair mechanism. Model, training, validation
+semantics, and results remain read-only, including inside shared files.
+
+Refinement emits only `{node_id, issues}` updates in its own stage artifact;
+`codegen_plan.json` is entirely immutable. The host validates update structure,
+node IDs, issue coverage, unchanged baseline, and file boundaries, without judging
+scientific correctness. It retains evidence, checkpoints the validated file
+manifests, applies recoverable file replacements, synchronizes changed remote
+code when applicable, and merges updates with this round's source. Promotion
+interruptions resume host operations, not the agent. After code/state completion,
+the candidate is deleted; transcripts and compact evidence remain outside it.
+The next independent audit reads the current code and prior issue dispositions.
 Cohort refinement treats graph `paper_result` values only as observed reference
 outputs: they cannot become runtime assertions, reconciliation gates, success
 criteria, or exception conditions. Computed discrepancies remain explicit in
@@ -177,6 +198,8 @@ repairs), missing/invalid audit report, opted-in data-availability provider
 and remote-inspection commands, codegen cloud-materialization commands, Auto
 Research cloud-materialization monitors, base-replication experiments, and one
 remote validation operation.
+Refinement issue-coverage continuations also keep the same session and do not
+consume the two artifact-repair turns.
 Initial and resumed turns append to one transcript. Explicit CLI resume never
 restores a process-local session ID.
 

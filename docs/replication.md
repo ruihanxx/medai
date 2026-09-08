@@ -32,9 +32,10 @@ grouping. One run executes these stages:
 8. Audit checks all runnable preprocessing paths. Each issue has one origin
    node and routes either to preprocessing refinement or source availability.
 9. At most three cohort-refinement rounds may change only P-related code and
-   node updates. Each round follows the
-   [candidate-copy semantic-delta review](agents.md#replication-boundaries)
-   before promotion; M, training, evaluation, and results remain read-only.
+   node updates. Each round handles every audit issue under the
+   [candidate refinement contract](agents.md#replication-boundaries); the host
+   creates, validates, promotes, and removes its candidate. M, training,
+   evaluation, and results remain read-only.
 10. Planning writes one node-free environment/setup step followed by one step
    per earliest runnable-DAG topological layer. Each runnable node appears in
    exactly one layer step via `verifies`, without fallback scale.
@@ -70,7 +71,9 @@ sources. Scope or stage invalidation removes only owned updates.
 Direct Codex completion is artifact-driven. Preprocessing, codegen, audit,
 refinement, planning, replication, and per-claim reporting may resume the same
 temporary session for at most two repair turns when their final artifact is
-missing or invalid. A structured codegen `blocked` or `failed` result is
+missing or invalid. Refinement's issue-coverage review instead continues the
+same session until every issue has a disposition; scientific limitations do not
+make that review fail. A structured codegen `blocked` or `failed` result is
 terminal and does not consume artifact-repair turns. Replication experiment
 handoffs may resume a session repeatedly without consuming artifact-repair turns;
 orchestration rotates that temporary session after six terminal handoffs. Other

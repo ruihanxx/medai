@@ -1,3 +1,18 @@
+{% if coverage_review|default(false) %}
+# Continue refinement issue handling
+
+Continue the same refinement session in its existing candidate. The coverage
+review found issues that still need concrete dispositions:
+
+```text
+{{ artifact_validation_error }}
+```
+
+Return to the original issue-handling workflow for each omitted issue, preserve
+valid work, and then repeat the complete coverage review. Scientific limitations
+may remain when evidenced and recorded with their follow-up. This continuation
+does not mark refinement failed and does not require failure exit.
+{% else %}
 # Resume after artifact validation failure
 
 Your previous `{{ stage_name }}` turn returned successfully, but orchestration
@@ -23,6 +38,7 @@ symptom, and return only after the corrected artifacts satisfy the original
 stage instructions. If the error is caused by an irrecoverable external or
 infrastructure condition, surface that condition explicitly instead of
 fabricating a valid-looking artifact.
+{% endif %}
 {% if experiment_handoff|default(false) %}
 
 Do not launch or monitor an experiment directly during this repair turn. If a

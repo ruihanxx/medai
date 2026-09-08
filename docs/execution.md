@@ -141,6 +141,14 @@ to be released and its completed cloud inventory to remain reloadable; the
 campaign owns a separate instance and copies the inventory as its immutable
 materialization baseline.
 Supported providers are `claude`, `codex`, and `codex-siliconflow`.
+Codex-family cohort-refinement turns use workspace-write sandboxing rooted at
+the candidate, with network access, no approval escalation, no additional
+writable roots, and candidate-local temporary/cache directories. Other stages
+retain their existing invocation policy. Claude retains prompt-based mutation
+boundaries; all providers receive host baseline/delta validation. Same-session
+artifact repair remains direct-Codex-only. Remote refinement probes use the
+attempt's remote candidate; host orchestration synchronizes validated changed
+files and removes remote candidate scratch before completing the round.
 The SiliconFlow dotenv may set `CODEX_CLI_SILICONFLOW_REASONING_EFFORT` to
 `high` or `max`; the adapter forwards it unchanged as the SiliconFlow
 `chat/completions` `reasoning_effort` field. Blank or omitted leaves the field

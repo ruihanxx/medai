@@ -53,6 +53,7 @@ def run_agent(
     resume_session_id: str | None = None,
     append_transcript: bool = False,
     environment_remove: Sequence[str] = (),
+    confine_to_working_dir: bool = False,
     _recover_unfinished_commands: bool = True,
 ) -> str | None:
     """Run an agent and stream its provider JSONL transcript to disk."""
@@ -99,6 +100,16 @@ def run_agent(
 
     with adapter_context as adapter:
         command = list(PROVIDER_COMMANDS[provider])
+        if confine_to_working_dir and provider.startswith("codex"):
+            command.remove("--dangerously-bypass-approvals-and-sandbox")
+            command.extend([
+                "--config", 'sandbox_mode="workspace-write"',
+                "--config", 'approval_policy="never"',
+                "--config", "sandbox_workspace_write.writable_roots=[]",
+                "--config", "sandbox_workspace_write.network_access=true",
+                "--config", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+                "--config", "sandbox_workspace_write.exclude_slash_tmp=true",
+            ])
         if resume_session_id is not None:
             command.insert(2, "resume")
         command.extend(TRANSCRIPT_FLAGS[provider])
@@ -107,6 +118,13 @@ def run_agent(
         if output_last_message_path is not None:
             command.extend(["--output-last-message", str(output_last_message_path)])
         environment = os.environ.copy()
+        if confine_to_working_dir:
+            scratch = working_dir / ".medai_refine"
+            for name, directory in (("TMPDIR", "tmp"), ("XDG_CACHE_HOME", "cache")):
+                target = scratch / directory
+                target.mkdir(parents=True, exist_ok=True)
+                environment[name] = str(target)
+            environment["PYTHONDONTWRITEBYTECODE"] = "1"
         for name in environment_remove:
             environment.pop(name, None)
         if adapter is not None:
@@ -206,6 +224,7 @@ def run_agent(
                                 output_last_message_path=recovery_result_path,
                                 resume_session_id=recovery_session_id,
                                 environment_remove=environment_remove,
+                                confine_to_working_dir=confine_to_working_dir,
                                 _recover_unfinished_commands=False,
                             )
                         finally:

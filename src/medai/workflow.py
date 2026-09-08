@@ -19,6 +19,16 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from medai.artifacts import load_model, write_json
+from medai.cohort_refinement import (
+    REFINEMENT_CACHE_NAMES,
+    REFINEMENT_SCRATCH,
+    UnhandledRefinementIssues,
+    promote_refinement_candidate,
+    read_refinement_updates,
+    refinement_manifest,
+    validate_editable_paths,
+    validate_refinement_candidate,
+)
 from medai.computation_providers import get_provider_adapter
 from medai.computation_providers import skills_dir as _skills_dir
 from medai.config import AutoResearchConfig, RunConfig
@@ -245,6 +255,7 @@ def _validate_agent_artifacts_with_resume(
     result_schema_path: Path | None = None,
     result_path: Path | None = None,
     environment_remove: Sequence[str] = (),
+    confine_to_working_dir: bool = False,
 ) -> None:
     """Resume a direct Codex stage when its owned artifacts fail validation."""
     repair_turns = 0
@@ -260,7 +271,8 @@ def _validate_agent_artifacts_with_resume(
                 raise RuntimeError(
                     f"Codex {stage_name} artifacts failed validation without a session ID"
                 ) from exc
-            if repair_turns >= MAX_AGENT_ARTIFACT_REPAIR_TURNS:
+            coverage_review = isinstance(exc, UnhandledRefinementIssues)
+            if not coverage_review and repair_turns >= MAX_AGENT_ARTIFACT_REPAIR_TURNS:
                 raise RuntimeError(
                     f"{stage_name} artifacts still failed validation after "
                     f"{MAX_AGENT_ARTIFACT_REPAIR_TURNS} resumed repair turns: {exc}"
@@ -283,6 +295,7 @@ def _validate_agent_artifacts_with_resume(
                 artifact_paths=artifact_paths,
                 artifact_validation_error=str(exc),
                 structured_stage_result=result_schema_path is not None,
+                coverage_review=coverage_review,
             )
             run_agent(
                 provider=config.provider,
@@ -296,10 +309,12 @@ def _validate_agent_artifacts_with_resume(
                 output_last_message_path=result_path,
                 resume_session_id=session_id,
                 environment_remove=environment_remove,
+                confine_to_working_dir=confine_to_working_dir,
             )
             if result_path is not None:
                 _require_agent_stage_completion(result_path, stage_name)
-            repair_turns += 1
+            if not coverage_review:
+                repair_turns += 1
             prompt_index += 1
 
 
@@ -815,6 +830,11 @@ def read_audit_report(report_path: Path) -> dict[str, Any]:
             not in {"preprocessing_fix", "source_unavailable"}
         ):
             raise RuntimeError(f"Audit report contains an invalid issue: {report_path}")
+        if issue.get("route", "preprocessing_fix") == "preprocessing_fix":
+            try:
+                validate_editable_paths(issue.get("editable_paths"))
+            except ValueError as exc:
+                raise RuntimeError(f"Audit report has invalid editable_paths: {exc}") from exc
     if (verdict == "PASS" and issues) or (verdict == "FAIL" and not issues):
         raise RuntimeError(
             "Audit report PASS requires no issues and FAIL requires at least one issue: "
@@ -3178,6 +3198,7 @@ def audit_agent_node(state: WorkflowState) -> dict[str, str | bool]:
         paper_graph_path=state["paper_graph_path"],
         execution_scope_path=state["execution_scope_path"],
         availability_report_path=availability_report_path,
+        node_state_path=state["node_state_path"],
         codegen_plan_path=Path(state["codebase_dir"]) / "codegen_plan.json",
         codebase_dir=state["codebase_dir"],
         data_dir=config.data,
@@ -3339,36 +3360,47 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
     _ensure_stage_scope(pipeline_state, "cohort_refine_agent", scope.scope_sha256)
     audit_checkpoints = pipeline_state.get_stage_checkpoints("audit_agent")
     audit_report_path = Path(str(audit_checkpoints.get("report_path", "")))
+    audit_report = read_audit_report(audit_report_path)
     if (
         not pipeline_state.is_stage_completed("audit_agent")
         or audit_checkpoints.get("verdict") != "FAIL"
         or audit_checkpoints.get("refinement_exhausted", False)
-        or read_audit_verdict(audit_report_path) != "FAIL"
+        or audit_report["verdict"] != "FAIL"
     ):
         raise RuntimeError("Cohort refinement requires a non-exhausted failed audit")
-
     refine_round = int(audit_checkpoints.get("refine_rounds_used", 0))
     if not 1 <= refine_round <= MAX_COHORT_REFINE_ROUNDS:
         raise RuntimeError(f"Invalid cohort refinement round: {refine_round}")
+
+    codebase_dir = Path(state["codebase_dir"])
     checkpoints = pipeline_state.get_stage_checkpoints("cohort_refine_agent")
+    workspace = checkpoints.get("workspace", {})
+    audit_sha256 = sha256_file(audit_report_path)
+    same_workspace = (
+        workspace.get("round") == refine_round
+        and workspace.get("audit_sha256") == audit_sha256
+        and workspace.get("scope_sha256") == scope.scope_sha256
+    )
     if (
         pipeline_state.is_stage_completed("cohort_refine_agent")
         and checkpoints.get("completed_round") == refine_round
-        and checkpoints.get("audit_report_path") == str(audit_report_path)
+        and same_workspace
     ):
-        refined_plan = load_model(
-            Path(state["codebase_dir"]) / "codegen_plan.json",
-            CodegenPlan,
+        attempt_dir = Path(workspace["attempt_dir"])
+        updates = read_refinement_updates(
+            attempt_dir / "refinement" / "node_updates.json",
+            audit_report["issues"],
+            set(scope.runnable_node_ids),
         )
         merge_node_updates(
-            Path(state["node_state_path"]),
-            _paper_graph(state),
-            scope.paper_graph_sha256,
-            f"cohort_refine:{refine_round:03d}",
-            refined_plan.node_updates,
+            Path(state["node_state_path"]), _paper_graph(state), scope.paper_graph_sha256,
+            f"cohort_refine:{refine_round:03d}", updates,
         )
+        candidate = attempt_dir / "candidate_codebase"
+        if candidate.exists():
+            shutil.rmtree(candidate)
         print("resume cohort_refine_agent stage: skipped (already completed)")
-        return {"codebase_dir": state["codebase_dir"]}
+        return {"codebase_dir": str(codebase_dir)}
 
     print("enter cohort refine agent stage")
     previous_status = pipeline_state.get_stage_status("cohort_refine_agent")
@@ -3378,10 +3410,39 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
     )
     pipeline_state.start_stage("cohort_refine_agent")
     _checkpoint_stage_scope(pipeline_state, "cohort_refine_agent", scope.scope_sha256)
-    attempt_dir = config.output / "codegen" / "cohort_refine" / f"attempt_{refine_round:03d}"
-    attempt_dir.mkdir(parents=True, exist_ok=True)
+    if not same_workspace:
+        attempt = pipeline_state.state["stages"]["cohort_refine_agent"]["attempts"]
+        attempt_dir = config.output / "codegen" / "cohort_refine" / f"attempt_{attempt:03d}"
+        # Never repurpose an existing attempt's source or diagnostic artifacts.
+        while attempt_dir.exists():
+            attempt += 1
+            attempt_dir = attempt_dir.with_name(f"attempt_{attempt:03d}")
+        attempt_dir.mkdir(parents=True)
+        workspace = {
+            "round": refine_round,
+            "audit_sha256": audit_sha256,
+            "scope_sha256": scope.scope_sha256,
+            "attempt_dir": str(attempt_dir),
+            "baseline": refinement_manifest(codebase_dir),
+            "candidate_ready": False,
+        }
+        pipeline_state.update_stage_checkpoints("cohort_refine_agent", {"workspace": workspace})
+    attempt_dir = Path(workspace["attempt_dir"])
+    candidate = attempt_dir / "candidate_codebase"
+    scratch = candidate / REFINEMENT_SCRATCH
+    retained = attempt_dir / "refinement"
     transcript_path = attempt_dir / "cohort_refine_transcript.jsonl"
-    codebase_dir = Path(state["codebase_dir"])
+    if not workspace["candidate_ready"]:
+        if candidate.exists():
+            shutil.rmtree(candidate)
+        shutil.copytree(
+            codebase_dir, candidate, symlinks=True,
+            ignore=shutil.ignore_patterns(*REFINEMENT_CACHE_NAMES, REFINEMENT_SCRATCH),
+        )
+        scratch.mkdir()
+        workspace["candidate_ready"] = True
+        pipeline_state.update_stage_checkpoints("cohort_refine_agent", {"workspace": workspace})
+    updates_path = scratch / "node_updates.json"
     codegen_plan_path = codebase_dir / "codegen_plan.json"
     codegen_plan = load_model(codegen_plan_path, CodegenPlan)
     cloud_data = _uses_cloud_data(config, codegen_plan)
@@ -3394,79 +3455,152 @@ def cohort_refine_agent_node(state: WorkflowState) -> dict[str, str]:
     )
     remote_working_dir = (
         codegen_plan.remote_compute.remote_working_dir
-        if cloud_data and codegen_plan.remote_compute is not None
-        else None
+        if codegen_plan.remote_compute is not None else None
     )
-    prompt_path = render_prompt(
-        "cohort_refine/session_instructions.md",
-        config.output / "prompts" / f"cohort_refine_attempt_{refine_round:03d}.md",
-        paper_markdown=state["paper_markdown"],
-        paper_graph_path=state["paper_graph_path"],
-        execution_scope_path=state["execution_scope_path"],
-        codebase_dir=codebase_dir,
-        refinement_workspace=attempt_dir,
-        codegen_plan_path=codegen_plan_path,
-        audit_report_path=audit_report_path,
-        data_dir=config.data,
-        datasets=config.dataset_names,
-        data_paths=config.dataset_paths,
-        cloud_drive_enabled=cloud_data,
-        cloud_dataset=", ".join(config.selected_cloud_datasets),
-        cloud_datasets=_active_cloud_datasets(state),
-        drive_provider=config.drive_provider,
-        computation_provider_reference=config.computation_provider_reference,
-        drive_reference=config.drive_reference,
-        remote_compute_state_path=config.output / "remote_compute" / "instance.json",
-        remote_dataset_dir=(cloud_drive_state.get("target_path") if cloud_drive_state else None),
-        remote_working_dir=remote_working_dir,
-        skills_dir=skills_dir(),
-        refine_round=refine_round,
-        resuming=previous_status in {"running", "failed"},
+    remote_candidate_dir = (
+        f"{remote_working_dir.rstrip('/')}/cohort_refine/{attempt_dir.name}/candidate_codebase"
+        if remote_working_dir else None
     )
-    session_id = run_agent(
-        provider=config.provider,
-        prompt_path=prompt_path,
-        working_dir=codebase_dir,
-        transcript_path=transcript_path,
-        siliconflow_config_path=config.siliconflow_config,
-        codex_model=config.codex_model,
-        codex_reasoning_effort=config.codex_reasoning_effort,
-    )
-    _validate_agent_artifacts_with_resume(
-        config=config,
-        stage_name=f"cohort_refine_attempt_{refine_round:03d}",
-        session_id=session_id,
-        working_dir=codebase_dir,
-        transcript_path=transcript_path,
-        artifact_paths=[codegen_plan_path],
-        validate=lambda: load_model(codegen_plan_path, CodegenPlan),
-    )
-    refined_plan = load_model(codegen_plan_path, CodegenPlan)
-    unknown_update_ids = {
-        update.node_id for update in refined_plan.node_updates
-    } - set(scope.runnable_node_ids)
-    if unknown_update_ids:
-        raise ValueError(
-            f"Cohort refinement updates inactive graph nodes: {sorted(unknown_update_ids)}"
+    editable_paths = {
+        path for issue in audit_report["issues"]
+        if issue.get("route", "preprocessing_fix") == "preprocessing_fix"
+        for path in validate_editable_paths(issue.get("editable_paths"))
+    }
+
+    if "proposed" not in workspace:
+        prompt_path = render_prompt(
+            "cohort_refine/session_instructions.md",
+            config.output / "prompts" / f"cohort_refine_{attempt_dir.name}.md",
+            paper_markdown=state["paper_markdown"],
+            paper_graph_path=state["paper_graph_path"],
+            execution_scope_path=state["execution_scope_path"],
+            node_state_path=state["node_state_path"],
+            codegen_plan_path=codegen_plan_path,
+            codebase_dir=codebase_dir,
+            candidate_codebase=candidate,
+            candidate_scratch=scratch,
+            node_updates_path=updates_path,
+            retained_evidence_dir=retained,
+            editable_paths=sorted(editable_paths),
+            audit_report_path=audit_report_path,
+            data_dir=config.data,
+            data_paths=config.dataset_paths,
+            cloud_datasets=_active_cloud_datasets(state),
+            drive_provider=config.drive_provider,
+            computation_provider_reference=config.computation_provider_reference,
+            drive_reference=config.drive_reference,
+            remote_compute_state_path=config.output / "remote_compute" / "instance.json",
+            remote_dataset_dir=(
+                cloud_drive_state.get("target_path") if cloud_drive_state
+                else codegen_plan.remote_compute.remote_dataset_dir
+                if codegen_plan.remote_compute else None
+            ),
+            remote_working_dir=remote_working_dir,
+            remote_candidate_dir=remote_candidate_dir,
+            skills_dir=skills_dir(),
+            refine_round=refine_round,
+            resuming=previous_status in {"running", "failed"} and same_workspace,
         )
+        session_id = run_agent(
+            provider=config.provider,
+            prompt_path=prompt_path,
+            working_dir=candidate,
+            transcript_path=transcript_path,
+            siliconflow_config_path=config.siliconflow_config,
+            codex_model=config.codex_model,
+            codex_reasoning_effort=config.codex_reasoning_effort,
+            confine_to_working_dir=True,
+        )
+
+        def validate_outputs() -> None:
+            validate_refinement_candidate(
+                codebase_dir, candidate, workspace["baseline"], editable_paths,
+            )
+            read_refinement_updates(
+                updates_path, audit_report["issues"], set(scope.runnable_node_ids),
+            )
+            for name in ("scripts", "results"):
+                source = scratch / name
+                if source.is_symlink() or (
+                    source.exists() and (
+                        not source.is_dir()
+                        or any(path.is_symlink() for path in source.rglob("*"))
+                    )
+                ):
+                    raise ValueError(f"Retained refinement evidence must be a link-free directory: {name}")
+
+        _validate_agent_artifacts_with_resume(
+            config=config,
+            stage_name=f"cohort_refine_{attempt_dir.name}",
+            session_id=session_id,
+            working_dir=candidate,
+            transcript_path=transcript_path,
+            artifact_paths=[candidate, updates_path],
+            validate=validate_outputs,
+            confine_to_working_dir=True,
+        )
+        proposed = validate_refinement_candidate(
+            codebase_dir, candidate, workspace["baseline"], editable_paths,
+        )
+        updates = read_refinement_updates(
+            updates_path, audit_report["issues"], set(scope.runnable_node_ids),
+        )
+        retained.mkdir(exist_ok=True)
+        write_json(retained / "node_updates.json", [
+            update.model_dump(mode="json") for update in updates
+        ])
+        for name in ("scripts", "results"):
+            source = scratch / name
+            if source.exists():
+                shutil.copytree(source, retained / name, dirs_exist_ok=True)
+        workspace["proposed"] = proposed
+        pipeline_state.update_stage_checkpoints("cohort_refine_agent", {"workspace": workspace})
+
+    # From this checkpoint onward, resume the host's promotion, never the agent.
+    proposed = workspace["proposed"]
+    promote_refinement_candidate(codebase_dir, candidate, workspace["baseline"], proposed)
+    if remote_working_dir:
+        provider_state = config.output / "remote_compute" / "instance.json"
+        for relative in sorted(workspace["baseline"].keys() | proposed.keys()):
+            if workspace["baseline"].get(relative) == proposed.get(relative):
+                continue
+            target = str(PurePosixPath(remote_working_dir) / relative)
+            if relative in proposed:
+                _run_computation_provider_action(
+                    provider_state, "exec",
+                    arguments=["--", "mkdir", "-p", "--", str(PurePosixPath(target).parent)],
+                    expected_provider=config.computation_provider,
+                )
+                _run_computation_provider_action(
+                    provider_state, "upload",
+                    arguments=["--source", str(codebase_dir / relative), "--remote", target],
+                    expected_provider=config.computation_provider,
+                )
+            else:
+                _run_computation_provider_action(
+                    provider_state, "exec", arguments=["--", "rm", "-f", "--", target],
+                    expected_provider=config.computation_provider,
+                )
+        _run_computation_provider_action(
+            provider_state, "exec",
+            arguments=["--", "rm", "-rf", "--", remote_candidate_dir],
+            expected_provider=config.computation_provider,
+        )
+    updates = read_refinement_updates(
+        retained / "node_updates.json", audit_report["issues"], set(scope.runnable_node_ids),
+    )
     merge_node_updates(
-        Path(state["node_state_path"]),
-        _paper_graph(state),
-        scope.paper_graph_sha256,
-        f"cohort_refine:{refine_round:03d}",
-        refined_plan.node_updates,
+        Path(state["node_state_path"]), _paper_graph(state), scope.paper_graph_sha256,
+        f"cohort_refine:{refine_round:03d}", updates,
     )
     pipeline_state.update_stage_checkpoints(
         "cohort_refine_agent",
-        {
-            "completed_round": refine_round,
-            "audit_report_path": str(audit_report_path),
-        },
+        {"completed_round": refine_round, "audit_report_path": str(audit_report_path)},
     )
     pipeline_state.complete_stage(
-        "cohort_refine_agent",
-        [str(codebase_dir), str(attempt_dir), str(transcript_path)],
+        "cohort_refine_agent", [str(codebase_dir), str(retained), str(transcript_path)],
     )
+    shutil.rmtree(candidate)
     return {"codebase_dir": str(codebase_dir)}
 
 

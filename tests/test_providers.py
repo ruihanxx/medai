@@ -119,7 +119,8 @@ def test_codex_records_tool_error_output_without_treating_it_as_agent_status(
     assert '"reported partition arithmetic"' in transcript_text
 
 
-def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Path, monkeypatch):
+@pytest.mark.parametrize("confined", [False, True])
+def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Path, monkeypatch, confined):
     processes = []
 
     def fake_popen(command, **kwargs):
@@ -143,6 +144,7 @@ def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Pa
         siliconflow_config_path=None,
         output_schema_path=schema,
         output_last_message_path=initial_result,
+        confine_to_working_dir=confined,
     )
 
     assert session_id == "thread-123"
@@ -168,6 +170,7 @@ def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Pa
         output_schema_path=schema,
         output_last_message_path=resumed_result,
         resume_session_id=session_id,
+        confine_to_working_dir=confined,
     )
 
     assert resumed == "thread-123"
@@ -176,6 +179,9 @@ def test_codex_command_turn_uses_schema_and_explicit_session_resume(tmp_path: Pa
     assert "--last" not in processes[1].command
     assert transcript.read_text(encoding="utf-8").count('"type":"done"') == 2
     assert not (tmp_path / "replication_transcript.attempt-1.jsonl").exists()
+    for process in processes:
+        assert ('sandbox_mode="workspace-write"' in process.command) is confined
+        assert ("--dangerously-bypass-approvals-and-sandbox" in process.command) is not confined
 
 
 def test_codex_fresh_session_can_append_existing_transcript(tmp_path: Path, monkeypatch):

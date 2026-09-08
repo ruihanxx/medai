@@ -32,7 +32,10 @@ runs/<run_id>/
 │   │   ├── repo_calibration_transcript.jsonl
 │   │   └── attempt_<NNN>/{baseline_codebase/,candidate_codebase/}
 │   ├── audit/attempt_<NNN>/{audit_report.json,audit_transcript.jsonl,scripts/,results/}
-│   ├── cohort_refine/attempt_<NNN>/cohort_refine_transcript.jsonl
+│   ├── cohort_refine/attempt_<NNN>/
+│   │   ├── cohort_refine_transcript.jsonl
+│   │   ├── candidate_codebase/           # temporary; removed after promotion
+│   │   └── refinement/{node_updates.json,scripts/,results/}
 │   └── scope_revision_<scope-sha256>.json
 ├── plan/{replicate_plan.json,plan_transcript.jsonl}
 ├── replication/
@@ -124,6 +127,27 @@ idempotently by `(source,node_id)`. Stages own distinct source names; audit and
 refinement attempts remain distinguishable. Invalidation removes only the
 invalidated sources. Replication rollback archives artifacts and removes the
 old `replicate_agent` updates.
+
+Refinement writes a JSON list of exactly `{node_id, issues}` objects to
+`candidate_codebase/.medai_refine/node_updates.json`, reusing `PendingNodeUpdate`
+and the open `NodeIssue` schema. Each input audit issue has one same-origin
+disposition with `audit_issue` (one-based position in that report) and a nonblank
+`resolution`; additional scientific evidence/assumption/conflict fields remain
+open. Additional findings may omit the reference. The host checks coverage,
+not whether each scientific limitation was eliminated, assigns
+`cohort_refine:<round>`, and preserves other sources. It retains the updates and
+scratch `scripts/`/`results/` in `refinement/`; citations use this retained path.
+Candidate-only environments and caches are discarded.
+
+The refinement stage's `workspace` checkpoint binds the scientific round, audit
+and scope hashes, attempt directory, baseline file/mode manifest, and copy readiness. A
+validated `proposed` manifest marks the beginning of host promotion. Recovery
+accepts only recorded before/after file states, completes code replacement and
+node-state merge idempotently, then records completion and deletes the candidate.
+Completed-stage resume reloads retained updates without requiring the candidate.
+No baseline code copy is retained. Audit `preprocessing_fix` issues must supply
+safe, exact relative `editable_paths`; the host rejects edits outside their
+frozen union, links at changed paths, and all changes to `codegen_plan.json`.
 
 Replication must update every runnable node exactly once with a non-empty
 actual result and at least one real evidence path. Results may be numeric,
