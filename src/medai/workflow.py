@@ -2383,6 +2383,7 @@ def data_availability_agent_node(state: WorkflowState) -> dict[str, str]:
     prompt_path = render_prompt(
         "data_availability/session_instructions.md",
         config.output / "prompts" / f"data_availability_attempt_{attempt:03d}.md",
+        skills_dir=skills_dir(),
         paper_markdown=state["paper_markdown"],
         paper_graph_path=state["paper_graph_path"],
         resources_path=resources_path,
@@ -3977,6 +3978,7 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
         prompt_path = render_prompt(
             "report/session_instructions.md",
             config.output / "prompts" / f"report_{claim.id}.md",
+            skills_dir=skills_dir(),
             claim_report_path=fragment_path,
             claim_id=claim.id,
             paper_markdown=state["paper_markdown"],
@@ -4062,6 +4064,7 @@ def report_agents_node(state: WorkflowState) -> dict[str, str]:
     final_prompt_path = render_prompt(
         "report/final_session_instructions.md",
         config.output / "prompts" / "report_final.md",
+        skills_dir=skills_dir(),
         report_path=report_path,
         run_dir=config.output,
         paper_markdown=state["paper_markdown"],

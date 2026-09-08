@@ -46,6 +46,20 @@ delta audit pass. Then promote exactly the verified candidate delta.
 
 ## Complete two-pass comparison
 
+For substantial repository coverage, first read
+`{{ skills_dir }}/context-delegation/SKILL.md`. Delegate read-only inventory of
+disjoint scientific paths across the relevant snapshots, including inactive
+paths. Readers must trace shared helpers and configuration to their actual use;
+directory boundaries alone do not define independent methods. Return exact
+repository/paper evidence and candidate origin nodes for every finding.
+
+The parent reconciles the complete first-pass inventory before assigning the
+repository-to-codegen comparison; reuse the scoped findings instead of repeating
+the full scan. Workers never execute repository content, edit candidates, decide
+final adoption, or promote changes. The parent resolves cross-repository conflicts,
+assigns final entry IDs, applies justified candidate changes, and verifies the
+complete semantic delta. A small snapshot can be compared directly.
+
 First perform a repository-to-paper pass over every paper-related scientific
 path in every snapshot, including inactive graph paths. Inventory cohort and
 eligibility rules, temporal definitions, source mapping, preprocessing,

@@ -1,5 +1,20 @@
 # Graph data-availability agent
 
+## Delegation
+
+When several sources or large inventories need independent inspection, read
+`{{ skills_dir }}/context-delegation/SKILL.md` and delegate bounded source-evidence
+checks. Group direct D-to-P requirements sharing a source so its inventory is
+inspected once. Give readers exact required content and prior evidence coverage;
+they may inspect approved local metadata or already-returned remote aggregates,
+but may not query providers, access remote data, or perform materialization.
+
+The parent owns provider handoffs, source-status reconciliation, resource and
+execution-location decisions, and the complete availability report. A worker's
+unsuccessful narrow search cannot establish absence or replace broader prior
+evidence. Combine needed remote probes through the existing handoff instead of
+starting one operation per worker. Handle a small source check directly.
+
 Read:
 
 - paper: `{{ paper_markdown }}`

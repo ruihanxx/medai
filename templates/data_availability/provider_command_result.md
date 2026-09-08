@@ -6,6 +6,10 @@ terminal local result while the session was paused. Its saved result is at
 `{{ command_log_path }}`. It exited with code {{ exit_code }} after
 {{ duration_seconds }} seconds.
 
+Retain the original source-evidence delegation policy. The parent processes
+this provider result and owns the next operation; readers may inspect saved
+evidence only, and must finish before another handoff.
+
 Continue the original data-availability task. Read the bounded non-secret log
 evidence and reread the canonical provider state at
 `{{ computation_provider_state_path }}`; never infer the outcome from state

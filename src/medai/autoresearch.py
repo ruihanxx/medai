@@ -682,6 +682,7 @@ def autoresearch_validation_setup_node(state: AutoResearchState) -> dict[str, An
     prompt_path = render_prompt(
         "autoresearch/validation_contracts/session_instructions.md",
         config.output / "prompts" / "validation_setup" / "contracts.md",
+        skills_dir=skills_dir(),
         paper_graph_path=paper_graph_path,
         weights_path=weights_path,
         codegen_plan_path=base_codebase_dir / "codegen_plan.json",
@@ -738,6 +739,7 @@ def _run_idea_generation(config: AutoResearchConfig, round_index: int) -> Path:
     prompt_path = render_prompt(
         "autoresearch/idea_generation/session_instructions.md",
         config.output / "prompts" / f"round_{round_index:03d}" / "idea_generation.md",
+        skills_dir=skills_dir(),
         paper_markdown=config.base_run / "preprocessing" / "paper.md",
         eligibility_path=config.output / "eligibility" / "eligibility.json",
         weights_path=config.output / "validation_setup" / "validation_weights.json",
@@ -859,6 +861,7 @@ def _run_codegen(
         / f"round_{round_index:03d}"
         / f"idea_{idea_index:02d}"
         / prompt_name,
+        skills_dir=skills_dir(),
         idea_id=idea_id,
         paper_markdown=config.base_run / "preprocessing" / "paper.md",
         ideas_path=ideas_path,
@@ -975,6 +978,7 @@ def _run_codegen_audit(
         / f"round_{round_index:03d}"
         / f"idea_{idea_index:02d}"
         / f"audit_{attempt}.md",
+        skills_dir=skills_dir(),
         idea_id=idea_id,
         contracts_path=contracts_path,
         base_codebase_dir=config.base_run / "codegen" / "codebase",
@@ -2080,6 +2084,7 @@ def _run_assessment(
         / f"round_{round_index:03d}"
         / f"idea_{idea_index:02d}"
         / "assessment.md",
+        skills_dir=skills_dir(),
         idea_id=idea_id,
         contracts_path=(
             config.output / "validation_setup" / "validation_contracts.json"
@@ -2391,6 +2396,7 @@ def autoresearch_report_node(state: AutoResearchState) -> dict[str, str]:
     prompt_path = render_prompt(
         "autoresearch/report/session_instructions.md",
         config.output / "prompts" / "final_report.md",
+        skills_dir=skills_dir(),
         eligibility_path=config.output / "eligibility" / "eligibility.json",
         weights_path=config.output / "validation_setup" / "validation_weights.json",
         contracts_path=(

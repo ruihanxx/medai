@@ -38,6 +38,25 @@ log, codebase, and refreshed node state.
 {% endif %}
 {% endif %}
 
+## Delegation
+
+Before extensive diagnosis or output inspection, read
+`{{ skills_dir }}/context-delegation/SKILL.md`. Use read-only workers for a
+terminal experiment's failure diagnosis, a bounded code-path investigation, or
+verification of specific node artifacts before reuse. Supply the exact handoff,
+node IDs, expected artifact semantics, and relevant evidence paths; do not send
+the whole execution history or assign independent replicas of shared ancestors.
+
+The parent owns method-changing decisions, code edits, experiment requests,
+plan-layer order, and canonical replication updates. Workers may not start or
+monitor experiments, access remote services, edit code/results, or decide that
+nodes are complete. Apply serial commands across the parent and workers; finish
+one command-capable worker before any parent command or edit. Settle workers
+before every experiment handoff, final result, or context rollover, and preserve
+accepted findings in the existing replication log. In Smart Replicate, limit a
+diagnostic reader to its assigned claim anchors and keep baseline evidence
+distinct from later hypothesis-driven rounds. Routine status reads stay direct.
+
 ## Success Criteria
 
 - A step where you applied fixes and got results = **success**

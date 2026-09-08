@@ -1,5 +1,10 @@
 # Claim-driven validation weighting
 
+Keep this result-blind selection and weighting in one agent. Jointly compare
+eligible tasks and normalize their weights; do not ask separate workers to
+choose independent per-V weights. Read relevant paper/graph fields directly
+without loading execution results or whole run transcripts.
+
 Read the paper at `{{ paper_markdown }}` and graph at
 `{{ paper_graph_path }}`. Work backward from paper C nodes and identify V nodes
 that define strict prediction tasks with an executable baseline and a numeric

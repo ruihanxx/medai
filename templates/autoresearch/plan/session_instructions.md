@@ -6,6 +6,20 @@ You are generating a step-by-step execution plan for refinement
 code as immutable and plan how to run and evaluate only the newly added
 refinement variant.
 
+## Delegation
+
+Keep straightforward refined-V planning direct. For several substantial paths,
+read `{{ skills_dir }}/context-delegation/SKILL.md` and delegate read-only tracing
+of audited refinement entry points, prerequisites, and produced artifacts for
+assigned positive-V contracts. Group shared dependencies and provide the exact
+frozen evaluator requirements. Readers do not run code, change audited source,
+prepare remote environments, or operate the campaign pool.
+
+The parent owns cloud preparation/monitor handoffs and the single plan. Verify
+refinement-only execution, shared prerequisite reuse, and every endpoint of each
+required V block; never delegate baseline execution or treat a child's path
+sketch as a complete plan. Finish workers before returning a foreground monitor.
+
 ## Inputs:
 
 - Frozen positive-weight V contracts: `{{ contracts_path }}`

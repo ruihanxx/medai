@@ -91,6 +91,23 @@ Never use the `computation-provider` skill during this stage.
 
 ## Workflow
 
+### Delegation
+
+For substantial independent audit questions, read
+`{{ skills_dir }}/context-delegation/SKILL.md`. Build the runnable P checklist and
+identify shared preprocessing products first. Delegate read-only diagnosis by
+coherent P path or scientific question, using exact paper expectations, source
+code, and already-produced aggregate evidence. Include the applicable counting
+unit, population, and cohort-size comparison rule in each task contract.
+
+The parent owns preprocessing execution and remote access, produces shared
+evidence once, and executes any justified additional probes in the audit-only
+workspace. Workers propose focused probes when evidence is missing; they do not
+rerun the pipeline, change preprocessing, or train models. The parent checks
+cross-path consistency, deduplicates root causes at their origin nodes, supplies
+required correction outcomes and editable paths, and covers every runnable P
+before writing the report. Finding a failure does not end other assigned checks.
+
 ### 1. Establish the paper's preprocessing expectations
 
 Read the Methods, cohort/data, preprocessing, and relevant table/figure text.

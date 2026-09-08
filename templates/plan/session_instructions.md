@@ -40,6 +40,21 @@ directory. Do not upload, download, remount, or rematerialize raw data.
 {% endif %}
 
 
+## Delegation
+
+Keep a small plan in one agent. For a large generated pipeline, read
+`{{ skills_dir|default("<skills-directory>") }}/context-delegation/SKILL.md` and
+delegate read-only entry-point and artifact-flow tracing for coherent branches.
+Give each reader the assigned nodes, direct dependencies, and relevant source
+paths. Return concrete consumed/produced artifacts, required configuration, and
+source evidence; do not construct separate plans or run experiments.
+
+The parent owns environment/remote preparation and the final setup-plus-layer
+plan. Reconcile shared artifacts and every V endpoint, preserve the exact
+host-supplied layers, and perform the complete reverse C-to-D self-audit. Branch
+assignments cannot split or reorder plan layers. Inspect bounded code/config
+and result fields instead of dumping complete remote responses or raw data.
+
 ## Runnable claim graph and node artifacts
 
 The immutable graph payload is:

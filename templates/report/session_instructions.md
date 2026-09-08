@@ -48,6 +48,22 @@ Exact local/ancestor issues collected by orchestration:
 {{ lineage_issues_json }}
 ```
 
+## Delegation
+
+This invocation already owns one claim; write a small fragment directly. If its
+ancestor evidence or Figure/Table comparison is large, read
+`{{ skills_dir }}/context-delegation/SKILL.md` and delegate read-only lookup or
+content checks for explicit artifacts in this claim's real lineage. Return
+source-exact quotes, numeric components with units/conditions, paths, and gaps.
+Do not expand to other claims, search unrelated run history, execute code, or
+create new scientific issues. For a blocked claim, follow the blocking evidence
+directly without delegating a search for execution results.
+
+The parent verifies decisive original and reproduced evidence, traces shared
+ancestors, covers every required component and supplied issue, and writes the
+single fragment and final assessment. A reader's summary is not a substitute
+for the required content-level comparison.
+
 ## Evidence audit
 
 Inspect cited evidence and the underlying output files rather than trusting labels or copying summaries. Never invent paper text, values, artifact content, experimental outputs, causal explanations, or evidence. Preserve discrepancies instead of explaining them away.

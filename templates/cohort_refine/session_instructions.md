@@ -84,6 +84,23 @@ compute or the `computation-provider` skill.{% endif %}
 
 ## Workflow
 
+### Delegation
+
+When several issues require substantial investigation, read
+`{{ skills_dir }}/context-delegation/SKILL.md`. Group issues sharing P semantics
+or editable files, then delegate read-only confirmation of root causes against
+the baseline and saved probe evidence. After candidate edits, a scoped reviewer
+can check the changed semantics and affected shared consumers. Give reviewers
+the exact audit issues, frozen editable paths, and stable code/evidence versions.
+
+The parent owns candidate edits, baseline/candidate probes, remote staging,
+cross-issue decisions, and every issue disposition. Workers may propose fixes
+but may not mutate candidate code, expand editable paths, create extra baseline
+copies, or promote/synchronize code. Reuse aggregate probes across related issues
+and wait for readers before changing their inputs. Handle a small coupled fix
+directly; on resume, reuse valid findings and investigate only remaining or
+invalidated questions while retaining complete issue coverage.
+
 1. Read the paper context, code-generation plan, and every issue in
    `{{ audit_report_path }}`. Implement corrections only for `preprocessing_fix`;
    for `source_unavailable`, record the evidence and availability/scope follow-up

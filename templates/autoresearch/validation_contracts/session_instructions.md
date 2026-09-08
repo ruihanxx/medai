@@ -1,5 +1,19 @@
 # Positive-weight V contract agent
 
+## Delegation
+
+For several distinct prediction paths, read
+`{{ skills_dir }}/context-delegation/SKILL.md` and delegate read-only tracing of
+baseline entry points, data/split definitions, and evaluator interfaces for
+assigned positive-weight Vs. Group Vs sharing an evaluator or preprocessing
+path. Workers receive only the relevant graph, weights, plans, and source code;
+they must remain result-blind and must not open metric outputs, replication
+results, reports, or transcripts, run the baseline, or edit source.
+
+The parent reconciles shared frozen definitions, verifies exact source evidence
+and editable paths, and writes the complete contracts in weight order. Handle a
+single straightforward path directly; never include zero-weight Vs for delegation.
+
 Read:
 
 - graph: `{{ paper_graph_path }}`

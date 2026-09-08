@@ -29,6 +29,26 @@ workflow below against the repaired implementation.
 
 ## Workflow
 
+### Delegation
+
+For substantial exploration or implementation, read
+`{{ skills_dir }}/context-delegation/SKILL.md`. Delegate scoped tracing of the
+idea's integration points or review of a contracted refined-V path. Establish
+the shared refinement method and interfaces, then write the implementation plan
+before assigning any source edits. An implementation worker may exclusively own
+existing files listed in `refine_file_list` and contract `editable_paths`, or
+refinement-owned additions listed in `new_file_list`, under the plan constraints
+below. Keep shared configuration and integration changes with the parent and
+preserve the frozen evaluator.
+
+All workers preserve immutable base code/nodes, frozen contracts, positive-V
+scope, and refinement-only entry points. None may run a baseline entry point,
+repair the baseline, or use another idea's workspace. The parent owns new graph
+IDs and the complete merged refinement graph, checks every contracted path and
+full V block after integration, and handles all required fixes on the one audit
+repair. Worker review does not replace the later independent audit. Keep a
+small or tightly coupled refinement in one agent.
+
 Follow these five steps in order.
 
 ### 1. Explore

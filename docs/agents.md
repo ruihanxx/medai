@@ -36,6 +36,25 @@ feature flags or authorize nested agent CLIs. Context isolation is an execution
 strategy, not a guarantee of lower total tokens or unchanged scientific quality;
 the stage owner retains coverage, integration, and evidence verification.
 
+Base-stage policies favor read-only paper/asset checks, source inventories,
+calibration paths, audit diagnoses, and terminal replication evidence. Codegen
+may assign independent generated-code paths after shared interfaces and its plan
+are established; candidate refinement retains a single editing owner. Planning
+may delegate branch artifact tracing but retains exact DAG-layer assembly.
+Reporting already isolates claims and delegates only substantial evidence or
+artifact lookup; repository discovery stays single-agent. Serial stages use one
+command-capable worker at a time without overlapping parent commands or edits.
+
+Auto Research keeps eligibility and result-blind weighting single-agent.
+Contract tracing remains result-blind when delegated; idea research uses shared
+paper anchors and one candidate-pool owner. Refinement codegen may assign
+disjoint declared files, while its parent owns graph integration. Audit and
+planning may delegate scoped path checks; validation delegates only terminal
+evidence diagnosis. Assessment retains scoring and report generation retains
+the full idea ledger, using evidence readers only when input volume warrants it.
+Resume prompts retain the original policy and reuse valid findings; routine
+artifact repairs and provider recovery stay with the parent.
+
 ## Graph ownership
 
 - Repository discovery runs after PDF conversion and reads only paper Markdown.

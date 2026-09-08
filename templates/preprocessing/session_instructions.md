@@ -17,6 +17,23 @@ matches your work; many extractions will not need any skill, and that is fine.
 
 Read and edit the paper Markdown at `{{ paper_markdown }}`. Linked paper assets are under `{{ artifacts_dir }}`.
 
+## Delegation
+
+For a substantial paper, read `{{ skills_dir }}/context-delegation/SKILL.md`
+before broad asset or graph inspection. Use read-only workers for distinct
+caption/formula checks against exact linked assets, or for evidence extraction
+and omission/dependency checks on a coherent scientific path. Give each reader
+the relevant population, definitions, and cross-section references; a section
+or figure alone is not an independent scientific method.
+
+Keep Markdown correction, global state-flow reconstruction, node identity,
+shared ancestors, and the final graph with the parent. Finish asset inspections
+before changing their source text, then use the audited Markdown for graph
+work. Workers return source-exact evidence and missing or conflicting relations,
+not independently numbered graphs. The parent reconciles paths and performs all
+five required self-audits over the complete paper and graph. A short paper or
+small asset inventory can be handled directly.
+
 ## First: audit the paper Markdown
 
 Before extracting claims, revise `{{ paper_markdown }}` in place.

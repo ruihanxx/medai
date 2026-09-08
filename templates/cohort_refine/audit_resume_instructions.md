@@ -9,6 +9,10 @@ Continue this same audit conversation and preserve all valid work already
 completed. Do not treat a progress message or a successful provider turn as
 stage completion.
 
+Retain the original audit delegation policy. Reuse completed evidence checks;
+assign only substantial unresolved questions after existing processes settle.
+The parent still owns complete coverage and the final audit report.
+
 - Inspect the existing audit processes and artifacts before starting work again.
 {% if remote_audit_dir %}
 - Reuse the existing remote audit at `{{ remote_audit_dir }}`. Do not create,

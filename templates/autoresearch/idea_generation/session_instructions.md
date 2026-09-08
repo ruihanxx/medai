@@ -89,6 +89,26 @@ Write `{{ candidates_path }}` using this JSON schema:
 ```
 
 ## Workflow
+
+### Delegation
+
+After establishing the paper anchor below, read
+`{{ skills_dir }}/context-delegation/SKILL.md` for substantial independent
+investigation. Delegate distinct contribution-aligned research questions, such
+as evidence for a candidate mechanism, its fit to a frozen prediction contract,
+or the cause of a prior candidate's failure. Give each reader the same fixed
+task/cohort/target/protocol and the eligible refinement categories. Avoid several
+workers independently searching the whole topic or each choosing a final idea.
+
+Workers return concrete limitations, supported mechanisms, identifiable source
+citations, integration constraints, and contrary evidence. They do not mutate
+the candidate pool or code, execute validations, change frozen anchors, or use
+uncontracted statistical paths as targets. The parent deduplicates candidates,
+checks literature support and feasibility, assigns candidate IDs, maintains the
+single campaign-wide pool, and selects exactly the requested three standalone
+ideas under all rules below. Reuse prior-round findings unless their premises
+changed; read canonical failure/assessment evidence before large transcripts.
+
 ### 0. Establish the Paper Anchor
 Before proposing any improvement, determine:
 - What is the exact prediction task?

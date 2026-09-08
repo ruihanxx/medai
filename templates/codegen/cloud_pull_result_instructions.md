@@ -5,6 +5,9 @@ terminal local result. Its saved result is at `{{ command_result_path }}` and
 its complete combined local log is at `{{ command_log_path }}`. It exited with
 code {{ exit_code }} after {{ duration_seconds }} seconds.
 
+Keep this bounded provider recovery with the parent; do not delegate provider
+actions or start implementation workers while materialization is incomplete.
+
 Cloud materialization is still incomplete:
 
 ```text

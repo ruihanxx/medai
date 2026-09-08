@@ -3,6 +3,20 @@
 Write `{{ report_path }}` from the immutable base report, validation setup, and
 canonical round/idea artifacts.
 
+## Delegation
+
+Write a small campaign report directly. For a long campaign, read
+`{{ skills_dir }}/context-delegation/SKILL.md` and delegate read-only extraction
+from disjoint round/idea artifact sets. Readers return exact idea/V IDs, metric
+rows, audit/assessment verdicts, failure evidence, and missing fields from the
+canonical artifacts, not full transcripts or rewritten scientific judgments.
+They do not implement ideas, execute validations, rescore results, or select
+which attempts to omit.
+
+The parent reconciles the ledger, verifies every attempted idea and positive-V
+comparison, preserves canonical scores/verdicts, and writes the report with the
+supplied visualizations. No delegation may hide failed or inconclusive attempts.
+
 Read:
 
 - eligibility: `{{ eligibility_path }}`

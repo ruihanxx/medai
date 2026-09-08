@@ -75,6 +75,27 @@ Before writing `codegen_plan.json` (Step 2.5), run
 If any skill matches your paper's domain or methodology, note it — you
 can invoke its scripts and reference docs while implementing in Step 3.
 
+## Delegation
+
+After establishing the runnable graph and shared scientific definitions, read
+`{{ skills_dir }}/context-delegation/SKILL.md` for substantial exploration or
+implementation work. Delegate bounded source-schema inspection, a coherent
+method's implementation requirements, or targeted self-review of generated code.
+Every worker inherits the repository-independence boundary above; none may read
+original repositories, sibling snapshots, or information excluded from this stage.
+
+Before assigning implementation, the parent writes the codegen plan and fixes
+shared cohort/split semantics, data interfaces, configuration ownership, and
+entry points. An implementation worker may edit only an explicitly assigned,
+independent set of generated-code paths. Keep shared pipeline changes and the
+canonical plan with the parent; do not assign one writer per graph node when
+nodes share code. Apply the stage's serial-command rule across parent and
+workers: use one command-capable worker at a time, with no parent commands or
+edits until it finishes. Provider operations and cloud-materialization handoffs
+remain with the parent. After integration, the parent checks all runnable paths
+and required self-review outcomes, including cross-module leakage and artifact
+interfaces. For a small implementation, work directly.
+
 ## Workflow
 
 Follow this four-step structure. Take time on each step; do not rush.

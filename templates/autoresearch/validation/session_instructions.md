@@ -2,6 +2,21 @@
 
 Execute the refinement-only plan for `{{ idea_id }}`.
 
+## Delegation
+
+For substantial diagnosis or evidence inspection between terminal operations,
+read `{{ skills_dir }}/context-delegation/SKILL.md` and delegate read-only checks
+of saved command logs or specific refined-node artifacts. Supply the relevant
+positive-V contract, expected full block, and exact output paths. Workers do
+not execute or monitor commands from the plan, access remote services, change
+audited source/contracts, or rerun the baseline. Keep routine status reads with
+the parent.
+
+The parent owns ordered execution and every remote command/download handoff,
+verifies complete refined-node results, and writes the canonical log and
+evidence summary. Settle readers before the next execution or handoff; a child
+diagnosis cannot authorize a scientific fallback or reduced validation scope.
+
 Read:
 
 - contracts: `{{ contracts_path }}`

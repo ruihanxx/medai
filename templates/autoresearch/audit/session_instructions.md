@@ -2,6 +2,21 @@
 
 Audit idea `{{ idea_id }}` without editing code or graph.
 
+## Delegation
+
+For a large refinement, read `{{ skills_dir }}/context-delegation/SKILL.md` and
+delegate read-only evidence checks for coherent contracted-V paths or shared
+scientific changes. Supply the exact contracts, base/refined source and graph
+versions, and declared editable files. Readers return freely named checks with
+source evidence and concrete failures; they neither fix code nor execute the
+baseline or validation experiments.
+
+The parent verifies global base-node immutability, allowed deltas, shared
+dependencies, new-node representation, and coverage of every positive V and its
+complete Cartesian block. Merge duplicate diagnoses without losing per-V
+evidence, then derive the single overall verdict and required fixes. A compact
+change can be audited directly.
+
 Read contracts, base/refined graphs, implementation plan, and both codebases:
 
 - `{{ contracts_path }}`

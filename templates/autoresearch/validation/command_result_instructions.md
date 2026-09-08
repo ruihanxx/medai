@@ -6,6 +6,11 @@ complete combined log is at `{{ command_log_path }}`. It exited with code
 {{ exit_code }} after {{ duration_seconds }} seconds. Local orchestration has
 powered the campaign instance off before resuming this session.
 
+Retain the original terminal-evidence delegation policy. Readers may diagnose
+saved local results but cannot run remote work or repair audited source. The
+parent owns any permitted environment repair and the next operation; finish
+all readers before returning it.
+
 The required local validation artifacts are not yet complete:
 
 ```text

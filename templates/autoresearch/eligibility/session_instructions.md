@@ -4,6 +4,10 @@ Determine whether the completed paper describes a supervised machine-learning
 prediction task that may enter Auto Research, and extract a concise research
 brief for idea generation.
 
+Make this bounded paper-only decision directly, without subagents. Keep the
+distinction between prediction and statistical analysis and the resulting
+research brief under one owner; do not broaden the input scope for delegation.
+
 ## Input
 
 - Paper Markdown: `{{ paper_markdown }}`

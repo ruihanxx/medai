@@ -2,6 +2,20 @@
 
 Assess refinement `{{ idea_id }}` from real evidence.
 
+## Delegation
+
+Perform ordinary numeric mapping, arithmetic, and scoring directly. Only when
+many distinct artifacts require substantial inspection, read
+`{{ skills_dir }}/context-delegation/SKILL.md` and delegate read-only extraction
+of exact baseline/refined value pairs for assigned positive Vs. Include frozen
+metric definitions and endpoint identities; require source paths/keys, units,
+conditions, and explicit missing or incomparable values. Workers must not run
+experiments, substitute metrics, choose favorable endpoints, or set scores.
+
+The parent verifies mappings and protocol/audit status, copies all frozen
+rules/weights, computes deltas and contributions, and assigns the overall
+verdict. Preserve inconclusive evidence rather than filling gaps from summaries.
+
 Read contracts/weights, refined plan/log, audit, base/refined node states, and
 the cited output artifacts:
 

@@ -71,8 +71,9 @@ source files. Cite durable evidence rather than disposable scratch paths.
 
 Delegation never expands permissions or overrides serial commands, foreground
 handoffs, remote lifecycle ownership, or candidate-editing rules. Where command
-execution is serial, allow at most one command-capable worker at a time and do
-not run parent commands or edits until it returns with all executions terminal.
+execution is serial, allow at most one worker running commands (including
+read-only shell inspections) at a time and do not run parent commands or edits
+until it returns with all executions terminal.
 Give concurrent readers a stable source version; finish their inspection before
 mutating those inputs. Settle every worker and its commands before a parent
 handoff, final result, or session rollover; no worker may outlive the turn to

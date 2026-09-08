@@ -39,6 +39,11 @@ stage instructions. If the error is caused by an irrecoverable external or
 infrastructure condition, surface that condition explicitly instead of
 fabricating a valid-looking artifact.
 {% endif %}
+Retain the original stage's delegation boundaries and reuse valid findings.
+Handle a routine schema or formatting repair directly; delegate only a
+substantial unresolved investigation permitted by that stage, and settle all
+workers before returning its structured result.
+
 {% if experiment_handoff|default(false) %}
 
 Do not launch or monitor an experiment directly during this repair turn. If a

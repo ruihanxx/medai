@@ -51,6 +51,18 @@ empty `issues` list means that no issue was recorded for that node.
 {{ node_issue_index_json }}
 ```
 
+## Delegation
+
+Assemble the report directly by default; the claim-level scientific work is
+already partitioned. If locating a large paper-artifact inventory requires
+substantial independent reading, use
+`{{ skills_dir }}/context-delegation/SKILL.md` for read-only label/path/content
+lookup on assigned artifacts. Readers return evidence, not rewritten claim
+assessments or separately authored report sections. The parent still reads
+every claim fragment, preserves its assessment, verifies artifact mappings,
+and checks complete ordered coverage of claims, nodes, issues, and calibration
+entries. Do not reopen experiments or browse full transcripts to fill gaps.
+
 ## Evidence rules
 
 Read every per-claim report. In the claim table, copy both the

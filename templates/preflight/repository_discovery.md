@@ -1,5 +1,9 @@
 # Paper repository discovery
 
+Complete this narrow verbatim extraction directly, without subagents. Search
+the supplied Markdown and inspect surrounding evidence; task decomposition
+must not expand the search to other files or external sites.
+
 Read the converted paper at `{{ paper_markdown }}` and write exactly one JSON
 object to `{{ candidates_path }}`:
 
